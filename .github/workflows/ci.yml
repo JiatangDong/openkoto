@@ -42,6 +42,10 @@ jobs:
           chmod +x script/download_binaries.sh
           bash script/download_binaries.sh
 
+      - name: Prepare frontend dist for Tauri context
+        working-directory: .
+        run: mkdir -p textlingo-desktop/dist
+
       - name: Rust tests
         run: cargo test --all-features --all-targets
 
