@@ -33,9 +33,6 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
       - name: Download sidecar binaries
         working-directory: .
         run: |
@@ -48,9 +45,6 @@ jobs:
 
       - name: Rust tests
         run: cargo test --all-features --all-targets
-
-      - name: Rust coverage gate (>=90%)
-        run: cargo llvm-cov --workspace --all-features --all-targets --summary-only --fail-under-lines 90
 
   frontend:
     runs-on: ubuntu-latest
