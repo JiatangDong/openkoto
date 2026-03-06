@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FavoritesPage } from "./FavoritesPage";
@@ -56,6 +56,27 @@ function mockFavoritesData() {
     if (command === "write_text_file") {
       return Promise.resolve(null);
     }
+    if (command === "delete_word_pack_cmd") {
+      return Promise.resolve(null);
+    }
+    if (command === "get_article") {
+      return Promise.resolve({
+        id: payload?.id ?? "a1",
+        title: "Source Article",
+        content: "content",
+        created_at: "2026-02-16T00:00:00Z",
+        updated_at: "2026-02-16T00:00:00Z",
+      });
+    }
+    if (command === "import_word_pack_cmd") {
+      return Promise.resolve({
+        created_pack_id: "p2",
+        total: 1,
+        imported: 1,
+        skipped: 0,
+        errors: [],
+      });
+    }
     return Promise.resolve(null);
   });
 }
@@ -65,6 +86,12 @@ describe("FavoritesPage", () => {
     invokeMock.mockReset();
     saveMock.mockReset();
     saveMock.mockResolvedValue("/tmp/export.okpack.json");
+    vi.restoreAllMocks();
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+    });
   });
 
   afterEach(() => {
@@ -161,6 +188,122 @@ describe("FavoritesPage", () => {
     );
     expect(alertSpy).not.toHaveBeenCalled();
 
+    alertSpy.mockRestore();
+  });
+
+  it("supports copy, txt download, article navigation, back, and pack deletion", async () => {
+    const onBack = vi.fn();
+    const onSelectArticle = vi.fn();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    mockFavoritesData();
+
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "list_favorite_vocabularies_cmd") {
+        return Promise.resolve([
+          {
+            id: "v1",
+            word: "abandon",
+            meaning: "放弃",
+            usage: "v.",
+            explanation: "example",
+            source_article_id: "a1",
+            source_article_title: "Source Article",
+            pack_ids: ["p1"],
+            srs_state: "new",
+            due_date: "2026-02-16",
+            review_count: 0,
+            created_at: "2026-02-16T00:00:00Z",
+          },
+        ]);
+      }
+      if (command === "list_favorite_grammars_cmd") {
+        return Promise.resolve([]);
+      }
+      if (command === "list_word_packs_cmd") {
+        return Promise.resolve([{ id: "p1", name: "TOEFL", is_system: false }]);
+      }
+      if (command === "get_article") {
+        return Promise.resolve({
+          id: "a1",
+          title: "Source Article",
+          content: "content",
+          created_at: "2026-02-16T00:00:00Z",
+          updated_at: "2026-02-16T00:00:00Z",
+        });
+      }
+      if (command === "export_word_pack_cmd") {
+        return Promise.resolve({
+          file_name: "TOEFL.okpack.json",
+          json_content: "{\"schema_version\":\"openkoto-word-pack-v1\"}",
+        });
+      }
+      if (command === "write_text_file" || command === "delete_word_pack_cmd") {
+        return Promise.resolve(null);
+      }
+      return Promise.resolve(null);
+    });
+
+    render(<FavoritesPage onBack={onBack} onSelectArticle={onSelectArticle} />);
+
+    await screen.findByText("abandon");
+    await userEvent.click(screen.getByRole("button", { name: "TOEFL操作" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "复制到剪贴板" }));
+    await waitFor(() => {
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith("abandon");
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "TOEFL操作" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "下载 TXT 文件" }));
+    await waitFor(() => {
+      expect(saveMock).toHaveBeenCalledWith(expect.objectContaining({ defaultPath: "TOEFL.txt" }));
+    });
+
+    await userEvent.click(screen.getByTitle("Source Article"));
+    expect(onSelectArticle).toHaveBeenCalledWith(expect.objectContaining({ id: "a1" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "TOEFL操作" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "删除合集" }));
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("delete_word_pack_cmd", { id: "p1" });
+    });
+
+    await userEvent.click(screen.getAllByRole("button")[0]);
+    expect(onBack).toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("imports a word pack from the hidden file input", async () => {
+    mockFavoritesData();
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+
+    class MockFileReader {
+      onload: ((event: { target: { result: string } }) => void) | null = null;
+
+      readAsText() {
+        this.onload?.({ target: { result: "{\"schema_version\":\"openkoto-word-pack-v1\"}" } });
+      }
+    }
+
+    vi.stubGlobal("FileReader", MockFileReader);
+
+    const { container } = render(<FavoritesPage onBack={() => {}} onSelectArticle={() => {}} />);
+
+    await screen.findByText("abandon");
+    const input = container.querySelector('input[type="file"]');
+    expect(input).not.toBeNull();
+
+    fireEvent.change(input as Element, {
+      target: {
+        files: [new File(["{}"], "all.okpack.json", { type: "application/json" })],
+      },
+    });
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("import_word_pack_cmd", {
+        jsonContent: "{\"schema_version\":\"openkoto-word-pack-v1\"}",
+      });
+    });
+    expect(alertSpy).toHaveBeenCalled();
     alertSpy.mockRestore();
   });
 });

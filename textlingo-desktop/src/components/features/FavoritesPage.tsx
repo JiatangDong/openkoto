@@ -6,8 +6,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
-import { ArrowLeft, BookOpen, ExternalLink, Loader2, SpellCheck, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, BookOpen, Loader2, SpellCheck, Upload } from "lucide-react";
 import type { Article, FavoriteGrammar, FavoriteVocabulary, WordPack } from "../../types";
+import { EmptyState, GrammarCard, VocabularyCard } from "./FavoritesCards";
 import { WordPackManager } from "./WordPackManager";
 import { WordRecitePanel } from "./WordRecitePanel";
 
@@ -27,13 +28,6 @@ interface ImportWordPackResult {
   imported: number;
   skipped: number;
   errors: string[];
-}
-
-function formatLocalDate(dateString?: string): string {
-  if (!dateString) return "-";
-  const date = new Date(dateString);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleDateString("zh-CN");
 }
 
 export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
@@ -431,130 +425,6 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-function EmptyState({
-  icon,
-  title,
-  description,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center py-24 text-center">
-      <div className="mb-6 p-6 rounded-full bg-muted/30 text-muted-foreground/50 border border-border/50">
-        {icon}
-      </div>
-      <h3 className="text-lg font-semibold mb-2 text-foreground">{title}</h3>
-      <p className="text-sm text-muted-foreground max-w-xs mx-auto leading-relaxed">{description}</p>
-    </div>
-  );
-}
-
-function VocabularyCard({
-  vocab,
-  article,
-  onDelete,
-  onGoToArticle,
-}: {
-  vocab: FavoriteVocabulary;
-  article?: Article;
-  onDelete: () => void;
-  onGoToArticle?: () => void;
-}) {
-  return (
-    <div className="group relative bg-card hover:bg-gradient-to-br hover:from-card hover:to-primary/5 border border-border/50 hover:border-primary/20 p-5 rounded-xl transition-all duration-300 shadow-sm hover:shadow-md">
-      <div className="flex justify-between items-start mb-3">
-        <div className="flex items-baseline gap-2">
-          <span className="font-bold text-lg text-primary">{vocab.word}</span>
-          {vocab.reading && <span className="text-xs text-muted-foreground/80 font-mono">{vocab.reading}</span>}
-        </div>
-        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          {onGoToArticle && article && (
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary" onClick={onGoToArticle} title={article.title}>
-              <ExternalLink size={14} />
-            </Button>
-          )}
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={onDelete}>
-            <Trash2 size={14} />
-          </Button>
-        </div>
-      </div>
-
-      <div className="space-y-2 mb-3">
-        <div className="text-sm text-foreground/90 leading-relaxed font-medium">{vocab.meaning}</div>
-        {vocab.usage && (
-          <div className="inline-block text-xs text-primary/80 bg-primary/5 px-2 py-1 rounded-md border border-primary/10">
-            {vocab.usage}
-          </div>
-        )}
-        {vocab.explanation && <div className="text-xs text-muted-foreground line-clamp-3">{vocab.explanation}</div>}
-      </div>
-
-      <div className="mt-2 rounded-md bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground">
-        状态: {vocab.srs_state ?? "new"} | 到期: {vocab.due_date ?? "-"} | 复习: {vocab.review_count ?? 0}
-      </div>
-
-      {vocab.source_article_title && (
-        <div className="pt-3 mt-2 border-t border-border/30 text-[10px] text-muted-foreground/60 flex items-center gap-1.5 truncate">
-          <BookOpen size={10} />
-          <span className="truncate">
-            {article ? vocab.source_article_title : <span className="line-through decoration-muted-foreground/50 opacity-70">{vocab.source_article_title} (已删除)</span>}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function GrammarCard({
-  grammar,
-  article,
-  onDelete,
-  onGoToArticle,
-}: {
-  grammar: FavoriteGrammar;
-  article?: Article;
-  onDelete: () => void;
-  onGoToArticle?: () => void;
-}) {
-  return (
-    <div className="group relative bg-card hover:bg-primary/[0.02] border border-border/60 hover:border-primary/20 p-5 rounded-xl transition-all duration-300 shadow-sm hover:shadow-md">
-      <div className="absolute left-0 top-4 bottom-4 w-1 bg-primary/40 rounded-r-lg group-hover:bg-primary transition-colors"></div>
-      <div className="pl-4 flex items-start justify-between gap-4">
-        <div className="flex-1 space-y-2">
-          <h5 className="font-bold text-base text-foreground">{grammar.point}</h5>
-          <p className="text-sm text-muted-foreground leading-relaxed">{grammar.explanation}</p>
-          {grammar.example && (
-            <div className="bg-muted/30 p-3 rounded-lg border border-border/50 text-sm text-foreground/80 italic relative mt-3">
-              <span className="relative z-10">{grammar.example}</span>
-            </div>
-          )}
-        </div>
-
-        <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          {onGoToArticle && article && (
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-primary" onClick={onGoToArticle} title={article.title}>
-              <ExternalLink size={16} />
-            </Button>
-          )}
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={onDelete}>
-            <Trash2 size={16} />
-          </Button>
-        </div>
-      </div>
-
-      {grammar.source_article_title && (
-        <div className="pl-4 mt-4 pt-3 border-t border-border/30 text-[10px] text-muted-foreground/60 flex items-center gap-1.5">
-          <BookOpen size={10} />
-          <span>{article ? grammar.source_article_title : <span className="line-through decoration-muted-foreground/50 opacity-70">{grammar.source_article_title} (已删除)</span>}</span>
-        </div>
-      )}
-      <div className="pl-4 mt-2 text-[11px] text-muted-foreground">收藏时间: {formatLocalDate(grammar.created_at)}</div>
     </div>
   );
 }

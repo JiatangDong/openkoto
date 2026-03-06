@@ -45,6 +45,11 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
+      - name: Download sidecar binaries
+        run: |
+          chmod +x script/download_binaries.sh
+          bash script/download_binaries.sh
+
       - name: Rust tests
         run: cargo test --all-features --all-targets
         working-directory: ./textlingo-desktop/src-tauri
