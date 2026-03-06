@@ -31,6 +31,8 @@ interface NewMaterialDialogProps {
 export function NewMaterialDialog({ isOpen, onClose, onSave, editingArticle }: NewMaterialDialogProps) {
     const { t } = useTranslation();
     const [activeTab, setActiveTab] = useState<MaterialType>("article");
+    const activeTabClassName = "bg-primary/10 text-primary";
+    const inactiveTabClassName = "hover:bg-muted text-muted-foreground hover:text-foreground";
 
     // Initialize/Reset tab when dialog opens or editingArticle changes
     useState(() => {
@@ -75,8 +77,8 @@ export function NewMaterialDialog({ isOpen, onClose, onSave, editingArticle }: N
                         className={cn(
                             "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left",
                             activeTab === "article"
-                                ? "bg-primary/10 text-primary"
-                                : "hover:bg-muted text-muted-foreground hover:text-foreground",
+                                ? activeTabClassName
+                                : inactiveTabClassName,
                             isEditing && activeTab !== "article" && "opacity-50 cursor-not-allowed"
                         )}
                         onClick={() => !isEditing && setActiveTab("article")}
@@ -90,8 +92,8 @@ export function NewMaterialDialog({ isOpen, onClose, onSave, editingArticle }: N
                         className={cn(
                             "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left",
                             activeTab === "web"
-                                ? "bg-blue-500/10 text-blue-500"
-                                : "hover:bg-muted text-muted-foreground hover:text-foreground",
+                                ? activeTabClassName
+                                : inactiveTabClassName,
                             isEditing && activeTab !== "web" && "opacity-50 cursor-not-allowed"
                         )}
                         onClick={() => !isEditing && setActiveTab("web")}
@@ -105,8 +107,8 @@ export function NewMaterialDialog({ isOpen, onClose, onSave, editingArticle }: N
                         className={cn(
                             "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left",
                             activeTab === "book"
-                                ? "bg-purple-500/10 text-purple-500"
-                                : "hover:bg-muted text-muted-foreground hover:text-foreground",
+                                ? activeTabClassName
+                                : inactiveTabClassName,
                             isEditing && activeTab !== "book" && "opacity-50 cursor-not-allowed"
                         )}
                         onClick={() => !isEditing && setActiveTab("book")}
@@ -120,8 +122,8 @@ export function NewMaterialDialog({ isOpen, onClose, onSave, editingArticle }: N
                         className={cn(
                             "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left",
                             activeTab === "youtube"
-                                ? "bg-red-500/10 text-red-500"
-                                : "hover:bg-muted text-muted-foreground hover:text-foreground",
+                                ? activeTabClassName
+                                : inactiveTabClassName,
                             isEditing && activeTab !== "youtube" && "opacity-50 cursor-not-allowed"
                         )}
                         onClick={() => !isEditing && setActiveTab("youtube")}
@@ -135,8 +137,8 @@ export function NewMaterialDialog({ isOpen, onClose, onSave, editingArticle }: N
                         className={cn(
                             "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left",
                             activeTab === "local"
-                                ? "bg-accent/10 text-accent-foreground"
-                                : "hover:bg-muted text-muted-foreground hover:text-foreground",
+                                ? activeTabClassName
+                                : inactiveTabClassName,
                             isEditing && activeTab !== "local" && "opacity-50 cursor-not-allowed"
                         )}
                         onClick={() => !isEditing && setActiveTab("local")}
@@ -150,8 +152,8 @@ export function NewMaterialDialog({ isOpen, onClose, onSave, editingArticle }: N
                         className={cn(
                             "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left",
                             activeTab === "audio"
-                                ? "bg-green-500/10 text-green-500"
-                                : "hover:bg-muted text-muted-foreground hover:text-foreground",
+                                ? activeTabClassName
+                                : inactiveTabClassName,
                             isEditing && activeTab !== "audio" && "opacity-50 cursor-not-allowed"
                         )}
                         onClick={() => !isEditing && setActiveTab("audio")}

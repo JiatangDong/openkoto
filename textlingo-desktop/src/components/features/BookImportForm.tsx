@@ -89,10 +89,10 @@ export function BookImportForm({ onSave, onCancel }: BookImportFormProps) {
     const getFileIcon = () => {
         if (!filePath) return <BookOpen size={20} />;
         if (filePath.toLowerCase().endsWith(".epub")) {
-            return <BookOpen size={20} className="text-purple-500" />;
+            return <BookOpen size={20} className="text-primary" />;
         }
         if (filePath.toLowerCase().endsWith(".pdf")) {
-            return <FileType size={20} className="text-red-500" />;
+            return <FileType size={20} className="text-primary" />;
         }
         return <FileText size={20} className="text-primary" />;
     };
@@ -106,8 +106,8 @@ export function BookImportForm({ onSave, onCancel }: BookImportFormProps) {
     return (
         <div className="flex flex-col h-full">
             {/* 描述 */}
-            <div className="flex gap-3 p-3 bg-purple-500/10 border border-purple-500/20 rounded-lg text-sm text-purple-200/90 mb-6">
-                <Info className="w-5 h-5 shrink-0 text-purple-400 mt-0.5" />
+            <div className="mb-6 flex gap-3 rounded-lg border border-primary/20 bg-primary/10 p-3 text-sm text-foreground">
+                <Info className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
                 <p>{t("bookImport.hint", "Supports papers, books, novels, etc...")}</p>
             </div>
 
@@ -120,7 +120,7 @@ export function BookImportForm({ onSave, onCancel }: BookImportFormProps) {
                     <button
                         type="button"
                         onClick={handleSelectFile}
-                        className="w-full flex items-center gap-3 px-4 py-3 border-2 border-dashed border-border rounded-lg hover:border-primary/50 hover:bg-muted/50 transition-colors text-left"
+                        className="w-full flex items-center gap-3 rounded-lg border-2 border-dashed border-border px-4 py-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/5"
                     >
                         {getFileIcon()}
                         <span className={`flex-1 truncate ${filePath ? "text-foreground" : "text-muted-foreground"}`}>
