@@ -196,7 +196,8 @@
       "openai-compatible": "OpenAI Compatible",
       "ollama": "Ollama (Local)",
       "lmstudio": "LM Studio (Local)",
-      "moonshot": "Moonshot AI"
+      "moonshot": "Moonshot AI",
+      "anthropic": "Anthropic (Claude)"
     },
     "baseUrl": "Base URL",
     "baseUrlPlaceholder": "https://your-api-endpoint.com/v1",
@@ -255,6 +256,11 @@
         "moonshot-v1-128k": "Moonshot v1 128k",
         "moonshot-v1-32k": "Moonshot v1 32k",
         "moonshot-v1-8k": "Moonshot v1 8k"
+      },
+      "anthropic": {
+        "claude-sonnet-4-6": "Claude Sonnet 4.6",
+        "claude-haiku-4-5": "Claude Haiku 4.5",
+        "claude-opus-4-6": "Claude Opus 4.6"
       },
       "ollama": {
         "qwen2_5_7b_instruct": "Qwen2.5 7B Instruct (Local)",

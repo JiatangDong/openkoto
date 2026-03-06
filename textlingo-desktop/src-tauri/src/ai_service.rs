@@ -12,6 +12,7 @@ const OPENROUTER_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions"
 const DEEPSEEK_API_URL: &str = "https://api.deepseek.com/v1/chat/completions";
 const SILICONFLOW_API_URL: &str = "https://api.siliconflow.cn/v1/chat/completions";
 const API_302AI_URL: &str = "https://api.302.ai/v1/chat/completions";
+const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 
 pub struct AIService {
     client: Client,
@@ -76,6 +77,7 @@ impl AIService {
                 "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
                 self.model.strip_prefix("models/").unwrap_or(&self.model)
             ),
+            "anthropic" => ANTHROPIC_API_URL.to_string(),
             "moonshot" => "https://api.moonshot.cn/v1/chat/completions".to_string(),
             "ollama" => OLLAMA_DEFAULT_URL.to_string(),
             "lmstudio" => LMSTUDIO_DEFAULT_URL.to_string(),
@@ -90,6 +92,60 @@ impl AIService {
     /// 检查是否为 Google 类型的 provider（需要使用 X-goog-api-key 认证）
     fn is_google_provider(&self) -> bool {
         self.provider == "google" || self.provider == "google-ai-studio"
+    }
+
+    fn is_anthropic_provider(&self) -> bool {
+        self.provider == "anthropic"
+    }
+
+    async fn make_anthropic_request(
+        &self,
+        system: Option<String>,
+        messages: Vec<Value>,
+        temperature: Option<f32>,
+    ) -> Result<String, String> {
+        let mut request_body = json!({
+            "model": self.model,
+            "max_tokens": 8192,
+            "messages": messages,
+            "temperature": temperature.unwrap_or(0.7)
+        });
+
+        if let Some(sys) = system {
+            if let Some(obj) = request_body.as_object_mut() {
+                obj.insert("system".to_string(), json!(sys));
+            }
+        }
+
+        let response = self
+            .client
+            .post(self.get_api_url())
+            .header("Content-Type", "application/json")
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send request: {}", e))?;
+
+        if !response.status().is_success() {
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(format!("Anthropic API error: {}", error_text));
+        }
+
+        let response_json: Value = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        // Anthropic response: { content: [ { type: "text", text: "..." } ] }
+        response_json["content"][0]["text"]
+            .as_str()
+            .map(|s| s.to_string())
+            .ok_or_else(|| "No content in response".to_string())
     }
 
     async fn make_request(
@@ -212,6 +268,11 @@ impl AIService {
                 "parts": [{"text": format!("{}\n\n{}", system_prompt, request.text)}]
             })];
             self.make_google_request(contents, Some(0.3)).await?
+        } else if self.is_anthropic_provider() {
+            let messages = vec![
+                json!({"role": "user", "content": request.text.clone()}),
+            ];
+            self.make_anthropic_request(Some(system_prompt), messages, Some(0.3)).await?
         } else {
             let messages = vec![
                 json!({"role": "system", "content": system_prompt}),
@@ -256,6 +317,11 @@ impl AIService {
                 "parts": [{"text": prompt}]
             })];
             self.make_google_request(contents, Some(0.3)).await?
+        } else if self.is_anthropic_provider() {
+            let messages = vec![
+                json!({"role": "user", "content": prompt}),
+            ];
+            self.make_anthropic_request(Some("你是专业翻译助手，将文本翻译并返回JSON格式结果。".to_string()), messages, Some(0.3)).await?
         } else {
             let messages = vec![
                 json!({"role": "system", "content": "你是专业翻译助手，将文本翻译并返回JSON格式结果。"}),
@@ -367,6 +433,11 @@ impl AIService {
                 "parts": [{"text": format!("{}\n\n{}", system_prompt, request.text)}]
             })];
             self.make_google_request(contents, Some(0.5)).await?
+        } else if self.is_anthropic_provider() {
+            let messages = vec![
+                json!({"role": "user", "content": request.text}),
+            ];
+            self.make_anthropic_request(Some(system_prompt), messages, Some(0.5)).await?
         } else {
             let messages = vec![
                 json!({"role": "system", "content": system_prompt}),
@@ -385,6 +456,9 @@ impl AIService {
     pub async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, String> {
         if self.provider == "google" || self.provider == "google-ai-studio" {
             return self.chat_google(request).await;
+        }
+        if self.provider == "anthropic" {
+            return self.chat_anthropic(request).await;
         }
         if self.provider == "moonshot" {
             // Moonshot requires specific message formatting for multimedia
@@ -427,8 +501,8 @@ impl AIService {
         F: Fn(String) + Send + Sync + 'static,
     {
         // For now, only support standard OpenAI SSE streaming
-        // Google streaming requires different handling, fallback to normal chat
-        if self.is_google_provider() {
+        // Google/Anthropic streaming requires different handling, fallback to normal chat
+        if self.is_google_provider() || self.is_anthropic_provider() {
             let response = self.chat(request).await?;
             callback(response.content.clone());
             return Ok(response.content);
@@ -572,6 +646,60 @@ impl AIService {
         })
     }
 
+    async fn chat_anthropic(&self, request: ChatRequest) -> Result<ChatResponse, String> {
+        let mut system: Option<String> = None;
+        let mut messages: Vec<Value> = Vec::new();
+
+        for msg in request.messages {
+            if msg.role == "system" {
+                // Anthropic uses top-level system param instead of system role in messages
+                if let crate::types::ChatContent::Text(text) = msg.content {
+                    system = Some(text);
+                }
+                continue;
+            }
+            let content_value = match msg.content {
+                crate::types::ChatContent::Text(text) => json!(text),
+                crate::types::ChatContent::Parts(parts) => {
+                    let json_parts: Vec<Value> = parts
+                        .into_iter()
+                        .map(|part| {
+                            if let Some(text) = part.text {
+                                json!({"type": "text", "text": text})
+                            } else if let Some(image) = part.image_url {
+                                // Anthropic image format
+                                json!({
+                                    "type": "image",
+                                    "source": {
+                                        "type": "url",
+                                        "url": image.url
+                                    }
+                                })
+                            } else {
+                                json!({"type": "text", "text": ""})
+                            }
+                        })
+                        .collect();
+                    json!(json_parts)
+                }
+            };
+            messages.push(json!({
+                "role": msg.role,
+                "content": content_value
+            }));
+        }
+
+        let content = self
+            .make_anthropic_request(system, messages, request.temperature)
+            .await?;
+
+        Ok(ChatResponse {
+            content,
+            model: self.model.clone(),
+            tokens_used: None,
+        })
+    }
+
     // Helper to format messages for different providers
     fn format_messages_for_provider(&self, messages: &[crate::types::ChatMessage]) -> Vec<Value> {
         messages
@@ -688,6 +816,11 @@ Ensure all explanations, meanings, and descriptive text are written in {0}."#,
                 "parts": [{"text": format!("{}\n\nAnalyze this: {}", system_prompt, text)}]
             })];
             self.make_google_request(contents, Some(0.3)).await?
+        } else if self.is_anthropic_provider() {
+            let anthropic_messages = vec![
+                json!({"role": "user", "content": format!("Analyze this: {}", text)}),
+            ];
+            self.make_anthropic_request(Some(system_prompt), anthropic_messages, Some(0.3)).await?
         } else {
             self.make_request(messages, Some(0.3), false).await?
         };
@@ -862,24 +995,69 @@ Ensure all explanations, meanings, and descriptive text are written in {0}."#,
             .to_string()
     }
 
-    /// Attempts to repair common JSON errors from LLMs
+    /// Attempts to repair common JSON errors from LLMs.
+    /// Handles: unescaped newlines, unescaped quotes inside strings, trailing commas.
     fn repair_json(json_str: &str) -> String {
-        // Use regex to remove trailing commas which are invalid in JSON but common in LLM output
-        // Invalid: { "a": 1, } -> Valid: { "a": 1 }
-        // Invalid: [ "a", ] -> Valid: [ "a" ]
+        let chars: Vec<char> = json_str.chars().collect();
+        let len = chars.len();
+        let mut repaired = String::new();
+        let mut in_string = false;
+        let mut i = 0;
 
-        let mut repaired = json_str.to_string();
+        while i < len {
+            let ch = chars[i];
 
+            if in_string {
+                if ch == '\\' {
+                    // Escape sequence — copy as-is
+                    repaired.push(ch);
+                    i += 1;
+                    if i < len {
+                        repaired.push(chars[i]);
+                    }
+                } else if ch == '"' || ch == '\u{201d}' {
+                    // Heuristic: is this a structural closing quote or content quote?
+                    // In valid JSON, after a closing quote the next non-whitespace
+                    // must be one of: , : } ] or EOF.
+                    let mut j = i + 1;
+                    while j < len && matches!(chars[j], ' ' | '\t' | '\r' | '\n') {
+                        j += 1;
+                    }
+                    if j >= len || matches!(chars[j], ',' | ':' | '}' | ']') {
+                        // Structural closing quote
+                        in_string = false;
+                        repaired.push('"');
+                    } else {
+                        // Content quote inside string value — escape it
+                        repaired.push_str("\\\"");
+                    }
+                } else if ch == '\n' {
+                    repaired.push_str("\\n");
+                } else if ch == '\r' {
+                    // skip
+                } else {
+                    repaired.push(ch);
+                }
+            } else {
+                // Outside string: ASCII " or smart left quote as opening quote
+                if ch == '"' || ch == '\u{201c}' {
+                    in_string = true;
+                    repaired.push('"');
+                } else {
+                    repaired.push(ch);
+                }
+            }
+
+            i += 1;
+        }
+
+        // Remove trailing commas
         if let Ok(re) = Regex::new(r",(\s*\})") {
             repaired = re.replace_all(&repaired, "$1").to_string();
         }
-
         if let Ok(re) = Regex::new(r",(\s*\])") {
             repaired = re.replace_all(&repaired, "$1").to_string();
         }
-
-        // Normalize quotes
-        repaired = repaired.replace("“", "\"").replace("”", "\"");
 
         repaired
     }

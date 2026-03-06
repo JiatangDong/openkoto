@@ -145,11 +145,17 @@ fn scan_plugins(app_handle: &AppHandle) -> Vec<PluginInfo> {
         }
 
         // Get mode from CONFIG, not from instance (instances might have stale mode)
+        // Default to Dev in debug builds (no exe needed), Prod in release
+        let default_mode = if cfg!(debug_assertions) {
+            PluginMode::Dev
+        } else {
+            PluginMode::Prod
+        };
         let active_mode = plugin_config
             .modes
             .get(&name)
             .cloned()
-            .unwrap_or(PluginMode::Prod);
+            .unwrap_or(default_mode);
 
         println!(
             "[PluginManager] Plugin '{}' configured mode: {:?}",
@@ -391,14 +397,17 @@ pub async fn check_plugin_installed_cmd(
     };
     let exe_exists = plugin_dir.join(exe_name).exists();
 
-    // 也检查开发目录
+    // Prod 模式：需要 plugin.json 和 exe 都存在
     if plugin_json_exists && exe_exists {
         return Ok(true);
     }
 
-    // 检查开发模式的目录
+    // 也检查开发目录（Dev 模式只需要 plugin.json）
     let plugins = scan_plugins(&app_handle);
-    let is_installed = plugins.iter().any(|p| p.metadata.name == plugin_name);
+    let is_installed = plugins.iter().any(|p| {
+        p.metadata.name == plugin_name
+            && (p.active_mode == PluginMode::Dev || exe_exists)
+    });
 
     Ok(is_installed)
 }

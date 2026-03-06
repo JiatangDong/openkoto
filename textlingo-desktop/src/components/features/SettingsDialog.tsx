@@ -42,7 +42,7 @@ interface OpenRouterModel {
   };
 }
 
-const SUPPORTED_PROVIDERS = ["openai", "openrouter", "deepseek", "siliconflow", "302ai", "google", "google-ai-studio", "moonshot", "openai-compatible", "ollama", "lmstudio"] as const;
+const SUPPORTED_PROVIDERS = ["openai", "anthropic", "openrouter", "deepseek", "siliconflow", "302ai", "google", "google-ai-studio", "moonshot", "openai-compatible", "ollama", "lmstudio"] as const;
 
 // Default base URLs for local providers
 const DEFAULT_BASE_URLS: Record<string, string> = {
@@ -58,6 +58,11 @@ const DEFAULT_MODELS = {
     { value: "gpt-4o-mini", labelKey: "settings.models.openai.gpt-4o-mini" },
     { value: "gpt-4-turbo", labelKey: "settings.models.openai.gpt-4-turbo" },
     { value: "gpt-3.5-turbo", labelKey: "settings.models.openai.gpt-3.5-turbo" },
+  ],
+  anthropic: [
+    { value: "claude-sonnet-4-6", labelKey: "settings.models.anthropic.claude-sonnet-4-6" },
+    { value: "claude-haiku-4-5", labelKey: "settings.models.anthropic.claude-haiku-4-5" },
+    { value: "claude-opus-4-6", labelKey: "settings.models.anthropic.claude-opus-4-6" },
   ],
   openrouter: [
     { value: "openai/gpt-4o", labelKey: "settings.models.openrouter.openai/gpt-4o" },
@@ -133,6 +138,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
   const [syncError, setSyncError] = useState<string | null>(null);
   const [dynamicModels, setDynamicModels] = useState<Record<string, { value: string; label: string }[]>>({
     openai: DEFAULT_MODELS.openai.map(m => ({ value: m.value, label: t(m.labelKey) })),
+    anthropic: DEFAULT_MODELS.anthropic.map(m => ({ value: m.value, label: t(m.labelKey) })),
     openrouter: DEFAULT_MODELS.openrouter.map(m => ({ value: m.value, label: t(m.labelKey) })),
     deepseek: DEFAULT_MODELS.deepseek.map(m => ({ value: m.value, label: t(m.labelKey) })),
     siliconflow: DEFAULT_MODELS.siliconflow.map(m => ({ value: m.value, label: t(m.labelKey) })),
@@ -165,7 +171,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
         }
       }
     } catch (err) {
-      const errorMsg = err as string;
+      const errorMsg = err instanceof Error ? err.message : String(err);
       if (errorMsg.includes("FATAL_CONFIG_CORRUPTION")) {
         setIsCorrupted(true);
         setError(t("settings.errors.configCorrupted"));
@@ -272,7 +278,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
       onSave?.();
       cancelEdit();
     } catch (err) {
-      setError(err as string);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSaving(false);
     }
@@ -293,7 +299,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
         model_configs: config.model_configs.filter(c => c.id !== configId),
       });
     } catch (err) {
-      setError(err as string);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSaving(false);
     }
@@ -306,7 +312,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
       const active = await invoke<ModelConfig>("set_active_model_config", { configId });
       setConfig({ ...config, active_model_id: active.id });
     } catch (err) {
-      setError(err as string);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSaving(false);
     }
@@ -986,7 +992,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
             await invoke("save_config_cmd", { config });
             onSave?.();
           } catch (err) {
-            setError(err as string);
+            setError(err instanceof Error ? err.message : String(err));
           } finally {
             setIsSaving(false);
           }
