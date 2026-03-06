@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 from string import Template
 
+import anthropic
 from .translator import OpenAITranslator
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 # Provider to base URL mapping (matching OpenKoto's ai_service.rs)
 OPENKOTO_PROVIDER_URLS = {
     "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com/v1",
     "openrouter": "https://openrouter.ai/api/v1",
     "deepseek": "https://api.deepseek.com/v1",
     "siliconflow": "https://api.siliconflow.cn/v1",
@@ -29,6 +31,7 @@ OPENKOTO_PROVIDER_URLS = {
 # Default models per provider
 OPENKOTO_DEFAULT_MODELS = {
     "openai": "gpt-4o-mini",
+    "anthropic": "claude-sonnet-4-6",
     "openrouter": "openai/gpt-4o-mini",
     "deepseek": "deepseek-chat",
     "siliconflow": "Qwen/Qwen2.5-7B-Instruct",
@@ -90,18 +93,56 @@ class OpenKotoTranslator(OpenAITranslator):
             )
         
         logger.info(f"OpenKoto Translator: provider={provider}, model={model}, base_url={base_url}")
-        
-        super().__init__(
-            lang_in=lang_in,
-            lang_out=lang_out,
-            model=model,
-            base_url=base_url,
-            api_key=api_key or "no-key",  # For local providers
-            ignore_cache=ignore_cache,
-        )
+
         self.provider = provider
-        self.prompttext = prompt
-        self.add_cache_impact_parameters("prompt", self.prompt("", self.prompttext))
+
+        if provider == "anthropic":
+            # Use Anthropic SDK directly instead of OpenAI-compatible client
+            self.set_envs(envs)
+            from .translator import BaseTranslator
+            BaseTranslator.__init__(self, lang_in, lang_out, model, ignore_cache)
+            self.options = {"temperature": 0}
+            self.anthropic_client = anthropic.Anthropic(api_key=api_key)
+            self.prompttext = prompt
+            self.add_cache_impact_parameters("temperature", self.options["temperature"])
+            self.add_cache_impact_parameters("prompt", self.prompt("", self.prompttext))
+        else:
+            super().__init__(
+                lang_in=lang_in,
+                lang_out=lang_out,
+                model=model,
+                base_url=base_url,
+                api_key=api_key or "no-key",  # For local providers
+                ignore_cache=ignore_cache,
+            )
+            self.prompttext = prompt
+            self.add_cache_impact_parameters("prompt", self.prompt("", self.prompttext))
+
+    def do_translate(self, text) -> str:
+        if self.provider == "anthropic":
+            messages = self.prompt(text, self.prompttext)
+            # Separate system message from user messages
+            system = None
+            user_messages = []
+            for msg in messages:
+                if msg["role"] == "system":
+                    system = msg["content"]
+                else:
+                    user_messages.append(msg)
+
+            kwargs = {
+                "model": self.model,
+                "max_tokens": 8192,
+                "messages": user_messages,
+                **self.options,
+            }
+            if system:
+                kwargs["system"] = system
+
+            response = self.anthropic_client.messages.create(**kwargs)
+            content = response.content[0].text.strip()
+            return content
+        return super().do_translate(text)
 
     def _load_config(self, config_path: str = None) -> dict:
         """Load configuration from JSON file."""

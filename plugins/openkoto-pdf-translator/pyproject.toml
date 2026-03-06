@@ -20,6 +20,7 @@ dependencies = [
     "tenacity",
     "numpy",
     "openai>=1.0.0",
+    "anthropic>=0.30.0",
     "huggingface_hub",
     "onnx",
     "onnxruntime",
