@@ -5,9 +5,8 @@ import { useTranslation } from "react-i18next";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "../ui/dropdown-menu";
 import { Input } from "../ui/input";
-import { ArrowLeft, BookOpen, Check, Copy, Download, ExternalLink, FileDown, Loader2, MoreHorizontal, SpellCheck, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, BookOpen, ExternalLink, Loader2, SpellCheck, Trash2, Upload } from "lucide-react";
 import type { Article, FavoriteGrammar, FavoriteVocabulary, WordPack } from "../../types";
 import { WordPackManager } from "./WordPackManager";
 import { WordRecitePanel } from "./WordRecitePanel";
@@ -46,17 +45,22 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedPackId, setSelectedPackId] = useState("all");
   const [articles, setArticles] = useState<Map<string, Article>>(new Map());
-  const [copySuccess, setCopySuccess] = useState(false);
+  const [copiedPackId, setCopiedPackId] = useState<string | null>(null);
   const [isReciteOpen, setIsReciteOpen] = useState(false);
   const [isCreatePackOpen, setIsCreatePackOpen] = useState(false);
   const [newPackName, setNewPackName] = useState("");
   const [isCreatingPack, setIsCreatingPack] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const selectedPackName = useMemo(() => {
-    if (selectedPackId === "all") return t("favorites.allPacks", "全部单词");
-    return packs.find((pack) => pack.id === selectedPackId)?.name ?? t("favorites.unknownPack", "未知合集");
-  }, [selectedPackId, packs, t]);
+  const getPackName = (packId: string) => {
+    if (packId === "all") return t("favorites.allPacks", "全部单词");
+    return packs.find((pack) => pack.id === packId)?.name ?? t("favorites.unknownPack", "未知合集");
+  };
+
+  const selectedPackName = useMemo(
+    () => getPackName(selectedPackId),
+    [selectedPackId, packs, t]
+  );
 
   const vocabularyCountByPack = useMemo(() => {
     const map = new Map<string, number>();
@@ -72,6 +76,11 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
     if (selectedPackId === "all") return vocabularies;
     return vocabularies.filter((vocab) => vocab.pack_ids?.includes(selectedPackId));
   }, [selectedPackId, vocabularies]);
+
+  const getVocabulariesForPack = (packId: string) => {
+    if (packId === "all") return vocabularies;
+    return vocabularies.filter((vocab) => vocab.pack_ids?.includes(packId));
+  };
 
   const loadFavorites = async () => {
     setIsLoading(true);
@@ -180,43 +189,40 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
     }
   };
 
-  const getPlainTextExport = (): string => filteredVocabularies.map((v) => v.word).join("\n");
+  const getPlainTextExport = (packId: string): string => getVocabulariesForPack(packId).map((v) => v.word).join("\n");
 
-  const handleCopyToClipboard = async () => {
-    if (filteredVocabularies.length === 0) return;
+  const handleCopyToClipboard = async (packId: string) => {
+    if (getVocabulariesForPack(packId).length === 0) return;
     try {
-      await navigator.clipboard.writeText(getPlainTextExport());
-      setCopySuccess(true);
-      setTimeout(() => setCopySuccess(false), 1500);
+      await navigator.clipboard.writeText(getPlainTextExport(packId));
+      setCopiedPackId(packId);
+      setTimeout(() => {
+        setCopiedPackId((currentPackId) => (currentPackId === packId ? null : currentPackId));
+      }, 1500);
     } catch (error) {
       console.error("Failed to copy:", error);
     }
   };
 
-  const handleDownloadTxt = async () => {
-    if (filteredVocabularies.length === 0) return;
-    const defaultPath = `${selectedPackName}.txt`;
+  const handleDownloadTxt = async (packId: string) => {
+    if (getVocabulariesForPack(packId).length === 0) return;
+    const defaultPath = `${getPackName(packId)}.txt`;
     const filePath = await save({
       defaultPath,
       filters: [{ name: "TXT", extensions: ["txt"] }],
     });
     if (!filePath) return;
     try {
-      await invoke("write_text_file", { path: filePath, content: getPlainTextExport() });
+      await invoke("write_text_file", { path: filePath, content: getPlainTextExport(packId) });
     } catch (error) {
       console.error("Failed to write txt file:", error);
     }
   };
 
-  const handleExportWordPack = async () => {
-    if (selectedPackId === "all") {
-      alert(t("favorites.selectPackForExport", "请先选择一个具体合集再导出"));
-      return;
-    }
-
+  const handleExportWordPack = async (packId: string) => {
     try {
       const result = await invoke<ExportWordPackResult>("export_word_pack_cmd", {
-        packId: selectedPackId,
+        packId,
       });
       const filePath = await save({
         defaultPath: result.file_name,
@@ -260,54 +266,6 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
     event.target.value = "";
   };
 
-  const renderVocabularyActions = () => (
-    <div className="flex items-center gap-2">
-      <input
-        ref={fileInputRef}
-        className="hidden"
-        type="file"
-        accept=".json,.okpack.json"
-        onChange={handleImportWordPack}
-      />
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" className="gap-2">
-            <MoreHorizontal size={16} />
-            {t("favorites.actions", "管理")}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-72">
-          {filteredVocabularies.length > 0 && (
-            <>
-              <DropdownMenuLabel>{t("favorites.exportWordList", "导出单词列表")}</DropdownMenuLabel>
-              <DropdownMenuItem onClick={() => void handleCopyToClipboard()}>
-                <Copy className="mr-2 h-4 w-4" />
-                <span>{copySuccess ? t("favorites.copied", "已复制") : t("favorites.copyToClipboard", "复制到剪贴板")}</span>
-                {copySuccess && <Check className="ml-auto h-4 w-4 text-green-500" />}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void handleDownloadTxt()}>
-                <FileDown className="mr-2 h-4 w-4" />
-                <span>{t("favorites.downloadTxt", "下载 TXT 文件")}</span>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
-          )}
-
-          <DropdownMenuLabel>{t("favorites.packTrade", "单词包")}</DropdownMenuLabel>
-          <DropdownMenuItem onClick={() => void handleExportWordPack()}>
-            <Download className="mr-2 h-4 w-4" />
-            <span>{t("favorites.exportWordPack", "导出单词包")}</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
-            <Upload className="mr-2 h-4 w-4" />
-            <span>{t("favorites.importWordPack", "导入单词包")}</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
-  );
-
   return (
     <div className="h-full max-w-6xl mx-auto p-8 flex flex-col bg-background/50">
       <div className="flex items-center gap-4 mb-8">
@@ -345,15 +303,31 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
         ) : (
           <div className="flex-1 overflow-y-auto pr-2 min-h-0">
             <TabsContent value="vocabulary" className="mt-0 h-full flex flex-col">
-              <div className="flex justify-end mb-5">{renderVocabularyActions()}</div>
+              <div className="mb-5 flex justify-end">
+                <input
+                  ref={fileInputRef}
+                  className="hidden"
+                  type="file"
+                  accept=".json,.okpack.json"
+                  onChange={handleImportWordPack}
+                />
+                <Button variant="outline" size="sm" className="gap-2" onClick={() => fileInputRef.current?.click()}>
+                  <Upload size={16} />
+                  {t("favorites.importWordPack", "导入单词包")}
+                </Button>
+              </div>
 
               <div className="flex gap-4 min-h-0 pb-8">
                 <WordPackManager
                   packs={packs}
                   selectedPackId={selectedPackId}
                   vocabularyCountByPack={vocabularyCountByPack}
+                  copiedPackId={copiedPackId}
                   onSelectPack={setSelectedPackId}
                   onCreatePack={() => setIsCreatePackOpen(true)}
+                  onCopyWords={(packId) => void handleCopyToClipboard(packId)}
+                  onDownloadTxt={(packId) => void handleDownloadTxt(packId)}
+                  onExportWordPack={(packId) => void handleExportWordPack(packId)}
                   onDeletePack={(pack) => void handleDeletePack(pack)}
                   onStartReview={() => setIsReciteOpen(true)}
                 />

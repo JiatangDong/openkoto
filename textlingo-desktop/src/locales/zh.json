@@ -343,11 +343,16 @@
     "unknownPack": "未知合集",
     "newPackPrompt": "输入新合集名称",
     "deletePackConfirm": "确定删除合集吗？",
+    "deletePackAction": "删除合集",
     "selectPackForExport": "请先选择一个具体合集再导出",
     "importPackSuccess": "导入完成",
     "packTrade": "单词包",
     "exportWordPack": "导出单词包",
-    "importWordPack": "导入单词包"
+    "importWordPack": "导入单词包",
+    "packListTitle": "单词合集",
+    "newPack": "新建",
+    "startReview": "开始复习",
+    "packActionsSuffix": "操作"
   },
   "localImport": {
     "title": "本地视频",

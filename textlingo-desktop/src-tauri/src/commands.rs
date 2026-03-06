@@ -243,6 +243,44 @@ pub struct ImportWordPackResult {
     pub errors: Vec<String>,
 }
 
+fn favorite_to_word_pack_export_entry(fav: FavoriteVocabulary) -> WordPackExportEntry {
+    WordPackExportEntry {
+        word: fav.word,
+        meaning: fav.meaning,
+        usage: if fav.usage.trim().is_empty() {
+            None
+        } else {
+            Some(fav.usage)
+        },
+        example: fav.example,
+        reading: fav.reading,
+        explanation: fav.explanation,
+        tags: Vec::new(),
+    }
+}
+
+fn build_word_pack_export_result(
+    pack_meta: WordPackExportMeta,
+    mut entries: Vec<WordPackExportEntry>,
+) -> Result<ExportWordPackResult, String> {
+    entries.sort_by(|a, b| a.word.cmp(&b.word));
+
+    let export_file = WordPackExportFile {
+        schema_version: "openkoto-word-pack-v1".to_string(),
+        pack: pack_meta.clone(),
+        entries,
+    };
+
+    let json_content = serde_json::to_string_pretty(&export_file)
+        .map_err(|e| format!("Failed to serialize export file: {}", e))?;
+    let file_name = format!("{}.okpack.json", sanitize_file_name(&pack_meta.name));
+
+    Ok(ExportWordPackResult {
+        file_name,
+        json_content,
+    })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SrsUpdateResult {
     pub srs_state: String,
@@ -1715,34 +1753,40 @@ pub async fn export_word_pack_cmd(
     app_handle: AppHandle,
     pack_id: String,
 ) -> Result<ExportWordPackResult, String> {
+    if pack_id == "all" {
+        let entries = load_all_favorite_vocabularies_internal(&app_handle)?
+            .into_iter()
+            .map(favorite_to_word_pack_export_entry)
+            .collect();
+
+        return build_word_pack_export_result(
+            WordPackExportMeta {
+                name: "全部单词".to_string(),
+                description: Some("所有收藏单词".to_string()),
+                cover_url: None,
+                author: None,
+                language_from: None,
+                language_to: None,
+                tags: Vec::new(),
+                version: Some("1.0.0".to_string()),
+            },
+            entries,
+        );
+    }
+
     let pack_json = load_word_pack(&app_handle, &pack_id)?;
     let pack: WordPack = serde_json::from_str(&pack_json)
         .map_err(|e| format!("Failed to parse word pack: {}", e))?;
 
-    let mut entries: Vec<WordPackExportEntry> =
+    let entries: Vec<WordPackExportEntry> =
         list_favorite_vocabularies_by_pack_cmd(app_handle.clone(), pack_id)
             .await?
             .into_iter()
-            .map(|fav| WordPackExportEntry {
-                word: fav.word,
-                meaning: fav.meaning,
-                usage: if fav.usage.trim().is_empty() {
-                    None
-                } else {
-                    Some(fav.usage)
-                },
-                example: fav.example,
-                reading: fav.reading,
-                explanation: fav.explanation,
-                tags: Vec::new(),
-            })
+            .map(favorite_to_word_pack_export_entry)
             .collect();
 
-    entries.sort_by(|a, b| a.word.cmp(&b.word));
-
-    let export_file = WordPackExportFile {
-        schema_version: "openkoto-word-pack-v1".to_string(),
-        pack: WordPackExportMeta {
+    build_word_pack_export_result(
+        WordPackExportMeta {
             name: pack.name.clone(),
             description: pack.description.clone(),
             cover_url: pack.cover_url.clone(),
@@ -1753,16 +1797,7 @@ pub async fn export_word_pack_cmd(
             version: pack.version.clone(),
         },
         entries,
-    };
-
-    let json_content = serde_json::to_string_pretty(&export_file)
-        .map_err(|e| format!("Failed to serialize export file: {}", e))?;
-    let file_name = format!("{}.okpack.json", sanitize_file_name(&pack.name));
-
-    Ok(ExportWordPackResult {
-        file_name,
-        json_content,
-    })
+    )
 }
 
 /// 导入 OpenKoto JSON 单词包
@@ -2651,6 +2686,46 @@ pub async fn delete_bookmark_cmd(app_handle: AppHandle, id: String) -> Result<()
 #[cfg(test)]
 mod word_pack_import_tests {
     use super::*;
+
+    #[test]
+    fn export_builder_uses_pack_name_for_filename_and_sorts_entries() {
+        let result = build_word_pack_export_result(
+            WordPackExportMeta {
+                name: "全部单词".to_string(),
+                description: None,
+                cover_url: None,
+                author: None,
+                language_from: None,
+                language_to: None,
+                tags: Vec::new(),
+                version: Some("1.0.0".to_string()),
+            },
+            vec![
+                WordPackExportEntry {
+                    word: "zebra".to_string(),
+                    meaning: "斑马".to_string(),
+                    usage: None,
+                    example: None,
+                    reading: None,
+                    explanation: None,
+                    tags: Vec::new(),
+                },
+                WordPackExportEntry {
+                    word: "apple".to_string(),
+                    meaning: "苹果".to_string(),
+                    usage: None,
+                    example: None,
+                    reading: None,
+                    explanation: None,
+                    tags: Vec::new(),
+                },
+            ],
+        )
+        .expect("should build export result");
+
+        assert_eq!(result.file_name, "全部单词.okpack.json");
+        assert!(result.json_content.find("apple").unwrap() < result.json_content.find("zebra").unwrap());
+    }
 
     #[test]
     fn import_parser_accepts_standard_pack_schema() {

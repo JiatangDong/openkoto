@@ -333,11 +333,16 @@
     "unknownPack": "不明なパック",
     "newPackPrompt": "新しいパック名を入力",
     "deletePackConfirm": "このパックを削除しますか？",
+    "deletePackAction": "パックを削除",
     "selectPackForExport": "エクスポート前にパックを選択してください",
     "importPackSuccess": "インポート完了",
     "packTrade": "単語パック",
     "exportWordPack": "単語パックをエクスポート",
-    "importWordPack": "単語パックをインポート"
+    "importWordPack": "単語パックをインポート",
+    "packListTitle": "単語パック",
+    "newPack": "新規作成",
+    "startReview": "復習を開始",
+    "packActionsSuffix": "の操作"
   },
   "localImport": {
     "title": "ローカル動画",
