@@ -4,7 +4,9 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Button } from "../ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "../ui/dropdown-menu";
+import { Input } from "../ui/input";
 import { ArrowLeft, BookOpen, Check, Copy, Download, ExternalLink, FileDown, Loader2, MoreHorizontal, SpellCheck, Trash2, Upload } from "lucide-react";
 import type { Article, FavoriteGrammar, FavoriteVocabulary, WordPack } from "../../types";
 import { WordPackManager } from "./WordPackManager";
@@ -46,6 +48,9 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
   const [articles, setArticles] = useState<Map<string, Article>>(new Map());
   const [copySuccess, setCopySuccess] = useState(false);
   const [isReciteOpen, setIsReciteOpen] = useState(false);
+  const [isCreatePackOpen, setIsCreatePackOpen] = useState(false);
+  const [newPackName, setNewPackName] = useState("");
+  const [isCreatingPack, setIsCreatingPack] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selectedPackName = useMemo(() => {
@@ -139,11 +144,12 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
   };
 
   const handleCreatePack = async () => {
-    const name = window.prompt(t("favorites.newPackPrompt", "输入新合集名称"));
-    if (!name || !name.trim()) return;
+    const trimmedName = newPackName.trim();
+    if (!trimmedName) return;
     try {
+      setIsCreatingPack(true);
       await invoke<WordPack>("create_word_pack_cmd", {
-        name: name.trim(),
+        name: trimmedName,
         description: null,
         coverUrl: null,
         author: null,
@@ -152,9 +158,13 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
         tags: [],
         version: "1.0.0",
       });
+      setNewPackName("");
+      setIsCreatePackOpen(false);
       await loadFavorites();
     } catch (error) {
       console.error("Failed to create pack:", error);
+    } finally {
+      setIsCreatingPack(false);
     }
   };
 
@@ -337,7 +347,7 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
                   selectedPackId={selectedPackId}
                   vocabularyCountByPack={vocabularyCountByPack}
                   onSelectPack={setSelectedPackId}
-                  onCreatePack={() => void handleCreatePack()}
+                  onCreatePack={() => setIsCreatePackOpen(true)}
                   onDeletePack={(pack) => void handleDeletePack(pack)}
                   onStartReview={() => setIsReciteOpen(true)}
                 />
@@ -406,6 +416,41 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
         packName={selectedPackName}
         onReviewed={loadFavorites}
       />
+
+      <Dialog
+        open={isCreatePackOpen}
+        onOpenChange={(open) => {
+          setIsCreatePackOpen(open);
+          if (!open) {
+            setNewPackName("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("favorites.newPackTitle", "新建单词合集")}</DialogTitle>
+          </DialogHeader>
+          <Input
+            value={newPackName}
+            onChange={(event) => setNewPackName(event.target.value)}
+            placeholder={t("favorites.newPackPrompt", "输入新合集名称")}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void handleCreatePack();
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCreatePackOpen(false)}>
+              {t("common.cancel", "取消")}
+            </Button>
+            <Button disabled={isCreatingPack || !newPackName.trim()} onClick={() => void handleCreatePack()}>
+              {t("common.create", "创建")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
