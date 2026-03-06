@@ -35,7 +35,7 @@ use crate::types::{
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -254,6 +254,25 @@ pub struct SrsUpdateResult {
 
 fn normalize_word(word: &str) -> String {
     word.trim().to_lowercase()
+}
+
+fn parse_import_word_pack_json(json_content: &str) -> Result<WordPackExportFile, String> {
+    let normalized = json_content.trim_start_matches('\u{feff}').trim();
+    if normalized.is_empty() {
+        return Err("Word pack JSON is empty".to_string());
+    }
+
+    let parsed = serde_json::from_str::<WordPackExportFile>(normalized)
+        .map_err(|e| format!("Invalid word pack JSON: {}", e))?;
+
+    if parsed.schema_version != "openkoto-word-pack-v1" {
+        return Err(format!(
+            "Unsupported word pack schema_version: {} (expected openkoto-word-pack-v1)",
+            parsed.schema_version
+        ));
+    }
+
+    Ok(parsed)
 }
 
 fn parse_local_date(date_local: &str) -> Result<chrono::NaiveDate, String> {
@@ -1752,9 +1771,8 @@ pub async fn import_word_pack_cmd(
     app_handle: AppHandle,
     json_content: String,
 ) -> Result<ImportWordPackResult, String> {
-    ensure_default_word_pack(&app_handle)?;
-    let parsed: WordPackExportFile = serde_json::from_str(&json_content)
-        .map_err(|e| format!("Invalid word pack JSON: {}", e))?;
+    let default_pack = ensure_default_word_pack(&app_handle)?;
+    let parsed = parse_import_word_pack_json(&json_content)?;
 
     if parsed.entries.len() > 20000 {
         return Err("Word pack is too large (max 20000 entries)".to_string());
@@ -1784,10 +1802,18 @@ pub async fn import_word_pack_cmd(
         .map_err(|e| format!("Failed to serialize word pack: {}", e))?;
     save_word_pack(&app_handle, &pack.id, &pack_json)?;
 
-    let mut existing_words: HashSet<String> = load_all_favorite_vocabularies_internal(&app_handle)?
-        .into_iter()
-        .map(|fav| normalize_word(&fav.word))
-        .collect();
+    let mut existing_by_word: HashMap<String, FavoriteVocabulary> =
+        load_all_favorite_vocabularies_internal(&app_handle)?
+            .into_iter()
+            .filter_map(|fav| {
+                let normalized = normalize_word(&fav.word);
+                if normalized.is_empty() {
+                    None
+                } else {
+                    Some((normalized, fav))
+                }
+            })
+            .collect();
     let mut file_seen_words = HashSet::new();
 
     let total = parsed.entries.len();
@@ -1805,22 +1831,60 @@ pub async fn import_word_pack_cmd(
         }
 
         let normalized = normalize_word(&word);
-        if file_seen_words.contains(&normalized) || existing_words.contains(&normalized) {
+        if file_seen_words.contains(&normalized) {
             skipped += 1;
             continue;
         }
 
         file_seen_words.insert(normalized.clone());
-        existing_words.insert(normalized);
+
+        let usage = entry.usage.unwrap_or_default();
+        let example = entry.example;
+        let reading = entry.reading;
+        let explanation = entry.explanation;
+
+        if let Some(existing) = existing_by_word.get_mut(&normalized) {
+            let mut merged_pack_ids = existing.pack_ids.clone();
+            merged_pack_ids.push(pack.id.clone());
+            existing.pack_ids = sanitize_pack_ids(Some(merged_pack_ids));
+            if existing.pack_ids.is_empty() {
+                existing.pack_ids.push(default_pack.id.clone());
+            }
+
+            if existing.meaning.trim().is_empty() {
+                existing.meaning = meaning;
+            }
+            if existing.usage.trim().is_empty() {
+                existing.usage = usage;
+            }
+            if existing.example.is_none() {
+                existing.example = example;
+            }
+            if existing.reading.is_none() {
+                existing.reading = reading;
+            }
+            if existing.explanation.is_none() {
+                existing.explanation = explanation;
+            }
+
+            if let Err(e) = persist_favorite_vocabulary(&app_handle, existing) {
+                skipped += 1;
+                errors.push(format!("Entry {} failed to merge: {}", index + 1, e));
+                continue;
+            }
+
+            imported += 1;
+            continue;
+        }
 
         let favorite = FavoriteVocabulary {
             id: Uuid::new_v4().to_string(),
             word,
             meaning,
-            usage: entry.usage.unwrap_or_default(),
-            explanation: entry.explanation,
-            example: entry.example,
-            reading: entry.reading,
+            usage,
+            explanation,
+            example,
+            reading,
             source_article_id: None,
             source_article_title: None,
             pack_ids: vec![pack.id.clone()],
@@ -1840,6 +1904,7 @@ pub async fn import_word_pack_cmd(
             continue;
         }
 
+        existing_by_word.insert(normalized, favorite.clone());
         imported += 1;
     }
 
@@ -2581,4 +2646,55 @@ pub async fn update_bookmark_cmd(
 pub async fn delete_bookmark_cmd(app_handle: AppHandle, id: String) -> Result<(), String> {
     delete_bookmark(&app_handle, &id)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod word_pack_import_tests {
+    use super::*;
+
+    #[test]
+    fn import_parser_accepts_standard_pack_schema() {
+        let json = r#"{
+          "schema_version":"openkoto-word-pack-v1",
+          "pack":{"name":"Core 100","description":"desc"},
+          "entries":[{"word":"abandon","meaning":"放弃"}]
+        }"#;
+
+        let parsed = parse_import_word_pack_json(json).expect("should parse standard schema");
+        assert_eq!(parsed.pack.name, "Core 100");
+        assert_eq!(parsed.entries.len(), 1);
+        assert_eq!(parsed.entries[0].word, "abandon");
+    }
+
+    #[test]
+    fn import_parser_rejects_legacy_array_schema() {
+        let json = r#"[
+          {"word":"abandon","meaning":"放弃","usage":"v."},
+          {"word":"ability","meaning":"能力"}
+        ]"#;
+
+        let error = parse_import_word_pack_json(json).expect_err("legacy array schema should be rejected");
+        assert!(error.contains("Invalid word pack JSON"));
+    }
+
+    #[test]
+    fn import_parser_rejects_unknown_schema_version() {
+        let json = r#"{
+          "schema_version":"openkoto-word-pack-v2",
+          "pack":{"name":"Core 100"},
+          "entries":[{"word":"abandon","meaning":"放弃"}]
+        }"#;
+
+        let error = parse_import_word_pack_json(json).expect_err("unknown schema should be rejected");
+        assert!(error.contains("Unsupported word pack schema_version"));
+    }
+
+    #[test]
+    fn import_parser_accepts_json_with_bom() {
+        let json = "\u{feff}{\"schema_version\":\"openkoto-word-pack-v1\",\"pack\":{\"name\":\"BOM Pack\"},\"entries\":[{\"word\":\"apple\",\"meaning\":\"苹果\"}]}";
+
+        let parsed = parse_import_word_pack_json(json).expect("should parse BOM-prefixed json");
+        assert_eq!(parsed.pack.name, "BOM Pack");
+        assert_eq!(parsed.entries.len(), 1);
+    }
 }

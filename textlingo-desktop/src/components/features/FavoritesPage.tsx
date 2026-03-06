@@ -242,12 +242,18 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
         alert(
           t(
             "favorites.importPackSuccess",
-            `导入完成：新增 ${result.imported}，跳过 ${result.skipped}，总数 ${result.total}`
+            `导入完成：导入/关联 ${result.imported}，跳过 ${result.skipped}，总数 ${result.total}`
           )
         );
       } catch (error) {
         console.error("Failed to import word pack:", error);
-        alert(t("favorites.importError", "导入失败"));
+        const detail =
+          typeof error === "string"
+            ? error
+            : error instanceof Error
+              ? error.message
+              : String(error);
+        alert(t("favorites.importErrorWithDetail", "导入失败：{{detail}}", { detail }));
       }
     };
     reader.readAsText(file);
