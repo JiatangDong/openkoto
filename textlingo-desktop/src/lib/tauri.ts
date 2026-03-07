@@ -122,6 +122,11 @@ export type TauriCommand = {
     maxDepth?: number
   ) => Promise<AgentTask>;
   get_agent_task_cmd: (taskId: string) => Promise<AgentTask>;
+  artifact_save_cmd: (
+    taskId: string,
+    articleId: string,
+    content: unknown
+  ) => Promise<Artifact>;
   get_artifact_cmd: (articleId: string, artifactId: string) => Promise<Artifact>;
   get_agent_worker_status_cmd: () => Promise<AgentWorkerStatusSnapshot>;
   stop_agent_worker_cmd: () => Promise<void>;

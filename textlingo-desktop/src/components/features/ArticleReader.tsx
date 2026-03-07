@@ -31,6 +31,7 @@ import { Article, SegmentExplanation } from "../../types";
 import { ArticleChatAssistant } from "./ArticleChatAssistant";
 import { ArticleExplanationPanel } from "./ArticleExplanationPanel";
 import { ArticleMindMapPanel } from "./ArticleMindMapPanel";
+import { AssistantSidebarShell, type AssistantPanelMode } from "./AssistantSidebarShell";
 import { VideoSubtitlePlayer, ViewMode } from "./VideoSubtitlePlayer";
 import {
   DropdownMenu,
@@ -62,6 +63,7 @@ export function ArticleReader({
   onUpdate,
 }: ArticleReaderProps) {
   const { t } = useTranslation();
+  const assistantModeStorageKey = "article-reader-assistant-mode";
   const [content, setContent] = useState(article.content);
   const [isEditing, setIsEditing] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
@@ -780,10 +782,8 @@ export function ArticleReader({
     }
   };
 
-  return (
-    <div className="h-full flex overflow-hidden">
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 bg-background relative">
+  const mainContent = (
+    <>
         {error && (
           <div className="absolute top-0 left-0 right-0 z-50 bg-destructive/90 border-b border-destructive text-destructive-foreground px-4 py-2 text-sm flex justify-between items-center backdrop-blur-md animate-in slide-in-from-top-full duration-300">
             <span>{error}</span>
@@ -1319,63 +1319,62 @@ export function ArticleReader({
             </TabsContent>
           </Tabs>
         </div>
-      </div>
+    </>
+  );
 
-      {/* Right Sidebar: Assistant / Explanation */}
-      {
-        showAssistant && (
-          <div className="w-[350px] md:w-[400px] border-l border-border bg-card flex flex-col shrink-0 transition-all duration-300">
-            <Tabs
-              value={activeTab}
-              onValueChange={(v) => setActiveTab(v as any)}
-              className="flex-1 flex flex-col h-full overflow-hidden"
-            >
-              <div className="px-4 py-2 border-b border-border bg-card">
-                <TabsList className="w-full">
-                  <TabsTrigger value="explanation" className="flex-1">
-                    {t("articleReader.explanation", "讲解")}
-                  </TabsTrigger>
-                  <TabsTrigger value="mind_map" className="flex-1">
-                    {t("articleReader.mindMap", "思维导图")}
-                  </TabsTrigger>
-                  <TabsTrigger value="chat" className="flex-1">
-                    {t("articleReader.chat", "对话")}
-                  </TabsTrigger>
-                </TabsList>
-              </div>
-
-              <TabsContent value="explanation" className="flex-1 overflow-hidden mt-0 relative">
-                {selectedSegment ? (
-                  <ArticleExplanationPanel
-                    segment={selectedSegment}
-                    explanation={selectedSegment.explanation || null}
-                    isLoading={isGeneratingExplanation}
-                    onRegenerate={handleGenerateExplanation}
-                  />
-                ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-muted-foreground p-8 text-center">
-                    <BookOpen size={48} className="mb-4 opacity-50" />
-                    <p>{t("articleReader.selectSegment") || "Select a sentence to see explanation"}</p>
-                  </div>
-                )}
-              </TabsContent>
-
-              <TabsContent value="chat" className="flex-1 overflow-hidden mt-0">
-                <ArticleChatAssistant
-                  articleId={article.id}
-                  articleTitle={article.title} // Use correct prop name
-                  targetLanguage={targetLanguage}
-                  selectedText={selectedText || (selectedSegment ? selectedSegment.text : "")}
-                />
-              </TabsContent>
-
-              <TabsContent value="mind_map" className="flex-1 overflow-hidden mt-0">
-                <ArticleMindMapPanel article={article} targetLanguage={targetLanguage} />
-              </TabsContent>
-            </Tabs>
-          </div>
-        )
-      }
-    </div >
+  return (
+    <AssistantSidebarShell
+      storageKey={assistantModeStorageKey}
+      showAssistant={showAssistant}
+      shellTestId="article-reader-shell"
+      mainPaneTestId="article-reader-main-pane"
+      assistantPaneTestId="article-reader-assistant-pane"
+      defaultTab="explanation"
+      activeTab={activeTab}
+      onTabChange={(value) => setActiveTab(value as "explanation" | "mind_map" | "chat")}
+      tabs={[
+        {
+          value: "explanation",
+          label: t("articleReader.explanation", "讲解"),
+          content: selectedSegment ? (
+            <ArticleExplanationPanel
+              segment={selectedSegment}
+              explanation={selectedSegment.explanation || null}
+              isLoading={isGeneratingExplanation}
+              onRegenerate={handleGenerateExplanation}
+            />
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center text-muted-foreground p-8 text-center">
+              <BookOpen size={48} className="mb-4 opacity-50" />
+              <p>{t("articleReader.selectSegment") || "Select a sentence to see explanation"}</p>
+            </div>
+          ),
+        },
+        {
+          value: "mind_map",
+          label: t("articleReader.mindMap", "思维导图"),
+          content: ({ panelMode }: { panelMode: AssistantPanelMode }) => (
+            <ArticleMindMapPanel
+              article={article}
+              targetLanguage={targetLanguage}
+              panelMode={panelMode}
+            />
+          ),
+        },
+        {
+          value: "chat",
+          label: t("articleReader.chat", "对话"),
+          content: (
+            <ArticleChatAssistant
+              articleId={article.id}
+              articleTitle={article.title}
+              targetLanguage={targetLanguage}
+              selectedText={selectedText || (selectedSegment ? selectedSegment.text : "")}
+            />
+          ),
+        },
+      ]}
+      mainContent={mainContent}
+    />
   );
 }

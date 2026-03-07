@@ -7,7 +7,6 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "../ui/tabs";
 import { Button } from "../ui/button";
 import { ChevronLeft, BookOpen, PanelRightClose, PanelRightOpen, Languages, Loader2, Download, FileText, Split, File, Columns } from "lucide-react";
 import {
@@ -21,6 +20,8 @@ import { EpubReader } from "./EpubReader";
 import { TxtReader } from "./TxtReader";
 import { PdfReader } from "./PdfReader";
 import { ArticleChatAssistant } from "./ArticleChatAssistant";
+import { ArticleMindMapPanel } from "./ArticleMindMapPanel";
+import { AssistantSidebarShell, type AssistantPanelMode } from "./AssistantSidebarShell";
 import { PluginInstallDialog } from "./PluginInstallDialog";
 import { useConfig } from "../../lib/hooks";
 
@@ -32,6 +33,7 @@ interface BookReaderProps {
 
 export function BookReader({ article, onBack }: BookReaderProps) {
     const { t } = useTranslation();
+    const assistantModeStorageKey = "book-reader-assistant-mode";
 
     // 选中的文本（用于 AI 分析）
     const [selectedText, setSelectedText] = useState("");
@@ -40,7 +42,7 @@ export function BookReader({ article, onBack }: BookReaderProps) {
     const [showAssistant, setShowAssistant] = useState(true);
 
     // 当前活动的助手标签
-    const [activeTab, setActiveTab] = useState<"chat">("chat");
+    const [activeTab, setActiveTab] = useState<"mind_map" | "chat">("mind_map");
 
     // Config hook
     const { config } = useConfig();
@@ -266,10 +268,8 @@ export function BookReader({ article, onBack }: BookReaderProps) {
         }
     };
 
-    return (
-        <div className="h-full flex overflow-hidden bg-background">
-            {/* 左侧：书籍阅读器 */}
-            <div className="flex-1 flex flex-col min-w-0">
+    const mainContent = (
+        <div className="flex-1 flex flex-col min-w-0">
                 {/* 顶部工具栏 */}
                 <div className="flex items-center justify-between p-3 border-b border-border bg-card/50 backdrop-blur-sm">
                     <div className="flex items-center gap-3">
@@ -401,7 +401,6 @@ export function BookReader({ article, onBack }: BookReaderProps) {
                     </div>
                 </div>
 
-                {/* 阅读器内容 */}
                 <div className="flex-1 overflow-hidden">
                     {isEpub && (
                         <EpubReader
@@ -446,46 +445,56 @@ export function BookReader({ article, onBack }: BookReaderProps) {
                         </>
                     )}
                 </div>
-            </div>
+        </div>
+    );
 
-            {/* 右侧：AI 助手面板 */}
-            {showAssistant && (
-                <div className="w-[350px] md:w-[400px] border-l border-border bg-card flex flex-col shrink-0">
-                    <Tabs
-                        value={activeTab}
-                        onValueChange={(v) => setActiveTab(v as "chat")}
-                        className="flex-1 flex flex-col h-full overflow-hidden"
-                    >
-                        <div className="px-4 py-2 border-b border-border bg-card">
-                            <TabsList className="w-full">
-                                <TabsTrigger value="chat" className="flex-1">
-                                    {t("articleReader.chat", "对话")}
-                                </TabsTrigger>
-                            </TabsList>
-                        </div>
-
-                        <TabsContent value="chat" className="flex-1 overflow-hidden mt-0">
+    return (
+        <>
+            <AssistantSidebarShell
+                storageKey={assistantModeStorageKey}
+                showAssistant={showAssistant}
+                activeTab={activeTab}
+                onTabChange={(value) => setActiveTab(value as "mind_map" | "chat")}
+                shellTestId="book-reader-shell"
+                mainPaneTestId="book-reader-main-pane"
+                assistantPaneTestId="book-reader-assistant-pane"
+                defaultTab="mind_map"
+                tabs={[
+                    {
+                        value: "mind_map",
+                        label: t("articleReader.mindMap", "思维导图"),
+                        content: ({ panelMode }: { panelMode: AssistantPanelMode }) => (
+                            <ArticleMindMapPanel
+                                article={article}
+                                targetLanguage={targetLanguage}
+                                panelMode={panelMode}
+                            />
+                        ),
+                    },
+                    {
+                        value: "chat",
+                        label: t("articleReader.chat", "对话"),
+                        content: (
                             <ArticleChatAssistant
                                 articleId={article.id}
                                 articleTitle={article.title}
                                 targetLanguage={targetLanguage}
                                 selectedText={selectedText}
                             />
-                        </TabsContent>
-                    </Tabs>
-                </div>
-            )}
+                        ),
+                    },
+                ]}
+                mainContent={mainContent}
+            />
 
-            {/* 插件安装对话框 */}
             <PluginInstallDialog
                 isOpen={showPluginInstallDialog}
                 onClose={() => setShowPluginInstallDialog(false)}
                 onInstallComplete={() => {
                     setShowPluginInstallDialog(false);
-                    // 安装完成后自动重试翻译
                     handlePdfTranslate();
                 }}
             />
-        </div>
+        </>
     );
 }
