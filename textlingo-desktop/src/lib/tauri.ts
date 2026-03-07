@@ -31,9 +31,9 @@ export interface AppConfig {
   srs_daily_review_limit?: number;
 }
 
-import { Article } from "../types";
+import { AgentTask, Artifact, Article, MindMapResult } from "../types";
 
-export { type Article };
+export { type AgentTask, type Artifact, type Article, type MindMapResult };
 
 export type AnalysisType = "summary" | "key_points" | "vocabulary" | "grammar" | "full";
 

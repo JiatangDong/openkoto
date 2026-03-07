@@ -12,7 +12,105 @@ export interface Article {
     book_type?: "epub" | "txt" | "pdf";
     created_at: string;
     translated: boolean;
+    active_mind_map_artifact_id?: string;
     segments?: ArticleSegment[];
+}
+
+export type AgentTaskType = "mind_map_generate" | "ppt_outline" | "ppt_slides" | "article_ask";
+export type AgentTaskStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+
+export interface AgentTaskInput {
+    article_id: string;
+    display_language: string;
+    max_depth: number;
+    evidence_mode: string;
+    prefer_structure: string;
+}
+
+export interface AgentTask {
+    id: string;
+    task_type: AgentTaskType;
+    status: AgentTaskStatus;
+    article_id: string;
+    input: AgentTaskInput;
+    progress: number;
+    stage?: string;
+    message?: string;
+    error?: string;
+    worker_session_id?: string;
+    artifact_ids: string[];
+    created_at: string;
+    updated_at: string;
+    started_at?: string;
+    finished_at?: string;
+}
+
+export type ArtifactType = "mind_map" | "mind_map_preview" | "ppt_outline" | "ppt_slides" | "article_answer";
+
+export interface Artifact {
+    id: string;
+    task_id: string;
+    article_id: string;
+    artifact_type: ArtifactType;
+    version: string;
+    content: unknown;
+    metadata?: unknown;
+    created_at: string;
+    updated_at: string;
+}
+
+export type MindMapStatus = "applicable" | "partial" | "not_applicable";
+export type DiagnosticsContentType = "narrative" | "lecture" | "dialogue" | "article" | "lyrics" | "music_only" | "mixed" | "unknown";
+export type DiagnosticsCoverage = "full" | "partial" | "none";
+export type MindMapNodeType = "root" | "theme" | "topic" | "event" | "entity" | "relation" | "evidence";
+
+export interface SourceOffset {
+    start: number;
+    end: number;
+}
+
+export interface TimeRange {
+    start: number;
+    end: number;
+}
+
+export interface MindMapNode {
+    id: string;
+    title: string;
+    node_type: MindMapNodeType;
+    summary: string;
+    confidence: number;
+    source_segment_ids: string[];
+    source_offsets: SourceOffset[];
+    time_range?: TimeRange;
+    children: MindMapNode[];
+}
+
+export interface MindMap {
+    version: string;
+    article_id: string;
+    title: string;
+    display_language: string;
+    generation_mode: string;
+    source_hash: string;
+    summary: string;
+    root: MindMapNode;
+}
+
+export interface MindMapDiagnostics {
+    content_type: DiagnosticsContentType;
+    coverage: DiagnosticsCoverage;
+    notes: string[];
+    window_count: number;
+    evidence_density: number;
+    low_confidence_node_ids: string[];
+}
+
+export interface MindMapResult {
+    status: MindMapStatus;
+    reason?: string | null;
+    map?: MindMap | null;
+    diagnostics: MindMapDiagnostics;
 }
 
 export interface ArticleSegment {

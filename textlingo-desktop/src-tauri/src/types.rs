@@ -140,7 +140,192 @@ pub struct Article {
     pub created_at: String,
     pub translated: bool,
     #[serde(default)]
+    pub active_mind_map_artifact_id: Option<String>,
+    #[serde(default)]
     pub segments: Vec<ArticleSegment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentTaskType {
+    MindMapGenerate,
+    PptOutline,
+    PptSlides,
+    ArticleAsk,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentTaskStatus {
+    Queued,
+    Running,
+    Succeeded,
+    Failed,
+    Cancelled,
+    Interrupted,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentTaskInput {
+    pub article_id: String,
+    pub display_language: String,
+    pub max_depth: i32,
+    pub evidence_mode: String,
+    pub prefer_structure: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentTask {
+    pub id: String,
+    pub task_type: AgentTaskType,
+    pub status: AgentTaskStatus,
+    pub article_id: String,
+    pub input: AgentTaskInput,
+    pub progress: f64,
+    #[serde(default)]
+    pub stage: Option<String>,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub worker_session_id: Option<String>,
+    #[serde(default)]
+    pub artifact_ids: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub finished_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactType {
+    MindMap,
+    MindMapPreview,
+    PptOutline,
+    PptSlides,
+    ArticleAnswer,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Artifact {
+    pub id: String,
+    pub task_id: String,
+    pub article_id: String,
+    pub artifact_type: ArtifactType,
+    pub version: String,
+    pub content: serde_json::Value,
+    #[serde(default)]
+    pub metadata: Option<serde_json::Value>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MindMapStatus {
+    Applicable,
+    Partial,
+    NotApplicable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticsContentType {
+    Narrative,
+    Lecture,
+    Dialogue,
+    Article,
+    Lyrics,
+    MusicOnly,
+    Mixed,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticsCoverage {
+    Full,
+    Partial,
+    None,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MindMapNodeType {
+    Root,
+    Theme,
+    Topic,
+    Event,
+    Entity,
+    Relation,
+    Evidence,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceOffset {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeRange {
+    pub start: f64,
+    pub end: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MindMapNode {
+    pub id: String,
+    pub title: String,
+    pub node_type: MindMapNodeType,
+    pub summary: String,
+    pub confidence: f64,
+    #[serde(default)]
+    pub source_segment_ids: Vec<String>,
+    #[serde(default)]
+    pub source_offsets: Vec<SourceOffset>,
+    #[serde(default)]
+    pub time_range: Option<TimeRange>,
+    #[serde(default)]
+    pub children: Vec<MindMapNode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MindMap {
+    pub version: String,
+    pub article_id: String,
+    pub title: String,
+    pub display_language: String,
+    pub generation_mode: String,
+    pub source_hash: String,
+    pub summary: String,
+    pub root: MindMapNode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MindMapDiagnostics {
+    pub content_type: DiagnosticsContentType,
+    pub coverage: DiagnosticsCoverage,
+    #[serde(default)]
+    pub notes: Vec<String>,
+    pub window_count: usize,
+    pub evidence_density: f64,
+    #[serde(default)]
+    pub low_confidence_node_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MindMapResult {
+    pub status: MindMapStatus,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub map: Option<MindMap>,
+    pub diagnostics: MindMapDiagnostics,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

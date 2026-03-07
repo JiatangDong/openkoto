@@ -854,6 +854,7 @@ pub async fn create_article(
         book_type: None,
         created_at: created_at.clone(),
         translated: false,
+        active_mind_map_artifact_id: None,
         segments,
     };
 
@@ -2088,6 +2089,7 @@ pub async fn import_local_video_cmd(
         book_type: None,
         created_at,
         translated: false,
+        active_mind_map_artifact_id: None,
         segments: Vec::new(),
     };
 
@@ -2294,6 +2296,7 @@ pub async fn import_book_cmd(
         book_type: Some(book_type.to_string()),
         created_at,
         translated: false,
+        active_mind_map_artifact_id: None,
         segments: Vec::new(), // 书籍不预分段，由阅读器处理
     };
 
@@ -2344,6 +2347,7 @@ pub async fn import_web_material_cmd(
         book_type: None,
         created_at,
         translated: false,
+        active_mind_map_artifact_id: None,
         segments,
     };
 

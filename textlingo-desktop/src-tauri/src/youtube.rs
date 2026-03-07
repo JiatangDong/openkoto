@@ -160,6 +160,7 @@ pub async fn import_youtube_video(app: AppHandle, url: String) -> Result<Article
         book_type: None,
         created_at: Utc::now().to_rfc3339(),
         translated: false,
+        active_mind_map_artifact_id: None,
         segments,
     };
 
