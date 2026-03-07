@@ -40,6 +40,12 @@ pub fn run() {
             commands::delete_article_cmd,
             commands::fetch_url_content,
             commands::import_web_material_cmd,
+            commands::article_get_overview_cmd,
+            commands::article_read_window_cmd,
+            commands::article_search_cmd,
+            commands::article_get_evidence_cmd,
+            commands::task_report_progress_cmd,
+            commands::artifact_save_cmd,
             // AI operations
             commands::translate_text,
             commands::analyze_text,

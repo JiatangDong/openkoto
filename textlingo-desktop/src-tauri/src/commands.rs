@@ -19,7 +19,9 @@ use crate::storage::{
     load_favorite_grammar,
     load_favorite_vocabulary,
     load_word_pack,
+    save_agent_task,
     save_article,
+    save_artifact,
     // 书签存储函数
     save_bookmark,
     save_config,
@@ -27,11 +29,14 @@ use crate::storage::{
     // 收藏夹存储函数
     save_favorite_vocabulary,
     save_word_pack,
+    update_article_active_mind_map_artifact,
 };
 use crate::types::{
-    AnalysisRequest, AnalysisResponse, AnalysisType, Article, ArticleSegment, Bookmark,
+    AnalysisRequest, AnalysisResponse, AnalysisType, AgentTask, AgentTaskStatus, Article,
+    ArticleEvidenceItem, ArticleEvidenceResult, ArticleOverview, ArticleSearchHit,
+    ArticleSearchResult, ArticleSegment, ArticleTextWindow, Artifact, ArtifactType, Bookmark,
     ChatRequest, ChatResponse, FavoriteGrammar, FavoriteVocabulary, ModelConfig,
-    TranslationRequest, TranslationResponse, WordPack,
+    TimeRange, TranslationRequest, TranslationResponse, WordPack,
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -181,6 +186,241 @@ fn is_abbreviation(chars: &[char], pos: usize) -> bool {
     }
 
     false
+}
+
+pub fn build_article_overview(article: &Article) -> ArticleOverview {
+    ArticleOverview {
+        article_id: article.id.clone(),
+        title: article.title.clone(),
+        source_type: article.source_type.clone(),
+        content_length: article.content.chars().count(),
+        segment_count: article.segments.len(),
+        has_timestamps: article
+            .segments
+            .iter()
+            .any(|segment| segment.start_time.is_some() || segment.end_time.is_some()),
+        has_segments: !article.segments.is_empty(),
+        language_hint: None,
+        book_type: article.book_type.clone(),
+    }
+}
+
+pub fn read_article_window(article: &Article, cursor: usize, max_chars: usize) -> ArticleTextWindow {
+    let total_chars = article.content.chars().count();
+    let safe_cursor = cursor.min(total_chars);
+    let requested_end = (safe_cursor + max_chars).min(total_chars);
+    let text: String = article
+        .content
+        .chars()
+        .skip(safe_cursor)
+        .take(requested_end.saturating_sub(safe_cursor))
+        .collect();
+
+    let mut source_segment_ids = Vec::new();
+    let mut min_start: Option<f64> = None;
+    let mut max_end: Option<f64> = None;
+    let mut segment_cursor = 0usize;
+
+    for (index, segment) in article.segments.iter().enumerate() {
+        if index > 0 {
+            segment_cursor += 1;
+        }
+        let segment_start = segment_cursor;
+        let segment_end = segment_start + segment.text.chars().count();
+        segment_cursor = segment_end;
+
+        let overlaps = segment_end > safe_cursor && segment_start < requested_end;
+        if overlaps {
+            source_segment_ids.push(segment.id.clone());
+            if let Some(start) = segment.start_time {
+                min_start = Some(min_start.map_or(start, |current| current.min(start)));
+            }
+            if let Some(end) = segment.end_time {
+                max_end = Some(max_end.map_or(end, |current| current.max(end)));
+            }
+        }
+    }
+
+    ArticleTextWindow {
+        cursor: safe_cursor,
+        next_cursor: requested_end,
+        has_more: requested_end < total_chars,
+        text,
+        start_offset: safe_cursor,
+        end_offset: requested_end,
+        source_segment_ids,
+        time_range: match (min_start, max_end) {
+            (Some(start), Some(end)) => Some(TimeRange { start, end }),
+            _ => None,
+        },
+    }
+}
+
+pub fn search_article_segments(article: &Article, query: &str, limit: usize) -> ArticleSearchResult {
+    let normalized_query = query.trim().to_lowercase();
+    if normalized_query.is_empty() {
+        return ArticleSearchResult { results: Vec::new() };
+    }
+
+    let mut results = Vec::new();
+    for segment in &article.segments {
+        let text_lower = segment.text.to_lowercase();
+        if text_lower.contains(&normalized_query) {
+            let score = normalized_query.len() as f64 / segment.text.len().max(1) as f64;
+            results.push(ArticleSearchHit {
+                segment_id: segment.id.clone(),
+                text: segment.text.clone(),
+                score,
+                start_time: segment.start_time,
+                end_time: segment.end_time,
+            });
+        }
+        if results.len() >= limit {
+            break;
+        }
+    }
+
+    ArticleSearchResult { results }
+}
+
+pub fn collect_article_evidence(
+    article: &Article,
+    segment_ids: &[String],
+) -> ArticleEvidenceResult {
+    let index: HashMap<&str, &ArticleSegment> = article
+        .segments
+        .iter()
+        .map(|segment| (segment.id.as_str(), segment))
+        .collect();
+
+    let items = segment_ids
+        .iter()
+        .filter_map(|segment_id| index.get(segment_id.as_str()))
+        .map(|segment| ArticleEvidenceItem {
+            segment_id: segment.id.clone(),
+            text: segment.text.clone(),
+            start_time: segment.start_time,
+            end_time: segment.end_time,
+        })
+        .collect();
+
+    ArticleEvidenceResult { items }
+}
+
+pub fn update_agent_task_progress_in_dir(
+    data_dir: &std::path::Path,
+    task_id: &str,
+    stage: String,
+    progress: f64,
+    message: Option<String>,
+) -> Result<AgentTask, String> {
+    let mut task = crate::storage::load_agent_task_in_dir(data_dir, task_id)?;
+    task.status = AgentTaskStatus::Running;
+    task.stage = Some(stage);
+    task.progress = progress.clamp(0.0, 1.0);
+    task.message = message;
+    task.updated_at = chrono::Utc::now().to_rfc3339();
+    if task.started_at.is_none() {
+        task.started_at = Some(task.updated_at.clone());
+    }
+    crate::storage::save_agent_task_in_dir(data_dir, &task)?;
+    Ok(task)
+}
+
+pub fn save_mind_map_artifact_in_dir(
+    data_dir: &std::path::Path,
+    task_id: &str,
+    article_id: &str,
+    content: serde_json::Value,
+) -> Result<Artifact, String> {
+    let artifact = Artifact {
+        id: Uuid::new_v4().to_string(),
+        task_id: task_id.to_string(),
+        article_id: article_id.to_string(),
+        artifact_type: ArtifactType::MindMap,
+        version: "1".to_string(),
+        content,
+        metadata: None,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        updated_at: chrono::Utc::now().to_rfc3339(),
+    };
+    crate::storage::save_artifact_in_dir(data_dir, &artifact)?;
+    Ok(artifact)
+}
+
+#[tauri::command]
+pub async fn article_get_overview_cmd(
+    app_handle: AppHandle,
+    article_id: String,
+) -> Result<ArticleOverview, String> {
+    let article = get_article(app_handle, article_id).await?;
+    Ok(build_article_overview(&article))
+}
+
+#[tauri::command]
+pub async fn article_read_window_cmd(
+    app_handle: AppHandle,
+    article_id: String,
+    cursor: usize,
+    max_chars: usize,
+) -> Result<ArticleTextWindow, String> {
+    let article = get_article(app_handle, article_id).await?;
+    Ok(read_article_window(&article, cursor, max_chars))
+}
+
+#[tauri::command]
+pub async fn article_search_cmd(
+    app_handle: AppHandle,
+    article_id: String,
+    query: String,
+    limit: Option<usize>,
+) -> Result<ArticleSearchResult, String> {
+    let article = get_article(app_handle, article_id).await?;
+    Ok(search_article_segments(&article, &query, limit.unwrap_or(8)))
+}
+
+#[tauri::command]
+pub async fn article_get_evidence_cmd(
+    app_handle: AppHandle,
+    article_id: String,
+    segment_ids: Vec<String>,
+) -> Result<ArticleEvidenceResult, String> {
+    let article = get_article(app_handle, article_id).await?;
+    Ok(collect_article_evidence(&article, &segment_ids))
+}
+
+#[tauri::command]
+pub async fn task_report_progress_cmd(
+    app_handle: AppHandle,
+    task_id: String,
+    stage: String,
+    progress: f64,
+    message: Option<String>,
+) -> Result<AgentTask, String> {
+    let data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let task = update_agent_task_progress_in_dir(&data_dir, &task_id, stage, progress, message)?;
+    save_agent_task(&app_handle, &task)?;
+    Ok(task)
+}
+
+#[tauri::command]
+pub async fn artifact_save_cmd(
+    app_handle: AppHandle,
+    task_id: String,
+    article_id: String,
+    content: serde_json::Value,
+) -> Result<Artifact, String> {
+    let data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let artifact = save_mind_map_artifact_in_dir(&data_dir, &task_id, &article_id, content)?;
+    save_artifact(&app_handle, &artifact)?;
+    let _ = update_article_active_mind_map_artifact(&app_handle, &article_id, Some(artifact.id.clone()))?;
+    Ok(artifact)
 }
 
 const DEFAULT_UNGROUPED_PACK_ID: &str = "system-ungrouped";

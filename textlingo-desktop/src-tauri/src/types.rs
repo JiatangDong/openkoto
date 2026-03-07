@@ -329,6 +329,69 @@ pub struct MindMapResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArticleOverview {
+    pub article_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub source_type: Option<String>,
+    pub content_length: usize,
+    pub segment_count: usize,
+    pub has_timestamps: bool,
+    pub has_segments: bool,
+    #[serde(default)]
+    pub language_hint: Option<String>,
+    #[serde(default)]
+    pub book_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArticleTextWindow {
+    pub cursor: usize,
+    pub next_cursor: usize,
+    pub has_more: bool,
+    pub text: String,
+    pub start_offset: usize,
+    pub end_offset: usize,
+    #[serde(default)]
+    pub source_segment_ids: Vec<String>,
+    #[serde(default)]
+    pub time_range: Option<TimeRange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArticleSearchHit {
+    pub segment_id: String,
+    pub text: String,
+    pub score: f64,
+    #[serde(default)]
+    pub start_time: Option<f64>,
+    #[serde(default)]
+    pub end_time: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArticleSearchResult {
+    #[serde(default)]
+    pub results: Vec<ArticleSearchHit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArticleEvidenceItem {
+    pub segment_id: String,
+    pub text: String,
+    #[serde(default)]
+    pub start_time: Option<f64>,
+    #[serde(default)]
+    pub end_time: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArticleEvidenceResult {
+    #[serde(default)]
+    pub items: Vec<ArticleEvidenceItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArticleSegment {
     pub id: String,
     pub article_id: String,
