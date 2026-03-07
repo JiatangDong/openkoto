@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createErrorEvent,
   createHeartbeatEvent,
   createProgressEvent,
+  createResultEvent,
   parseWorkerRequest,
   validateMindMapResult,
-} from "./runtime";
+} from "./runtime.js";
 
 describe("runtime", () => {
   it("parses a task request payload", () => {
@@ -44,6 +46,20 @@ describe("runtime", () => {
     expect(event.type).toBe("event");
     expect(event.event).toBe("worker.heartbeat");
     expect(event.payload.worker_session_id).toBe("worker-1");
+  });
+
+  it("creates result events", () => {
+    const event = createResultEvent("task-1", { status: "applicable" });
+
+    expect(event.event).toBe("task.result");
+    expect(event.payload.task_id).toBe("task-1");
+  });
+
+  it("creates error events", () => {
+    const event = createErrorEvent("task-1", "boom");
+
+    expect(event.event).toBe("task.error");
+    expect(event.payload.message).toBe("boom");
   });
 
   it("rejects invalid mind map results", () => {

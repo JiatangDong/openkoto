@@ -138,6 +138,24 @@ pub fn load_agent_task_in_dir(data_dir: &Path, task_id: &str) -> Result<AgentTas
     serde_json::from_str(&content).map_err(|e| format!("Failed to parse agent task: {}", e))
 }
 
+pub fn list_agent_tasks_in_dir(data_dir: &Path) -> Result<Vec<String>, String> {
+    let dir = data_dir.join(AGENT_TASKS_DIR);
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let entries =
+        fs::read_dir(dir).map_err(|e| format!("Failed to read agent task directory: {}", e))?;
+    let mut ids: Vec<String> = entries
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().is_file())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .map(|file_name| file_name.trim_end_matches(".json").to_string())
+        .collect();
+    ids.sort();
+    Ok(ids)
+}
+
 pub fn save_agent_task(app_handle: &AppHandle, task: &AgentTask) -> Result<(), String> {
     let data_dir = get_app_data_dir(app_handle)?;
     save_agent_task_in_dir(&data_dir, task)

@@ -1,4 +1,5 @@
 // Modules
+pub mod agent_worker;
 mod ai_service;
 pub mod commands;
 mod plugin_manager;
@@ -10,6 +11,7 @@ mod youtube;
 
 // Re-exports
 use ai_service::AIServiceCache;
+use agent_worker::{mark_running_tasks_interrupted_in_dir, AgentWorkerManager};
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -19,6 +21,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AIServiceCache::default())
+        .manage(AgentWorkerManager::default())
         .invoke_handler(tauri::generate_handler![
             // App initialization
             commands::init_app,
@@ -46,6 +49,11 @@ pub fn run() {
             commands::article_get_evidence_cmd,
             commands::task_report_progress_cmd,
             commands::artifact_save_cmd,
+            commands::create_mind_map_task_cmd,
+            commands::get_agent_task_cmd,
+            commands::get_artifact_cmd,
+            commands::get_agent_worker_status_cmd,
+            commands::stop_agent_worker_cmd,
             // AI operations
             commands::translate_text,
             commands::analyze_text,
@@ -110,6 +118,9 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 // Ensure app directories exist
                 let _ = commands::init_app(app_handle.clone()).await;
+                if let Ok(app_data_dir) = app_handle.path().app_data_dir() {
+                    let _ = mark_running_tasks_interrupted_in_dir(&app_data_dir);
+                }
 
                 // 启动资源服务器 (视频 + 书籍)
                 let app_data_dir = app_handle.path().app_data_dir().unwrap();

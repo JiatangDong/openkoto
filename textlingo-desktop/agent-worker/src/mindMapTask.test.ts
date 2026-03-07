@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildMindMapQueryOptions,
   runMindMapTask,
-} from "./mindMapTask";
-import { getTextlingoAllowedToolNames } from "./mcp/textlingoServer";
+} from "./mindMapTask.js";
+import { getTextlingoAllowedToolNames } from "./mcp/textlingoServer.js";
 
 describe("mindMapTask", () => {
   it("builds Claude SDK options with project skills and controlled tools", () => {

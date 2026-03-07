@@ -36,3 +36,20 @@ export interface WorkerHeartbeatEvent {
   };
 }
 
+export interface WorkerResultEvent {
+  type: "event";
+  event: "task.result";
+  payload: {
+    task_id: string;
+    content: unknown;
+  };
+}
+
+export interface WorkerErrorEvent {
+  type: "event";
+  event: "task.error";
+  payload: {
+    task_id: string;
+    message: string;
+  };
+}

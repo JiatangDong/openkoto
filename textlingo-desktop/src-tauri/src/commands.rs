@@ -1,4 +1,5 @@
 use crate::ai_service::{get_ai_service, get_or_create_ai_service, AIServiceCache};
+use crate::agent_worker::{AgentWorkerManager, AgentWorkerStatusSnapshot};
 use crate::storage::{
     delete_article,
     delete_bookmark,
@@ -14,6 +15,8 @@ use crate::storage::{
     list_favorite_vocabularies,
     list_word_packs,
     load_article,
+    load_agent_task,
+    load_artifact,
     load_bookmark,
     load_config,
     load_favorite_grammar,
@@ -32,8 +35,8 @@ use crate::storage::{
     update_article_active_mind_map_artifact,
 };
 use crate::types::{
-    AnalysisRequest, AnalysisResponse, AnalysisType, AgentTask, AgentTaskStatus, Article,
-    ArticleEvidenceItem, ArticleEvidenceResult, ArticleOverview, ArticleSearchHit,
+    AnalysisRequest, AnalysisResponse, AnalysisType, AgentTask, AgentTaskInput, AgentTaskStatus,
+    AgentTaskType, Article, ArticleEvidenceItem, ArticleEvidenceResult, ArticleOverview, ArticleSearchHit,
     ArticleSearchResult, ArticleSegment, ArticleTextWindow, Artifact, ArtifactType, Bookmark,
     ChatRequest, ChatResponse, FavoriteGrammar, FavoriteVocabulary, ModelConfig,
     TimeRange, TranslationRequest, TranslationResponse, WordPack,
@@ -421,6 +424,84 @@ pub async fn artifact_save_cmd(
     save_artifact(&app_handle, &artifact)?;
     let _ = update_article_active_mind_map_artifact(&app_handle, &article_id, Some(artifact.id.clone()))?;
     Ok(artifact)
+}
+
+#[tauri::command]
+pub async fn create_mind_map_task_cmd(
+    app_handle: AppHandle,
+    worker_manager: State<'_, AgentWorkerManager>,
+    article_id: String,
+    display_language: Option<String>,
+    max_depth: Option<i32>,
+) -> Result<AgentTask, String> {
+    let article = get_article(app_handle.clone(), article_id.clone()).await?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let task = AgentTask {
+        id: Uuid::new_v4().to_string(),
+        task_type: AgentTaskType::MindMapGenerate,
+        status: AgentTaskStatus::Queued,
+        article_id: article_id.clone(),
+        input: AgentTaskInput {
+            article_id: article_id.clone(),
+            display_language: display_language.unwrap_or_else(|| "zh-CN".to_string()),
+            max_depth: max_depth.unwrap_or(3),
+            evidence_mode: "strict".to_string(),
+            prefer_structure: "topic_tree".to_string(),
+        },
+        progress: 0.0,
+        stage: Some("queued".to_string()),
+        message: None,
+        error: None,
+        worker_session_id: None,
+        artifact_ids: Vec::new(),
+        created_at: now.clone(),
+        updated_at: now,
+        started_at: None,
+        finished_at: None,
+    };
+    save_agent_task(&app_handle, &task)?;
+    if let Err(error) = worker_manager.submit_mind_map_task(&app_handle, &task, &article) {
+        let mut failed_task = load_agent_task(&app_handle, &task.id)?;
+        failed_task.status = AgentTaskStatus::Failed;
+        failed_task.error = Some(error.clone());
+        failed_task.stage = Some("failed_to_start".to_string());
+        failed_task.updated_at = chrono::Utc::now().to_rfc3339();
+        failed_task.finished_at = Some(failed_task.updated_at.clone());
+        save_agent_task(&app_handle, &failed_task)?;
+        return Err(error);
+    }
+    load_agent_task(&app_handle, &task.id)
+}
+
+#[tauri::command]
+pub async fn get_agent_task_cmd(
+    app_handle: AppHandle,
+    task_id: String,
+) -> Result<AgentTask, String> {
+    load_agent_task(&app_handle, &task_id)
+}
+
+#[tauri::command]
+pub async fn get_artifact_cmd(
+    app_handle: AppHandle,
+    article_id: String,
+    artifact_id: String,
+) -> Result<Artifact, String> {
+    load_artifact(&app_handle, &article_id, &artifact_id)
+}
+
+#[tauri::command]
+pub async fn get_agent_worker_status_cmd(
+    worker_manager: State<'_, AgentWorkerManager>,
+) -> Result<AgentWorkerStatusSnapshot, String> {
+    Ok(worker_manager.status_snapshot())
+}
+
+#[tauri::command]
+pub async fn stop_agent_worker_cmd(
+    worker_manager: State<'_, AgentWorkerManager>,
+) -> Result<(), String> {
+    worker_manager.stop()
 }
 
 const DEFAULT_UNGROUPED_PACK_ID: &str = "system-ungrouped";

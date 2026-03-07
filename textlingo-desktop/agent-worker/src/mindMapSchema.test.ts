@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { parseMindMapResult } from "./mindMapSchema";
+import { parseMindMapResult } from "./mindMapSchema.js";
 
 const skillDir = path.resolve(
   __dirname,

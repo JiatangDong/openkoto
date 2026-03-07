@@ -1,11 +1,11 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { McpServerConfig, Options, SettingSource } from "@anthropic-ai/claude-agent-sdk";
 
-import { parseMindMapResult } from "./mindMapSchema";
+import { parseMindMapResult } from "./mindMapSchema.js";
 import {
   createTextlingoSdkServer,
   getTextlingoAllowedToolNames,
-} from "./mcp/textlingoServer";
+} from "./mcp/textlingoServer.js";
 
 const DISALLOWED_TOOLS = ["Read", "Write", "Edit", "Bash", "WebFetch", "WebSearch"];
 

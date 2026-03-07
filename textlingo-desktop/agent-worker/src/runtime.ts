@@ -1,10 +1,12 @@
 import type {
+  WorkerErrorEvent,
   WorkerHeartbeatEvent,
   WorkerProgressEvent,
   WorkerRequest,
-} from "./protocol";
-import { runMindMapTask } from "./mindMapTask";
-import { parseMindMapResult } from "./mindMapSchema";
+  WorkerResultEvent,
+} from "./protocol.js";
+import { runMindMapTask } from "./mindMapTask.js";
+import { parseMindMapResult } from "./mindMapSchema.js";
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
@@ -50,6 +52,28 @@ export function createHeartbeatEvent(workerSessionId: string): WorkerHeartbeatEv
     payload: {
       worker_session_id: workerSessionId,
       timestamp: new Date().toISOString(),
+    },
+  };
+}
+
+export function createResultEvent(taskId: string, content: unknown): WorkerResultEvent {
+  return {
+    type: "event",
+    event: "task.result",
+    payload: {
+      task_id: taskId,
+      content,
+    },
+  };
+}
+
+export function createErrorEvent(taskId: string, message: string): WorkerErrorEvent {
+  return {
+    type: "event",
+    event: "task.error",
+    payload: {
+      task_id: taskId,
+      message,
     },
   };
 }
