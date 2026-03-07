@@ -30,6 +30,7 @@ import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
 import { Article, SegmentExplanation } from "../../types";
 import { ArticleChatAssistant } from "./ArticleChatAssistant";
 import { ArticleExplanationPanel } from "./ArticleExplanationPanel";
+import { ArticleMindMapPanel } from "./ArticleMindMapPanel";
 import { VideoSubtitlePlayer, ViewMode } from "./VideoSubtitlePlayer";
 import {
   DropdownMenu,
@@ -77,7 +78,7 @@ export function ArticleReader({
   // Segment Explorer State
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [isGeneratingExplanation, setIsGeneratingExplanation] = useState(false);
-  const [activeTab, setActiveTab] = useState<"explanation" | "chat">("explanation");
+  const [activeTab, setActiveTab] = useState<"explanation" | "mind_map" | "chat">("explanation");
 
   // Video Sync State
   const activeSegmentRef = useRef<HTMLElement>(null);
@@ -1334,6 +1335,9 @@ export function ArticleReader({
                   <TabsTrigger value="explanation" className="flex-1">
                     {t("articleReader.explanation") || "Explanation"}
                   </TabsTrigger>
+                  <TabsTrigger value="mind_map" className="flex-1">
+                    {t("articleReader.mindMap") || "Mind Map"}
+                  </TabsTrigger>
                   <TabsTrigger value="chat" className="flex-1">
                     {t("articleReader.chat") || "Chat"}
                   </TabsTrigger>
@@ -1363,6 +1367,10 @@ export function ArticleReader({
                   targetLanguage={targetLanguage}
                   selectedText={selectedText || (selectedSegment ? selectedSegment.text : "")}
                 />
+              </TabsContent>
+
+              <TabsContent value="mind_map" className="flex-1 overflow-hidden mt-0">
+                <ArticleMindMapPanel article={article} targetLanguage={targetLanguage} />
               </TabsContent>
             </Tabs>
           </div>

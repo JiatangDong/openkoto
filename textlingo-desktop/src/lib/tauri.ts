@@ -77,6 +77,13 @@ export interface ChatResponse {
   tokens_used?: number;
 }
 
+export interface AgentWorkerStatusSnapshot {
+  health: "starting" | "healthy" | "unhealthy" | "stopped";
+  worker_session_id?: string;
+  started_at?: string;
+  last_heartbeat_at?: string;
+}
+
 // Tauri command type imports
 export type TauriCommand = {
   init_app: () => Promise<string>;
@@ -116,4 +123,13 @@ export type TauriCommand = {
     articleId: string,
     analysisType: AnalysisType
   ) => Promise<string>;
+  create_mind_map_task_cmd: (
+    articleId: string,
+    displayLanguage?: string,
+    maxDepth?: number
+  ) => Promise<AgentTask>;
+  get_agent_task_cmd: (taskId: string) => Promise<AgentTask>;
+  get_artifact_cmd: (articleId: string, artifactId: string) => Promise<Artifact>;
+  get_agent_worker_status_cmd: () => Promise<AgentWorkerStatusSnapshot>;
+  stop_agent_worker_cmd: () => Promise<void>;
 };
