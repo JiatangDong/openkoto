@@ -152,6 +152,9 @@ jobs:
         if: matrix.platform == 'macos-latest' && contains(matrix.args, 'aarch64')
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: plugin-${{ github.ref_name }}
+          name: OpenKoto Plugins ${{ github.ref_name }}
+          target_commitish: ${{ github.sha }}
           files: plugins.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
