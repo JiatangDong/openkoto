@@ -1,5 +1,7 @@
+use crate::agent_worker::{
+    resolve_runtime_provider_config, AgentWorkerManager, AgentWorkerStatusSnapshot,
+};
 use crate::ai_service::{get_ai_service, get_or_create_ai_service, AIServiceCache};
-use crate::agent_worker::{AgentWorkerManager, AgentWorkerStatusSnapshot};
 use crate::storage::{
     delete_article,
     delete_bookmark,
@@ -14,8 +16,8 @@ use crate::storage::{
     list_favorite_grammars,
     list_favorite_vocabularies,
     list_word_packs,
-    load_article,
     load_agent_task,
+    load_article,
     load_artifact,
     load_bookmark,
     load_config,
@@ -35,11 +37,11 @@ use crate::storage::{
     update_article_active_mind_map_artifact,
 };
 use crate::types::{
-    AnalysisRequest, AnalysisResponse, AnalysisType, AgentTask, AgentTaskInput, AgentTaskStatus,
-    AgentTaskType, Article, ArticleEvidenceItem, ArticleEvidenceResult, ArticleOverview, ArticleSearchHit,
-    ArticleSearchResult, ArticleSegment, ArticleTextWindow, Artifact, ArtifactType, Bookmark,
-    ChatRequest, ChatResponse, FavoriteGrammar, FavoriteVocabulary, ModelConfig,
-    TimeRange, TranslationRequest, TranslationResponse, WordPack,
+    AgentTask, AgentTaskInput, AgentTaskStatus, AgentTaskType, AnalysisRequest, AnalysisResponse,
+    AnalysisType, Article, ArticleEvidenceItem, ArticleEvidenceResult, ArticleOverview,
+    ArticleSearchHit, ArticleSearchResult, ArticleSegment, ArticleTextWindow, Artifact,
+    ArtifactType, Bookmark, ChatRequest, ChatResponse, FavoriteGrammar, FavoriteVocabulary,
+    ModelConfig, TimeRange, TranslationRequest, TranslationResponse, WordPack,
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -208,7 +210,11 @@ pub fn build_article_overview(article: &Article) -> ArticleOverview {
     }
 }
 
-pub fn read_article_window(article: &Article, cursor: usize, max_chars: usize) -> ArticleTextWindow {
+pub fn read_article_window(
+    article: &Article,
+    cursor: usize,
+    max_chars: usize,
+) -> ArticleTextWindow {
     let total_chars = article.content.chars().count();
     let safe_cursor = cursor.min(total_chars);
     let requested_end = (safe_cursor + max_chars).min(total_chars);
@@ -259,10 +265,16 @@ pub fn read_article_window(article: &Article, cursor: usize, max_chars: usize) -
     }
 }
 
-pub fn search_article_segments(article: &Article, query: &str, limit: usize) -> ArticleSearchResult {
+pub fn search_article_segments(
+    article: &Article,
+    query: &str,
+    limit: usize,
+) -> ArticleSearchResult {
     let normalized_query = query.trim().to_lowercase();
     if normalized_query.is_empty() {
-        return ArticleSearchResult { results: Vec::new() };
+        return ArticleSearchResult {
+            results: Vec::new(),
+        };
     }
 
     let mut results = Vec::new();
@@ -379,7 +391,11 @@ pub async fn article_search_cmd(
     limit: Option<usize>,
 ) -> Result<ArticleSearchResult, String> {
     let article = get_article(app_handle, article_id).await?;
-    Ok(search_article_segments(&article, &query, limit.unwrap_or(8)))
+    Ok(search_article_segments(
+        &article,
+        &query,
+        limit.unwrap_or(8),
+    ))
 }
 
 #[tauri::command]
@@ -422,7 +438,11 @@ pub async fn artifact_save_cmd(
         .map_err(|e| format!("Failed to get app data dir: {}", e))?;
     let artifact = save_mind_map_artifact_in_dir(&data_dir, &task_id, &article_id, content)?;
     save_artifact(&app_handle, &artifact)?;
-    let _ = update_article_active_mind_map_artifact(&app_handle, &article_id, Some(artifact.id.clone()))?;
+    let _ = update_article_active_mind_map_artifact(
+        &app_handle,
+        &article_id,
+        Some(artifact.id.clone()),
+    )?;
     Ok(artifact)
 }
 
@@ -435,6 +455,8 @@ pub async fn create_mind_map_task_cmd(
     max_depth: Option<i32>,
 ) -> Result<AgentTask, String> {
     let article = get_article(app_handle.clone(), article_id.clone()).await?;
+    let active_model = require_active_agent_model_config(load_config(&app_handle)?)?;
+    let provider_config = resolve_runtime_provider_config(&active_model);
     let now = chrono::Utc::now().to_rfc3339();
     let task = AgentTask {
         id: Uuid::new_v4().to_string(),
@@ -460,7 +482,9 @@ pub async fn create_mind_map_task_cmd(
         finished_at: None,
     };
     save_agent_task(&app_handle, &task)?;
-    if let Err(error) = worker_manager.submit_mind_map_task(&app_handle, &task, &article) {
+    if let Err(error) =
+        worker_manager.submit_mind_map_task(&app_handle, &task, &article, &provider_config)
+    {
         let mut failed_task = load_agent_task(&app_handle, &task.id)?;
         failed_task.status = AgentTaskStatus::Failed;
         failed_task.error = Some(error.clone());
@@ -471,6 +495,16 @@ pub async fn create_mind_map_task_cmd(
         return Err(error);
     }
     load_agent_task(&app_handle, &task.id)
+}
+
+pub fn require_active_agent_model_config(
+    config: Option<crate::types::AppConfig>,
+) -> Result<ModelConfig, String> {
+    let config = config.ok_or_else(|| "未配置 API，请先在设置中配置 AI 模型".to_string())?;
+    config
+        .get_active_config()
+        .cloned()
+        .ok_or_else(|| "未设置活动模型配置，请先在设置中配置 AI 模型".to_string())
 }
 
 #[tauri::command]
@@ -3049,7 +3083,9 @@ mod word_pack_import_tests {
         .expect("should build export result");
 
         assert_eq!(result.file_name, "全部单词.okpack.json");
-        assert!(result.json_content.find("apple").unwrap() < result.json_content.find("zebra").unwrap());
+        assert!(
+            result.json_content.find("apple").unwrap() < result.json_content.find("zebra").unwrap()
+        );
     }
 
     #[test]
@@ -3073,7 +3109,8 @@ mod word_pack_import_tests {
           {"word":"ability","meaning":"能力"}
         ]"#;
 
-        let error = parse_import_word_pack_json(json).expect_err("legacy array schema should be rejected");
+        let error =
+            parse_import_word_pack_json(json).expect_err("legacy array schema should be rejected");
         assert!(error.contains("Invalid word pack JSON"));
     }
 
@@ -3085,7 +3122,8 @@ mod word_pack_import_tests {
           "entries":[{"word":"abandon","meaning":"放弃"}]
         }"#;
 
-        let error = parse_import_word_pack_json(json).expect_err("unknown schema should be rejected");
+        let error =
+            parse_import_word_pack_json(json).expect_err("unknown schema should be rejected");
         assert!(error.contains("Unsupported word pack schema_version"));
     }
 

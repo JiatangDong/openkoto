@@ -1,13 +1,23 @@
 import type {
+  AgentRunRequest,
+  TaskErrorEvent,
+  TaskProgressEvent,
+  TaskResultEvent,
+  TaskStartedEvent,
   WorkerErrorEvent,
-  WorkerHeartbeatEvent,
-  WorkerProgressEvent,
   WorkerRequest,
   WorkerResultEvent,
 } from "./protocol.js";
-import { runMindMapTask } from "./mindMapTask.js";
+import {
+  createTaskErrorEvent,
+  createTaskProgressEvent,
+  createTaskResultEvent,
+  createTaskStartedEvent,
+  createWorkerHeartbeatEvent,
+  parseAgentRunRequest,
+} from "./protocol.js";
+import { runMindMapTask, type MindMapTaskDeps } from "./mindMapTask.js";
 import { parseMindMapResult } from "./mindMapSchema.js";
-import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
 const workerRequestSchema = z.object({
@@ -17,9 +27,11 @@ const workerRequestSchema = z.object({
   params: z.object({
     task_id: z.string().min(1),
     task_type: z.string().min(1),
-    payload: z.object({
-      article_id: z.string().min(1),
-    }).passthrough(),
+    payload: z
+      .object({
+        article_id: z.string().min(1),
+      })
+      .passthrough(),
   }),
 });
 
@@ -32,48 +44,34 @@ export function createProgressEvent(
   stage: string,
   progress: number,
   message?: string,
-): WorkerProgressEvent {
-  return {
-    type: "event",
-    event: "task.progress",
-    payload: {
-      task_id: taskId,
-      stage,
-      progress,
-      message,
-    },
-  };
+): TaskProgressEvent {
+  return createTaskProgressEvent(taskId, stage, progress, message);
 }
 
-export function createHeartbeatEvent(workerSessionId: string): WorkerHeartbeatEvent {
-  return {
-    type: "event",
-    event: "worker.heartbeat",
-    payload: {
-      worker_session_id: workerSessionId,
-      timestamp: new Date().toISOString(),
-    },
-  };
+export function createHeartbeatEvent(workerSessionId: string) {
+  return createWorkerHeartbeatEvent(workerSessionId);
 }
 
 export function createResultEvent(taskId: string, content: unknown): WorkerResultEvent {
+  const next = createTaskResultEvent(taskId, content);
   return {
-    type: "event",
-    event: "task.result",
+    type: next.type,
+    event: next.event,
     payload: {
-      task_id: taskId,
-      content,
+      task_id: next.payload.task_id,
+      content: next.payload.content,
     },
   };
 }
 
 export function createErrorEvent(taskId: string, message: string): WorkerErrorEvent {
+  const next = createTaskErrorEvent(taskId, "generation_error", message);
   return {
-    type: "event",
-    event: "task.error",
+    type: next.type,
+    event: next.event,
     payload: {
-      task_id: taskId,
-      message,
+      task_id: next.payload.task_id,
+      message: next.payload.message,
     },
   };
 }
@@ -82,39 +80,80 @@ export function validateMindMapResult(value: unknown) {
   return parseMindMapResult(value);
 }
 
-export async function handleTaskRequest(
-  request: WorkerRequest,
+export { parseAgentRunRequest };
+export { createTaskStartedEvent, createTaskErrorEvent };
+
+export async function executeAgentRunRequest(
+  request: AgentRunRequest,
   deps: {
     runMindMapTask?: typeof runMindMapTask;
-    saveArtifact: (taskId: string, artifactType: "mind_map", content: unknown) => Promise<{ artifact_id: string }>;
-    reportProgress: (taskId: string, stage: string, progress: number, message?: string) => Promise<void>;
-    cwd: string;
-    model: string;
-    pathToClaudeCodeExecutable?: string;
-    mcpServer: McpServerConfig;
+    saveArtifact: MindMapTaskDeps["saveArtifact"];
+    reportProgress: MindMapTaskDeps["reportProgress"];
+    log?: MindMapTaskDeps["log"];
+    promptRunner?: MindMapTaskDeps["promptRunner"];
+    workspaceRoot?: string;
   },
 ) {
-  if (request.method !== "task.start" || request.params.task_type !== "mind_map.generate") {
-    throw new Error(`Unsupported task method: ${request.method}`);
+  if (request.params.task_type !== "mind_map.generate") {
+    throw new Error(`Unsupported task type: ${request.params.task_type}`);
   }
 
   const runner = deps.runMindMapTask ?? runMindMapTask;
   return runner(
     {
       taskId: request.params.task_id,
-      articleId: request.params.payload.article_id,
-      displayLanguage:
-        typeof request.params.payload.display_language === "string"
-          ? request.params.payload.display_language
-          : "zh-CN",
+      articleId: request.params.input.article_id,
+      displayLanguage: request.params.input.display_language,
+      maxDepth: request.params.input.max_depth,
+      mode: request.params.input.mode,
+      articleSnapshot: {
+        title: request.params.input.article_snapshot.title,
+        content: request.params.input.article_snapshot.content,
+        sourceType: request.params.input.article_snapshot.source_type ?? null,
+      },
     },
     {
       saveArtifact: deps.saveArtifact,
       reportProgress: deps.reportProgress,
-      cwd: deps.cwd,
-      model: deps.model,
-      pathToClaudeCodeExecutable: deps.pathToClaudeCodeExecutable,
-      mcpServer: deps.mcpServer,
+      log: deps.log,
+      promptRunner: deps.promptRunner,
+      workspaceRoot: deps.workspaceRoot,
+      providerConfig: request.params.provider_config,
     },
   );
+}
+
+export async function handleAgentRunRequest(
+  request: AgentRunRequest,
+  deps: {
+    writeEvent: (event: TaskStartedEvent | TaskProgressEvent | TaskResultEvent | TaskErrorEvent) => void;
+    runTask: (request: AgentRunRequest) => Promise<void>;
+  },
+) {
+  deps.writeEvent(createTaskStartedEvent(request.params.task_id, request.params.task_type));
+
+  if (request.params.provider_config.kind === "unsupported") {
+    deps.writeEvent(
+      createTaskErrorEvent(
+        request.params.task_id,
+        "provider_unsupported",
+        "Provider is not supported for the agent runtime",
+        request.params.provider_config.reason,
+      ),
+    );
+    return;
+  }
+
+  try {
+    await deps.runTask(request);
+  } catch (error) {
+    deps.writeEvent(
+      createTaskErrorEvent(
+        request.params.task_id,
+        "internal_error",
+        "Agent runtime execution failed",
+        error instanceof Error ? error.message : String(error),
+      ),
+    );
+  }
 }

@@ -2,12 +2,13 @@ use std::{fs, path::PathBuf};
 
 use openkoto_desktop_lib::{
     agent_worker::{
-        apply_worker_event_in_dir, build_mind_map_worker_request,
-        mark_running_tasks_interrupted_in_dir, parse_worker_event_line, WorkerHealth,
-        WorkerRuntimeState,
+        apply_worker_event_in_dir, build_mind_map_worker_request, build_status_snapshot,
+        mark_running_tasks_interrupted_in_dir, parse_worker_event_line, push_worker_log,
+        resolve_runtime_provider_config, worker_event_log_entry, WorkerHealth, WorkerLogEntry,
+        WorkerLogLevel, WorkerRuntimeState,
     },
     storage::{load_agent_task_in_dir, load_artifact_in_dir, save_agent_task_in_dir},
-    types::{AgentTask, AgentTaskInput, AgentTaskStatus, AgentTaskType, Article},
+    types::{AgentTask, AgentTaskInput, AgentTaskStatus, AgentTaskType, Article, ModelConfig},
 };
 
 fn temp_data_dir(name: &str) -> PathBuf {
@@ -107,15 +108,73 @@ fn sample_mind_map_result() -> serde_json::Value {
     })
 }
 
+fn sample_model_config(provider: &str, model: &str, base_url: Option<&str>) -> ModelConfig {
+    ModelConfig {
+        id: "model-1".to_string(),
+        name: "Agent Model".to_string(),
+        api_key: "secret".to_string(),
+        api_provider: provider.to_string(),
+        model: model.to_string(),
+        is_default: true,
+        created_at: Some("2026-03-07T00:00:00Z".to_string()),
+        base_url: base_url.map(ToString::to_string),
+    }
+}
+
 #[test]
-fn worker_request_contains_task_and_article_payload() {
-    let request = build_mind_map_worker_request(&sample_task(AgentTaskStatus::Queued), &sample_article());
+fn worker_request_uses_agent_run_and_provider_config() {
+    let provider_config = resolve_runtime_provider_config(&sample_model_config(
+        "openrouter",
+        "openai/gpt-4o-mini",
+        None,
+    ));
+    let request = build_mind_map_worker_request(
+        &sample_task(AgentTaskStatus::Queued),
+        &sample_article(),
+        &provider_config,
+    );
 
     assert_eq!(request["type"], "request");
-    assert_eq!(request["method"], "task.start");
+    assert_eq!(request["method"], "agent.run");
     assert_eq!(request["params"]["task_type"], "mind_map.generate");
-    assert_eq!(request["params"]["payload"]["article_id"], "article-1");
-    assert_eq!(request["params"]["payload"]["article"]["title"], "Sample Article");
+    assert_eq!(request["params"]["input"]["article_id"], "article-1");
+    assert_eq!(request["params"]["input"]["mode"], "balanced");
+    assert_eq!(
+        request["params"]["input"]["article_snapshot"]["title"],
+        "Sample Article"
+    );
+    assert_eq!(
+        request["params"]["input"]["article_snapshot"]["content"],
+        "Alpha beta gamma. Delta epsilon zeta."
+    );
+    assert_eq!(
+        request["params"]["provider_config"]["kind"],
+        "openai_compatible"
+    );
+    assert_eq!(
+        request["params"]["provider_config"]["baseUrl"],
+        "https://openrouter.ai/api/v1"
+    );
+}
+
+#[test]
+fn resolve_runtime_provider_config_maps_google_and_openai_compatible_providers() {
+    let google =
+        resolve_runtime_provider_config(&sample_model_config("google", "gemini-2.0-flash", None));
+    let compatible = resolve_runtime_provider_config(&sample_model_config(
+        "openai-compatible",
+        "foo/bar",
+        Some("https://example.com/v1"),
+    ));
+
+    assert_eq!(
+        serde_json::to_value(&google).unwrap()["kind"],
+        "native_google"
+    );
+    assert_eq!(
+        serde_json::to_value(&compatible).unwrap()["kind"],
+        "openai_compatible"
+    );
 }
 
 #[test]
@@ -165,6 +224,25 @@ fn parses_task_result_events_from_worker_stdout() {
 }
 
 #[test]
+fn parses_task_started_events_from_worker_stdout() {
+    let event = parse_worker_event_line(
+        &serde_json::json!({
+            "type": "event",
+            "event": "task.started",
+            "payload": {
+                "task_id": "task-1",
+                "task_type": "mind_map.generate",
+                "timestamp": "2026-03-07T00:00:01Z",
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    assert_eq!(event.event_name(), "task.started");
+}
+
+#[test]
 fn result_events_persist_artifact_and_complete_task() {
     let data_dir = temp_data_dir("result");
     let task = sample_task(AgentTaskStatus::Running);
@@ -184,18 +262,225 @@ fn result_events_persist_artifact_and_complete_task() {
     )
     .unwrap();
 
-    apply_worker_event_in_dir(&data_dir, &mut WorkerRuntimeState {
-        worker_session_id: Some("worker-1".to_string()),
-        started_at: Some(chrono::Utc::now()),
-        last_heartbeat_at: None,
-    }, event)
+    apply_worker_event_in_dir(
+        &data_dir,
+        &mut WorkerRuntimeState {
+            worker_session_id: Some("worker-1".to_string()),
+            started_at: Some(chrono::Utc::now()),
+            last_heartbeat_at: None,
+        },
+        event,
+    )
     .unwrap();
 
     let stored_task = load_agent_task_in_dir(&data_dir, &task.id).unwrap();
     assert!(matches!(stored_task.status, AgentTaskStatus::Succeeded));
     assert_eq!(stored_task.artifact_ids.len(), 1);
 
-    let artifact = load_artifact_in_dir(&data_dir, &stored_task.article_id, &stored_task.artifact_ids[0]).unwrap();
+    let artifact = load_artifact_in_dir(
+        &data_dir,
+        &stored_task.article_id,
+        &stored_task.artifact_ids[0],
+    )
+    .unwrap();
     assert_eq!(artifact.article_id, "article-1");
     assert_eq!(artifact.content["status"], "applicable");
+}
+
+#[test]
+fn task_started_event_marks_task_running() {
+    let data_dir = temp_data_dir("task-started");
+    let task = sample_task(AgentTaskStatus::Queued);
+    save_agent_task_in_dir(&data_dir, &task).unwrap();
+
+    let event = parse_worker_event_line(
+        &serde_json::json!({
+            "type": "event",
+            "event": "task.started",
+            "payload": {
+                "task_id": task.id,
+                "task_type": "mind_map.generate",
+                "timestamp": "2026-03-07T00:00:01Z",
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    apply_worker_event_in_dir(
+        &data_dir,
+        &mut WorkerRuntimeState {
+            worker_session_id: Some("worker-1".to_string()),
+            started_at: Some(chrono::Utc::now()),
+            last_heartbeat_at: None,
+        },
+        event,
+    )
+    .unwrap();
+
+    let stored_task = load_agent_task_in_dir(&data_dir, &task.id).unwrap();
+    assert!(matches!(stored_task.status, AgentTaskStatus::Running));
+    assert_eq!(stored_task.stage.as_deref(), Some("started"));
+    assert_eq!(stored_task.worker_session_id.as_deref(), Some("worker-1"));
+}
+
+#[test]
+fn progress_events_do_not_reopen_completed_tasks() {
+    let data_dir = temp_data_dir("progress-after-result");
+    let mut task = sample_task(AgentTaskStatus::Succeeded);
+    task.progress = 1.0;
+    task.stage = Some("done".to_string());
+    task.finished_at = Some("2026-03-07T00:00:02Z".to_string());
+    save_agent_task_in_dir(&data_dir, &task).unwrap();
+
+    let event = parse_worker_event_line(
+        &serde_json::json!({
+            "type": "event",
+            "event": "task.progress",
+            "payload": {
+                "task_id": task.id,
+                "stage": "done",
+                "progress": 1.0,
+                "message": "Mind map generated",
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    apply_worker_event_in_dir(&data_dir, &mut WorkerRuntimeState::default(), event).unwrap();
+
+    let stored_task = load_agent_task_in_dir(&data_dir, &task.id).unwrap();
+    assert!(matches!(stored_task.status, AgentTaskStatus::Succeeded));
+    assert_eq!(stored_task.stage.as_deref(), Some("done"));
+}
+
+#[test]
+fn status_snapshot_includes_recent_logs() {
+    let now = chrono::Utc::now();
+    let runtime_state = WorkerRuntimeState {
+        worker_session_id: Some("worker-9".to_string()),
+        started_at: Some(now),
+        last_heartbeat_at: Some(now),
+    };
+    let logs = vec![WorkerLogEntry {
+        timestamp: now.to_rfc3339(),
+        level: WorkerLogLevel::Info,
+        source: "worker".to_string(),
+        message: "worker ready".to_string(),
+    }];
+
+    let snapshot = build_status_snapshot(&runtime_state, &logs, now);
+    assert!(matches!(snapshot.health, WorkerHealth::Healthy));
+    assert_eq!(snapshot.logs.len(), 1);
+    assert_eq!(snapshot.logs[0].message, "worker ready");
+}
+
+#[test]
+fn worker_log_buffer_keeps_only_latest_entries() {
+    let mut logs = Vec::new();
+    for index in 0..110 {
+        push_worker_log(
+            &mut logs,
+            WorkerLogLevel::Info,
+            "worker",
+            format!("entry-{index}"),
+        );
+    }
+
+    assert_eq!(logs.len(), 100);
+    assert_eq!(logs.first().unwrap().message, "entry-10");
+    assert_eq!(logs.last().unwrap().message, "entry-109");
+}
+
+#[test]
+fn heartbeat_events_do_not_create_debug_log_entries() {
+    let heartbeat = parse_worker_event_line(
+        &serde_json::json!({
+            "type": "event",
+            "event": "worker.heartbeat",
+            "payload": {
+                "worker_session_id": "worker-1",
+                "timestamp": "2026-03-07T00:00:00Z"
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    assert!(worker_event_log_entry(&heartbeat).is_none());
+}
+
+#[test]
+fn task_progress_events_are_converted_into_human_readable_logs() {
+    let progress = parse_worker_event_line(
+        &serde_json::json!({
+            "type": "event",
+            "event": "task.progress",
+            "payload": {
+                "task_id": "task-1",
+                "stage": "thinking",
+                "progress": 0.42,
+                "message": "Waiting for Claude response"
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let entry = worker_event_log_entry(&progress).expect("expected progress log");
+    assert!(matches!(entry.0, WorkerLogLevel::Info));
+    assert_eq!(entry.1, "thinking 42% Waiting for Claude response");
+}
+
+#[test]
+fn worker_ready_event_updates_runtime_state() {
+    let mut runtime_state = WorkerRuntimeState::default();
+    let data_dir = temp_data_dir("worker-ready");
+
+    let event = parse_worker_event_line(
+        &serde_json::json!({
+            "type": "event",
+            "event": "worker.ready",
+            "payload": {
+                "worker_session_id": "worker-ready-1",
+                "timestamp": "2026-03-07T00:00:00Z",
+                "runtime": "opencode",
+                "version": "0.1.0"
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    apply_worker_event_in_dir(&data_dir, &mut runtime_state, event).unwrap();
+
+    assert_eq!(
+        runtime_state.worker_session_id,
+        Some("worker-ready-1".to_string())
+    );
+    assert!(runtime_state.started_at.is_some());
+}
+
+#[test]
+fn task_log_events_are_converted_into_log_entries() {
+    let log_event = parse_worker_event_line(
+        &serde_json::json!({
+            "type": "event",
+            "event": "task.log",
+            "payload": {
+                "task_id": "task-1",
+                "level": "warn",
+                "source": "provider",
+                "message": "rate limit approaching",
+                "timestamp": "2026-03-07T00:00:00Z"
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let entry = worker_event_log_entry(&log_event).expect("expected log entry");
+    assert!(matches!(entry.0, WorkerLogLevel::Warn));
+    assert_eq!(entry.1, "provider: rate limit approaching");
 }

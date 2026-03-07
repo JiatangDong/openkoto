@@ -31,9 +31,9 @@ export interface AppConfig {
   srs_daily_review_limit?: number;
 }
 
-import { AgentTask, Artifact, Article, MindMapResult } from "../types";
+import { AgentTask, AgentWorkerStatusSnapshot, Artifact, Article, MindMapResult } from "../types";
 
-export { type AgentTask, type Artifact, type Article, type MindMapResult };
+export { type AgentTask, type AgentWorkerStatusSnapshot, type Artifact, type Article, type MindMapResult };
 
 export type AnalysisType = "summary" | "key_points" | "vocabulary" | "grammar" | "full";
 
@@ -75,13 +75,6 @@ export interface ChatResponse {
   content: string;
   model: string;
   tokens_used?: number;
-}
-
-export interface AgentWorkerStatusSnapshot {
-  health: "starting" | "healthy" | "unhealthy" | "stopped";
-  worker_session_id?: string;
-  started_at?: string;
-  last_heartbeat_at?: string;
 }
 
 // Tauri command type imports

@@ -9,8 +9,27 @@ import { AgentTask, Article, Artifact, MindMapResult } from "../../types";
 const invokeMock = vi.fn();
 const listenerMap = new Map<string, (event: { payload: unknown }) => void>();
 
+const translations: Record<string, string> = {
+  "articleReader.explanation": "讲解",
+  "articleReader.mindMap": "思维导图",
+  "articleReader.chat": "对话",
+  "articleReader.mindMapPanel.title": "生成文章思维导图",
+  "articleReader.mindMapPanel.description": "从原始内容提取主题结构，并保留与文章的证据关联。",
+  "articleReader.mindMapPanel.generate": "生成思维导图",
+  "articleReader.mindMapPanel.generateAgain": "重新生成",
+  "articleReader.mindMapPanel.notApplicable": "当前内容不适合生成思维导图",
+  "articleReader.mindMapPanel.agentStatus": "Agent 状态",
+  "articleReader.mindMapPanel.agentHealth.unhealthy": "异常",
+};
+
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
+}));
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, fallback?: string) => translations[key] ?? fallback ?? key,
+  }),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -168,13 +187,19 @@ describe("ArticleMindMapPanel", () => {
 
     render(<ArticleReader article={createArticle()} />);
 
-    await userEvent.click(screen.getByRole("button", { name: "articleReader.mindMap" }));
+    await userEvent.click(screen.getByRole("button", { name: "思维导图" }));
 
-    expect(screen.getByRole("button", { name: "Generate Mind Map" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "生成思维导图" })).toBeInTheDocument();
   });
 
   it("shows a generate CTA before a task exists and starts a task on click", async () => {
     invokeMock.mockImplementation((command: string) => {
+      if (command === "get_agent_worker_status_cmd") {
+        return Promise.resolve({
+          health: "stopped",
+          logs: [],
+        });
+      }
       if (command === "create_mind_map_task_cmd") {
         return Promise.resolve(createTask());
       }
@@ -183,7 +208,7 @@ describe("ArticleMindMapPanel", () => {
 
     render(<ArticleMindMapPanel article={createArticle()} targetLanguage="zh-CN" />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Generate Mind Map" }));
+    await userEvent.click(screen.getByRole("button", { name: "生成思维导图" }));
 
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith(
@@ -198,6 +223,20 @@ describe("ArticleMindMapPanel", () => {
 
   it("shows progress updates while generation is running", async () => {
     invokeMock.mockImplementation((command: string) => {
+      if (command === "get_agent_worker_status_cmd") {
+        return Promise.resolve({
+          health: "healthy",
+          worker_session_id: "worker-1",
+          logs: [
+            {
+              timestamp: "2026-03-07T00:00:00Z",
+              level: "info",
+              source: "worker",
+              message: "worker ready",
+            },
+          ],
+        });
+      }
       if (command === "create_mind_map_task_cmd") {
         return Promise.resolve(createTask());
       }
@@ -206,7 +245,7 @@ describe("ArticleMindMapPanel", () => {
 
     render(<ArticleMindMapPanel article={createArticle()} targetLanguage="zh-CN" />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Generate Mind Map" }));
+    await userEvent.click(screen.getByRole("button", { name: "生成思维导图" }));
 
     listenerMap.get("agent-task-updated")?.({
       payload: createTask({
@@ -219,10 +258,18 @@ describe("ArticleMindMapPanel", () => {
 
     expect(await screen.findByText("Reading source windows")).toBeInTheDocument();
     expect(screen.getByText("42%")).toBeInTheDocument();
+    expect(screen.getByText("Agent 状态")).toBeInTheDocument();
+    expect(screen.getByText("worker ready")).toBeInTheDocument();
   });
 
   it("renders a not-applicable empty state from the saved artifact", async () => {
     invokeMock.mockImplementation((command: string) => {
+      if (command === "get_agent_worker_status_cmd") {
+        return Promise.resolve({
+          health: "healthy",
+          logs: [],
+        });
+      }
       if (command === "get_artifact_cmd") {
         return Promise.resolve(
           createArtifact(
@@ -252,12 +299,18 @@ describe("ArticleMindMapPanel", () => {
       />,
     );
 
-    expect(await screen.findByText("Mind map unavailable")).toBeInTheDocument();
+    expect(await screen.findByText("当前内容不适合生成思维导图")).toBeInTheDocument();
     expect(screen.getByText("No stable semantic content detected.")).toBeInTheDocument();
   });
 
   it("renders a successful tree result from the saved artifact", async () => {
     invokeMock.mockImplementation((command: string) => {
+      if (command === "get_agent_worker_status_cmd") {
+        return Promise.resolve({
+          health: "healthy",
+          logs: [],
+        });
+      }
       if (command === "get_artifact_cmd") {
         return Promise.resolve(createArtifact(createMindMapResult({})));
       }
@@ -273,5 +326,69 @@ describe("ArticleMindMapPanel", () => {
 
     expect(await screen.findByText("Core Theme")).toBeInTheDocument();
     expect(screen.getByText("Theme summary")).toBeInTheDocument();
+  });
+
+  it("loads an artifact from task updates even if the task status is interrupted", async () => {
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "get_agent_worker_status_cmd") {
+        return Promise.resolve({
+          health: "healthy",
+          logs: [],
+        });
+      }
+      if (command === "create_mind_map_task_cmd") {
+        return Promise.resolve(createTask());
+      }
+      if (command === "get_artifact_cmd") {
+        return Promise.resolve(createArtifact(createMindMapResult({})));
+      }
+      return Promise.resolve(null);
+    });
+
+    render(<ArticleMindMapPanel article={createArticle()} targetLanguage="zh-CN" />);
+
+    await userEvent.click(screen.getByRole("button", { name: "生成思维导图" }));
+
+    listenerMap.get("agent-task-updated")?.({
+      payload: createTask({
+        status: "interrupted",
+        artifact_ids: ["artifact-1"],
+        progress: 1,
+        stage: "done",
+        message: "Mind map generated",
+      }),
+    });
+
+    expect(await screen.findByText("Core Theme")).toBeInTheDocument();
+    expect(screen.getByText("Theme summary")).toBeInTheDocument();
+  });
+
+  it("loads and renders worker status and recent logs", async () => {
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "get_agent_worker_status_cmd") {
+        return Promise.resolve({
+          health: "unhealthy",
+          worker_session_id: "worker-42",
+          started_at: "2026-03-07T00:00:00Z",
+          last_heartbeat_at: "2026-03-07T00:00:10Z",
+          logs: [
+            {
+              timestamp: "2026-03-07T00:00:11Z",
+              level: "warn",
+              source: "stderr",
+              message: "heartbeat delayed",
+            },
+          ],
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    render(<ArticleMindMapPanel article={createArticle()} targetLanguage="zh-CN" />);
+
+    expect(await screen.findByText("Agent 状态")).toBeInTheDocument();
+    expect(screen.getByText("异常")).toBeInTheDocument();
+    expect(screen.getByText("worker-42")).toBeInTheDocument();
+    expect(screen.getByText("heartbeat delayed")).toBeInTheDocument();
   });
 });

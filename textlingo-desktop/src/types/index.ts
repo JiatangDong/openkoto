@@ -113,6 +113,23 @@ export interface MindMapResult {
     diagnostics: MindMapDiagnostics;
 }
 
+export type WorkerLogLevel = "debug" | "info" | "warn" | "error";
+
+export interface WorkerLogEntry {
+    timestamp: string;
+    level: WorkerLogLevel;
+    source: string;
+    message: string;
+}
+
+export interface AgentWorkerStatusSnapshot {
+    health: "starting" | "healthy" | "unhealthy" | "stopped";
+    worker_session_id?: string;
+    started_at?: string;
+    last_heartbeat_at?: string;
+    logs: WorkerLogEntry[];
+}
+
 export interface ArticleSegment {
     id: string;
     article_id: string;

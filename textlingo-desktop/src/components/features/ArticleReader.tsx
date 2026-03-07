@@ -1333,13 +1333,13 @@ export function ArticleReader({
               <div className="px-4 py-2 border-b border-border bg-card">
                 <TabsList className="w-full">
                   <TabsTrigger value="explanation" className="flex-1">
-                    {t("articleReader.explanation") || "Explanation"}
+                    {t("articleReader.explanation", "讲解")}
                   </TabsTrigger>
                   <TabsTrigger value="mind_map" className="flex-1">
-                    {t("articleReader.mindMap") || "Mind Map"}
+                    {t("articleReader.mindMap", "思维导图")}
                   </TabsTrigger>
                   <TabsTrigger value="chat" className="flex-1">
-                    {t("articleReader.chat") || "Chat"}
+                    {t("articleReader.chat", "对话")}
                   </TabsTrigger>
                 </TabsList>
               </div>

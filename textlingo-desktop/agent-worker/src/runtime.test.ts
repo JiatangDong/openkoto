@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createTaskErrorEvent,
+  createTaskStartedEvent,
   createErrorEvent,
   createHeartbeatEvent,
   createProgressEvent,
   createResultEvent,
+  handleAgentRunRequest,
   parseWorkerRequest,
+  parseAgentRunRequest,
   validateMindMapResult,
 } from "./runtime.js";
 
@@ -69,5 +73,142 @@ describe("runtime", () => {
         map: null,
       }),
     ).toThrow(/diagnostics/i);
+  });
+
+  it("parses an agent.run request", () => {
+    const request = parseAgentRunRequest(
+      JSON.stringify({
+        id: "req-2",
+        type: "request",
+        method: "agent.run",
+        params: {
+          task_id: "task-2",
+          task_type: "mind_map.generate",
+          provider_config: {
+            kind: "native_google",
+            provider: "google",
+            model: "gemini-2.0-flash-exp",
+            api_key: "secret",
+          },
+          input: {
+            article_id: "article-1",
+            display_language: "zh-CN",
+            max_depth: 3,
+            mode: "balanced",
+            article_snapshot: {
+              title: "Sample Article",
+              content: "Alpha beta gamma.",
+              source_type: "article",
+            },
+          },
+        },
+      }),
+    );
+
+    expect(request.method).toBe("agent.run");
+    expect(request.params.input.article_id).toBe("article-1");
+  });
+
+  it("emits task.started before executing an agent run request", async () => {
+    const writes: unknown[] = [];
+
+    await handleAgentRunRequest(
+      parseAgentRunRequest(
+        JSON.stringify({
+          id: "req-2",
+          type: "request",
+          method: "agent.run",
+          params: {
+            task_id: "task-2",
+            task_type: "mind_map.generate",
+            provider_config: {
+              kind: "native_google",
+              provider: "google",
+              model: "gemini-2.0-flash-exp",
+              api_key: "secret",
+            },
+            input: {
+              article_id: "article-1",
+              display_language: "zh-CN",
+              max_depth: 3,
+              mode: "balanced",
+              article_snapshot: {
+                title: "Sample Article",
+                content: "Alpha beta gamma.",
+                source_type: "article",
+              },
+            },
+          },
+        }),
+      ),
+      {
+        writeEvent: (event) => writes.push(event),
+        runTask: async () => undefined,
+      },
+    );
+
+    expect(writes[0]).toMatchObject({
+      type: "event",
+      event: "task.started",
+      payload: {
+        task_id: "task-2",
+        task_type: "mind_map.generate",
+      },
+    });
+  });
+
+  it("emits a normalized task.error for unsupported providers", async () => {
+    const writes: unknown[] = [];
+
+    await handleAgentRunRequest(
+      parseAgentRunRequest(
+        JSON.stringify({
+          id: "req-3",
+          type: "request",
+          method: "agent.run",
+          params: {
+            task_id: "task-3",
+            task_type: "mind_map.generate",
+            provider_config: {
+              kind: "unsupported",
+              provider: "weird-provider",
+              reason: "Provider weird-provider is not supported for the agent runtime",
+            },
+            input: {
+              article_id: "article-1",
+              display_language: "zh-CN",
+              max_depth: 3,
+              mode: "balanced",
+              article_snapshot: {
+                title: "Sample Article",
+                content: "Alpha beta gamma.",
+                source_type: "article",
+              },
+            },
+          },
+        }),
+      ),
+      {
+        writeEvent: (event) => writes.push(event),
+        runTask: async () => undefined,
+      },
+    );
+
+    expect(writes[0]).toMatchObject({
+      type: "event",
+      event: "task.started",
+      payload: {
+        task_id: "task-3",
+        task_type: "mind_map.generate",
+      },
+    });
+    expect(writes[1]).toMatchObject(
+      createTaskErrorEvent(
+        "task-3",
+        "provider_unsupported",
+        "Provider is not supported for the agent runtime",
+        "Provider weird-provider is not supported for the agent runtime",
+      ),
+    );
   });
 });

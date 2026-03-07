@@ -79,6 +79,7 @@
     "analyzeAllConfirm": "本次将分析 {{count}} 个段落，可能消耗较多Token。\n（每次并行处理3个段落）\n\n是否继续？",
     "allSegmentsAnalyzed": "所有段落已分析完成",
     "explanation": "讲解",
+    "mindMap": "思维导图",
     "chat": "对话",
     "selectSegment": "选择一个句子查看讲解",
     "segmentExplanation": "段落讲解",
@@ -93,7 +94,33 @@
     "exportAnnotatedMd": "原文翻译精讲（Markdown）",
     "exportOriginalTranslationDocx": "原文-翻译（DOCX）",
     "exportAnnotatedDocx": "原文翻译精讲（DOCX）",
-    "exportNoSegments": "暂无可导出的分段内容，请先分段或翻译。"
+    "exportNoSegments": "暂无可导出的分段内容，请先分段或翻译。",
+    "mindMapPanel": {
+      "title": "生成文章思维导图",
+      "description": "从原始内容提取主题结构，并保留与文章的证据关联。",
+      "generate": "生成思维导图",
+      "generateAgain": "重新生成",
+      "generating": "正在生成思维导图",
+      "loading": "正在加载思维导图...",
+      "failed": "思维导图生成失败",
+      "retry": "重试",
+      "notApplicable": "当前内容不适合生成思维导图",
+      "notApplicableHint": "当前素材缺少稳定语义内容。",
+      "partial": "部分覆盖",
+      "artifactId": "产物 ID",
+      "refreshStatus": "刷新 Agent 状态",
+      "agentStatus": "Agent 状态",
+      "agentSession": "会话",
+      "agentStartedAt": "启动时间",
+      "agentHeartbeat": "最近心跳",
+      "agentLogEmpty": "当前还没有日志",
+      "agentHealth": {
+        "healthy": "正常",
+        "starting": "启动中",
+        "unhealthy": "异常",
+        "stopped": "未启动"
+      }
+    }
   },
   "novelChat": {
     "aiAssistant": "AI 助手",
