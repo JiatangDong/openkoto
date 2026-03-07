@@ -3,7 +3,9 @@ import type {
   WorkerProgressEvent,
   WorkerRequest,
 } from "./protocol";
+import { runMindMapTask } from "./mindMapTask";
 import { parseMindMapResult } from "./mindMapSchema";
+import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
 const workerRequestSchema = z.object({
@@ -54,4 +56,41 @@ export function createHeartbeatEvent(workerSessionId: string): WorkerHeartbeatEv
 
 export function validateMindMapResult(value: unknown) {
   return parseMindMapResult(value);
+}
+
+export async function handleTaskRequest(
+  request: WorkerRequest,
+  deps: {
+    runMindMapTask?: typeof runMindMapTask;
+    saveArtifact: (taskId: string, artifactType: "mind_map", content: unknown) => Promise<{ artifact_id: string }>;
+    reportProgress: (taskId: string, stage: string, progress: number, message?: string) => Promise<void>;
+    cwd: string;
+    model: string;
+    pathToClaudeCodeExecutable?: string;
+    mcpServer: McpServerConfig;
+  },
+) {
+  if (request.method !== "task.start" || request.params.task_type !== "mind_map.generate") {
+    throw new Error(`Unsupported task method: ${request.method}`);
+  }
+
+  const runner = deps.runMindMapTask ?? runMindMapTask;
+  return runner(
+    {
+      taskId: request.params.task_id,
+      articleId: request.params.payload.article_id,
+      displayLanguage:
+        typeof request.params.payload.display_language === "string"
+          ? request.params.payload.display_language
+          : "zh-CN",
+    },
+    {
+      saveArtifact: deps.saveArtifact,
+      reportProgress: deps.reportProgress,
+      cwd: deps.cwd,
+      model: deps.model,
+      pathToClaudeCodeExecutable: deps.pathToClaudeCodeExecutable,
+      mcpServer: deps.mcpServer,
+    },
+  );
 }
