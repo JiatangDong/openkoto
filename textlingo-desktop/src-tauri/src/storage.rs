@@ -1,11 +1,13 @@
-use crate::types::AppConfig;
+use crate::types::{AgentTask, AppConfig, Artifact, Article};
 use serde_json;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 const CONFIG_FILE: &str = "config.json";
 const ARTICLES_DIR: &str = "articles";
+const AGENT_TASKS_DIR: &str = "agent_tasks";
+const ARTIFACTS_DIR: &str = "artifacts/articles";
 
 pub fn get_app_data_dir(app_handle: &AppHandle) -> Result<PathBuf, String> {
     app_handle
@@ -17,9 +19,15 @@ pub fn get_app_data_dir(app_handle: &AppHandle) -> Result<PathBuf, String> {
 pub fn ensure_app_dirs(app_handle: &AppHandle) -> Result<(), String> {
     let data_dir = get_app_data_dir(app_handle)?;
     let articles_dir = data_dir.join(ARTICLES_DIR);
+    let agent_tasks_dir = data_dir.join(AGENT_TASKS_DIR);
+    let artifacts_dir = data_dir.join(ARTIFACTS_DIR);
 
     fs::create_dir_all(&articles_dir)
         .map_err(|e| format!("Failed to create articles directory: {}", e))?;
+    fs::create_dir_all(&agent_tasks_dir)
+        .map_err(|e| format!("Failed to create agent tasks directory: {}", e))?;
+    fs::create_dir_all(&artifacts_dir)
+        .map_err(|e| format!("Failed to create artifacts directory: {}", e))?;
 
     Ok(())
 }
@@ -107,6 +115,99 @@ pub fn delete_article(app_handle: &AppHandle, article_id: &str) -> Result<(), St
     }
 
     Ok(())
+}
+
+fn ensure_dir(path: &Path, name: &str) -> Result<(), String> {
+    fs::create_dir_all(path).map_err(|e| format!("Failed to create {}: {}", name, e))
+}
+
+pub fn save_agent_task_in_dir(data_dir: &Path, task: &AgentTask) -> Result<(), String> {
+    let dir = data_dir.join(AGENT_TASKS_DIR);
+    ensure_dir(&dir, "agent task directory")?;
+    let content = serde_json::to_string(task)
+        .map_err(|e| format!("Failed to serialize agent task: {}", e))?;
+    fs::write(dir.join(format!("{}.json", task.id)), content)
+        .map_err(|e| format!("Failed to save agent task: {}", e))?;
+    Ok(())
+}
+
+pub fn load_agent_task_in_dir(data_dir: &Path, task_id: &str) -> Result<AgentTask, String> {
+    let path = data_dir.join(AGENT_TASKS_DIR).join(format!("{}.json", task_id));
+    let content =
+        fs::read_to_string(path).map_err(|e| format!("Failed to read agent task: {}", e))?;
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse agent task: {}", e))
+}
+
+pub fn save_agent_task(app_handle: &AppHandle, task: &AgentTask) -> Result<(), String> {
+    let data_dir = get_app_data_dir(app_handle)?;
+    save_agent_task_in_dir(&data_dir, task)
+}
+
+pub fn load_agent_task(app_handle: &AppHandle, task_id: &str) -> Result<AgentTask, String> {
+    let data_dir = get_app_data_dir(app_handle)?;
+    load_agent_task_in_dir(&data_dir, task_id)
+}
+
+pub fn save_artifact_in_dir(data_dir: &Path, artifact: &Artifact) -> Result<(), String> {
+    let dir = data_dir.join(ARTIFACTS_DIR).join(&artifact.article_id);
+    ensure_dir(&dir, "artifact directory")?;
+    let content = serde_json::to_string(artifact)
+        .map_err(|e| format!("Failed to serialize artifact: {}", e))?;
+    fs::write(dir.join(format!("{}.json", artifact.id)), content)
+        .map_err(|e| format!("Failed to save artifact: {}", e))?;
+    Ok(())
+}
+
+pub fn load_artifact_in_dir(
+    data_dir: &Path,
+    article_id: &str,
+    artifact_id: &str,
+) -> Result<Artifact, String> {
+    let path = data_dir
+        .join(ARTIFACTS_DIR)
+        .join(article_id)
+        .join(format!("{}.json", artifact_id));
+    let content = fs::read_to_string(path).map_err(|e| format!("Failed to read artifact: {}", e))?;
+    serde_json::from_str(&content).map_err(|e| format!("Failed to parse artifact: {}", e))
+}
+
+pub fn save_artifact(app_handle: &AppHandle, artifact: &Artifact) -> Result<(), String> {
+    let data_dir = get_app_data_dir(app_handle)?;
+    save_artifact_in_dir(&data_dir, artifact)
+}
+
+pub fn load_artifact(
+    app_handle: &AppHandle,
+    article_id: &str,
+    artifact_id: &str,
+) -> Result<Artifact, String> {
+    let data_dir = get_app_data_dir(app_handle)?;
+    load_artifact_in_dir(&data_dir, article_id, artifact_id)
+}
+
+pub fn update_article_active_mind_map_artifact_in_dir(
+    data_dir: &Path,
+    article_id: &str,
+    artifact_id: Option<String>,
+) -> Result<Article, String> {
+    let path = data_dir.join(ARTICLES_DIR).join(article_id);
+    let content = fs::read_to_string(&path).map_err(|e| format!("Failed to read article: {}", e))?;
+    let mut article: Article =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse article: {}", e))?;
+    article.active_mind_map_artifact_id = artifact_id;
+    let updated = serde_json::to_string(&article)
+        .map_err(|e| format!("Failed to serialize article: {}", e))?;
+    fs::write(path, updated).map_err(|e| format!("Failed to save article: {}", e))?;
+    Ok(article)
+}
+
+pub fn update_article_active_mind_map_artifact(
+    app_handle: &AppHandle,
+    article_id: &str,
+    artifact_id: Option<String>,
+) -> Result<Article, String> {
+    let data_dir = get_app_data_dir(app_handle)?;
+    update_article_active_mind_map_artifact_in_dir(&data_dir, article_id, artifact_id)
 }
 
 // ============================================================================

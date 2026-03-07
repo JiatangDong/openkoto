@@ -2,7 +2,7 @@
 mod ai_service;
 pub mod commands;
 mod plugin_manager;
-mod storage;
+pub mod storage;
 mod subtitle_extraction;
 pub mod types;
 mod video_server;
