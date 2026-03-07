@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MindMapResult",
+  "type": "object",
+  "required": ["status", "diagnostics"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["applicable", "partial", "not_applicable"]
+    },
+    "reason": {
+      "type": ["string", "null"]
+    },
+    "map": {
+      "type": ["object", "null"]
+    },
+    "diagnostics": {
+      "type": "object",
+      "required": ["content_type", "coverage", "notes", "window_count", "evidence_density", "low_confidence_node_ids"],
+      "properties": {
+        "content_type": {
+          "type": "string",
+          "enum": ["narrative", "lecture", "dialogue", "article", "lyrics", "music_only", "mixed", "unknown"]
+        },
+        "coverage": {
+          "type": "string",
+          "enum": ["full", "partial", "none"]
+        },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "window_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "evidence_density": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "low_confidence_node_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}
