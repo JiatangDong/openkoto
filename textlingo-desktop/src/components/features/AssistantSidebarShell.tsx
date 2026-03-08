@@ -16,6 +16,7 @@ interface AssistantSidebarShellProps {
   tabs: AssistantSidebarTab[];
   defaultTab: string;
   mainContent: ReactNode;
+  topContent?: ReactNode;
   headerContent?: ReactNode;
   showAssistant?: boolean;
   activeTab?: string;
@@ -23,6 +24,7 @@ interface AssistantSidebarShellProps {
   shellTestId?: string;
   mainPaneTestId?: string;
   assistantPaneTestId?: string;
+  showTabList?: boolean;
 }
 
 const layoutModes: { value: AssistantPanelMode; label: string }[] = [
@@ -36,6 +38,7 @@ export function AssistantSidebarShell({
   tabs,
   defaultTab,
   mainContent,
+  topContent,
   headerContent,
   showAssistant = true,
   activeTab,
@@ -43,6 +46,7 @@ export function AssistantSidebarShell({
   shellTestId = "assistant-sidebar-shell",
   mainPaneTestId = "assistant-sidebar-main-pane",
   assistantPaneTestId = "assistant-sidebar-pane",
+  showTabList = true,
 }: AssistantSidebarShellProps) {
   const [assistantPanelMode, setAssistantPanelMode] = useState<AssistantPanelMode>(() => {
     if (typeof window === "undefined") {
@@ -99,15 +103,20 @@ export function AssistantSidebarShell({
             }}
             className="flex-1 flex flex-col h-full overflow-hidden"
           >
-            <div className="px-4 py-3 border-b border-border bg-card flex items-center gap-3">
-              <TabsList className="flex-1">
-                {tabs.map((tab) => (
-                  <TabsTrigger key={tab.value} value={tab.value} className="flex-1">
-                    {tab.label}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
+            {topContent ? <div className="border-b border-border bg-card px-4 py-3">{topContent}</div> : null}
 
+            <div className="px-4 py-3 border-b border-border bg-card flex items-center gap-3">
+              {showTabList ? (
+                <TabsList className="flex-1">
+                  {tabs.map((tab) => (
+                    <TabsTrigger key={tab.value} value={tab.value} className="flex-1">
+                      {tab.label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              ) : (
+                <div className="flex-1" />
+              )}
               <div className="flex items-center gap-1 rounded-xl border border-border bg-card p-1">
                 {layoutModes.map((mode) => (
                   <Button

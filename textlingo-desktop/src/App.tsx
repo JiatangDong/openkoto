@@ -14,6 +14,7 @@ import { Button } from "./components/ui/button";
 import { UpdateChecker } from "./components/features/UpdateChecker";
 import type { Article, AppConfig } from "./lib/tauri";
 import { getApiClient } from "./lib/api";
+import { useAgentOpenMaterialListener } from "./lib/hooks/useAgentOpenMaterialListener";
 
 function App() {
   const { t } = useTranslation();
@@ -32,6 +33,31 @@ function App() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useAgentOpenMaterialListener((materialId) => {
+    const existingArticle = articles.find((article) => article.id === materialId);
+    if (existingArticle) {
+      setShowFavorites(false);
+      handleSelectArticle(existingArticle);
+      return;
+    }
+
+    void invoke<Article>("get_article", { id: materialId })
+      .then((article) => {
+        setArticles((current) => {
+          const nextArticles = current.some((item) => item.id === article.id)
+            ? current
+            : [article, ...current];
+          setSelectedIndex(nextArticles.findIndex((item) => item.id === article.id));
+          return nextArticles;
+        });
+        setSelectedArticle(article);
+        setShowFavorites(false);
+      })
+      .catch((error) => {
+        console.error("Failed to open material from agent event:", error);
+      });
+  });
 
   const loadData = async (): Promise<Article[]> => {
     setIsLoading(true);

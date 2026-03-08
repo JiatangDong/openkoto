@@ -22,6 +22,37 @@
     "model": "モデル",
     "quickSwitch": "クイック切替"
   },
+  "assistant": {
+    "mode": {
+      "quick": "クイック",
+      "agent": "Agent"
+    },
+    "agent": {
+      "capabilitiesTitle": "現在対応中",
+      "capabilities": {
+        "current": "現在の素材を表示",
+        "list": "素材一覧を表示",
+        "open": "素材を開く"
+      },
+      "prompts": {
+        "current": "現在の素材を表示して",
+        "list": "素材一覧を表示して",
+        "open": "素材を開いて"
+      },
+      "empty": "ここに Agent の実行状態、ツール呼び出し、応答結果が表示されます。",
+      "inputPlaceholder": "AI にアプリ操作を依頼",
+      "send": "送信",
+      "sendAriaLabel": "Agent メッセージを送信",
+      "toolLogTitle": "ツール呼び出し",
+      "workerLogTitle": "Worker ログ",
+      "errorTitle": "タスクエラー",
+      "status": {
+        "submitting": "タスクを送信中",
+        "completed": "タスク完了",
+        "failed": "タスク失敗"
+      }
+    }
+  },
   "articleList": {
     "title": "マイ記事",
     "count_one": "{{count}} 記事",
@@ -214,6 +245,8 @@
       "ollama": "Ollama (ローカル)",
       "lmstudio": "LM Studio (ローカル)",
       "moonshot": "Moonshot AI",
+      "moonshot-cn": "Moonshot AI (Kimi China)",
+      "moonshot-global": "Moonshot AI (Kimi Global)",
       "anthropic": "Anthropic (Claude)"
     },
     "baseUrl": "ベースURL",
@@ -245,8 +278,6 @@
         "gpt-4o-mini": "GPT-4o Mini",
         "gpt-4-turbo": "GPT-4 Turbo",
         "gpt-3.5-turbo": "GPT-3.5 Turbo"
-      "moonshot-cn": "Moonshot AI (Kimi China)",
-      "moonshot-global": "Moonshot AI (Kimi Global)",
       },
       "openrouter": {
         "openai/gpt-4o": "GPT-4o",

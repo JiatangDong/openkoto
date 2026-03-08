@@ -23,6 +23,37 @@
     "model": "模型",
     "quickSwitch": "快速切换"
   },
+  "assistant": {
+    "mode": {
+      "quick": "快问",
+      "agent": "Agent"
+    },
+    "agent": {
+      "capabilitiesTitle": "当前支持",
+      "capabilities": {
+        "current": "查看当前素材",
+        "list": "列出素材",
+        "open": "打开素材"
+      },
+      "prompts": {
+        "current": "查看当前素材",
+        "list": "列出素材",
+        "open": "打开素材"
+      },
+      "empty": "Agent 会在这里展示执行状态、工具调用记录和回复结果。",
+      "inputPlaceholder": "让 AI 帮你操作软件",
+      "send": "发送",
+      "sendAriaLabel": "发送 Agent 消息",
+      "toolLogTitle": "工具调用",
+      "workerLogTitle": "Worker 日志",
+      "errorTitle": "任务错误",
+      "status": {
+        "submitting": "正在发送任务",
+        "completed": "任务已完成",
+        "failed": "任务失败"
+      }
+    }
+  },
   "articleList": {
     "title": "我的文章",
     "count_one": "{{count}} 篇文章",
@@ -224,6 +255,8 @@
       "ollama": "Ollama (本地)",
       "lmstudio": "LM Studio (本地)",
       "moonshot": "月之暗面 (Kimi)",
+      "moonshot-cn": "月之暗面 (Kimi 中国版)",
+      "moonshot-global": "Moonshot AI (Kimi 国际版)",
       "anthropic": "Anthropic (Claude)"
     },
     "baseUrl": "服务地址",
@@ -255,8 +288,6 @@
         "gpt-4o-mini": "GPT-4o Mini",
         "gpt-4-turbo": "GPT-4 Turbo",
         "gpt-3.5-turbo": "GPT-3.5 Turbo"
-      "moonshot-cn": "月之暗面 (Kimi 中国版)",
-      "moonshot-global": "Moonshot AI (Kimi 国际版)",
       },
       "openrouter": {
         "openai/gpt-4o": "GPT-4o",

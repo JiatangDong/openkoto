@@ -29,6 +29,7 @@ import ReactMarkdown from "react-markdown";
 import { AnalysisType, AppConfig } from "../../lib/tauri";
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
 import { Article, SegmentExplanation } from "../../types";
+import { AgentPanel } from "./AgentPanel";
 import { ArticleChatAssistant } from "./ArticleChatAssistant";
 import { ArticleExplanationPanel } from "./ArticleExplanationPanel";
 import { ArticleMindMapPanel } from "./ArticleMindMapPanel";
@@ -81,7 +82,7 @@ export function ArticleReader({
   // Segment Explorer State
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [isGeneratingExplanation, setIsGeneratingExplanation] = useState(false);
-  const [activeTab, setActiveTab] = useState<"explanation" | "mind_map" | "chat">("explanation");
+  const [activeTab, setActiveTab] = useState<"explanation" | "mind_map" | "chat" | "agent">("explanation");
 
   // Video Sync State
   const activeSegmentRef = useRef<HTMLElement>(null);
@@ -835,7 +836,7 @@ export function ArticleReader({
         )}
 
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-border bg-card/50 backdrop-blur-sm supports-[backdrop-filter]:bg-card/50">
+        <div className="flex flex-col gap-3 p-4 border-b border-border bg-card/50 backdrop-blur-sm supports-[backdrop-filter]:bg-card/50">
           <div className="flex items-center gap-4 min-w-0">
             {onBack && (
               <Button variant="ghost" size="sm" onClick={onBack}>
@@ -875,7 +876,7 @@ export function ArticleReader({
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex flex-wrap items-center gap-1.5">
             {onPrev && (
               <Button variant="ghost" size="sm" onClick={onPrev} disabled={!hasPrev} title="Previous Article">
                 <ChevronLeft size={18} />
@@ -1323,6 +1324,60 @@ export function ArticleReader({
     </>
   );
 
+  const sidebarTabs = [
+    {
+      value: "explanation",
+      label: t("articleReader.explanation", "讲解"),
+      content: selectedSegment ? (
+        <ArticleExplanationPanel
+          segment={selectedSegment}
+          explanation={selectedSegment.explanation || null}
+          isLoading={isGeneratingExplanation}
+          onRegenerate={handleGenerateExplanation}
+        />
+      ) : (
+        <div className="h-full flex flex-col items-center justify-center text-muted-foreground p-8 text-center">
+          <BookOpen size={48} className="mb-4 opacity-50" />
+          <p>{t("articleReader.selectSegment") || "Select a sentence to see explanation"}</p>
+        </div>
+      ),
+    },
+    {
+      value: "mind_map",
+      label: t("articleReader.mindMap", "思维导图"),
+      content: ({ panelMode }: { panelMode: AssistantPanelMode }) => (
+        <ArticleMindMapPanel
+          article={article}
+          targetLanguage={targetLanguage}
+          panelMode={panelMode}
+        />
+      ),
+    },
+    {
+      value: "chat",
+      label: t("articleReader.chat", "对话"),
+      content: (
+        <ArticleChatAssistant
+          articleId={article.id}
+          articleTitle={article.title}
+          targetLanguage={targetLanguage}
+          selectedText={selectedText || (selectedSegment ? selectedSegment.text : "")}
+        />
+      ),
+    },
+    {
+      value: "agent",
+      label: t("assistant.mode.agent", "Agent"),
+      content: (
+        <AgentPanel
+          articleId={article.id}
+          articleTitle={article.title}
+          targetLanguage={targetLanguage}
+        />
+      ),
+    },
+  ] as const;
+
   return (
     <AssistantSidebarShell
       storageKey={assistantModeStorageKey}
@@ -1332,49 +1387,8 @@ export function ArticleReader({
       assistantPaneTestId="article-reader-assistant-pane"
       defaultTab="explanation"
       activeTab={activeTab}
-      onTabChange={(value) => setActiveTab(value as "explanation" | "mind_map" | "chat")}
-      tabs={[
-        {
-          value: "explanation",
-          label: t("articleReader.explanation", "讲解"),
-          content: selectedSegment ? (
-            <ArticleExplanationPanel
-              segment={selectedSegment}
-              explanation={selectedSegment.explanation || null}
-              isLoading={isGeneratingExplanation}
-              onRegenerate={handleGenerateExplanation}
-            />
-          ) : (
-            <div className="h-full flex flex-col items-center justify-center text-muted-foreground p-8 text-center">
-              <BookOpen size={48} className="mb-4 opacity-50" />
-              <p>{t("articleReader.selectSegment") || "Select a sentence to see explanation"}</p>
-            </div>
-          ),
-        },
-        {
-          value: "mind_map",
-          label: t("articleReader.mindMap", "思维导图"),
-          content: ({ panelMode }: { panelMode: AssistantPanelMode }) => (
-            <ArticleMindMapPanel
-              article={article}
-              targetLanguage={targetLanguage}
-              panelMode={panelMode}
-            />
-          ),
-        },
-        {
-          value: "chat",
-          label: t("articleReader.chat", "对话"),
-          content: (
-            <ArticleChatAssistant
-              articleId={article.id}
-              articleTitle={article.title}
-              targetLanguage={targetLanguage}
-              selectedText={selectedText || (selectedSegment ? selectedSegment.text : "")}
-            />
-          ),
-        },
-      ]}
+      onTabChange={(value) => setActiveTab(value as "explanation" | "mind_map" | "chat" | "agent")}
+      tabs={sidebarTabs as unknown as { value: string; label: string; content: React.ReactNode | ((context: { panelMode: AssistantPanelMode }) => React.ReactNode); }[]}
       mainContent={mainContent}
     />
   );
