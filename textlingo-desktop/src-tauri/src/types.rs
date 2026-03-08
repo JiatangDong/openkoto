@@ -146,9 +146,25 @@ pub struct Article {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaterialSummary {
+    pub id: String,
+    pub title: String,
+    pub material_type: String,
+    pub created_at: String,
+    pub translated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssistantConversationMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentTaskType {
     MindMapGenerate,
+    AssistantAgentTurn,
     PptOutline,
     PptSlides,
     ArticleAsk,

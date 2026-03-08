@@ -94,6 +94,9 @@ async function main() {
         log(level, message, source = "runtime") {
           writeEvent(createTaskLogEvent(request.params.task_id, level, source, message));
         },
+        writeEvent(event) {
+          writeEvent(event);
+        },
       });
     },
   });

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createTaskErrorEvent,
@@ -7,6 +7,7 @@ import {
   createHeartbeatEvent,
   createProgressEvent,
   createResultEvent,
+  executeAgentRunRequest,
   handleAgentRunRequest,
   parseWorkerRequest,
   parseAgentRunRequest,
@@ -106,6 +107,10 @@ describe("runtime", () => {
     );
 
     expect(request.method).toBe("agent.run");
+    expect(request.params.task_type).toBe("mind_map.generate");
+    if (request.params.task_type !== "mind_map.generate") {
+      throw new Error("Expected a mind map request");
+    }
     expect(request.params.input.article_id).toBe("article-1");
   });
 
@@ -210,5 +215,55 @@ describe("runtime", () => {
         "Provider weird-provider is not supported for the agent runtime",
       ),
     );
+  });
+
+  it("dispatches assistant.agent_turn requests to the assistant runner", async () => {
+    const runAssistantTask = vi.fn(async () => ({
+      reply: "done",
+      action: null,
+    }));
+
+    await executeAgentRunRequest(
+      parseAgentRunRequest(
+        JSON.stringify({
+          id: "req-4",
+          type: "request",
+          method: "agent.run",
+          params: {
+            task_id: "task-4",
+            task_type: "assistant.agent_turn",
+            provider_config: {
+              kind: "native_google",
+              provider: "google",
+              model: "gemini-2.0-flash-exp",
+              api_key: "secret",
+            },
+            input: {
+              user_message: "列出 PDF",
+              conversation: [],
+              ui_context: {
+                current_article_id: "article-1",
+                display_language: "zh-CN",
+              },
+              current_material: {
+                id: "article-1",
+                title: "Current PDF",
+                material_type: "pdf",
+                created_at: "2026-03-08T00:00:00Z",
+                translated: false,
+              },
+              available_materials: [],
+            },
+          },
+        }),
+      ),
+      {
+        runAssistantTask,
+        reportProgress: async () => undefined,
+        saveArtifact: async () => ({ artifact_id: "unused" }),
+      },
+    );
+
+    expect(runAssistantTask).toHaveBeenCalledTimes(1);
   });
 });

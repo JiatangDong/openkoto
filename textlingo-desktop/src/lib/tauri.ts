@@ -65,6 +65,11 @@ export interface ChatMessage {
   content: string;
 }
 
+export interface AssistantConversationMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface ChatRequest {
   messages: ChatMessage[];
   model: string;
@@ -120,6 +125,13 @@ export type TauriCommand = {
     articleId: string,
     displayLanguage?: string,
     maxDepth?: number
+  ) => Promise<AgentTask>;
+  run_agent_turn_cmd: (
+    taskId: string,
+    articleId: string,
+    userMessage: string,
+    conversation: AssistantConversationMessage[],
+    displayLanguage?: string,
   ) => Promise<AgentTask>;
   get_agent_task_cmd: (taskId: string) => Promise<AgentTask>;
   artifact_save_cmd: (

@@ -24,6 +24,8 @@ describe("mindMapTask", () => {
 
     expect(resolved.model).toBe("google/models/gemini-3-flash-preview");
     expect(resolved.config.enabled_providers).toEqual(["google"]);
+    expect(resolved.config.plugin).toEqual([]);
+    expect(resolved.config.autoupdate).toBe(false);
     expect(resolved.config.provider?.google?.models?.["models/gemini-3-flash-preview"]).toMatchObject({
       id: "models/gemini-3-flash-preview",
       name: "models/gemini-3-flash-preview",

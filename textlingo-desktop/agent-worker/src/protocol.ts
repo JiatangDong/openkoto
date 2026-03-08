@@ -29,6 +29,16 @@ export const runtimeProviderSchema = z.discriminatedUnion("kind", [
 
 export type RuntimeProvider = z.infer<typeof runtimeProviderSchema>;
 
+export const materialSummarySchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  material_type: z.string().min(1),
+  created_at: z.string().min(1),
+  translated: z.boolean(),
+});
+
+export type MaterialSummary = z.infer<typeof materialSummarySchema>;
+
 export const articleSnapshotSchema = z.object({
   title: z.string().min(1),
   content: z.string(),
@@ -47,16 +57,42 @@ export const agentRunInputSchema = z.object({
 
 export type AgentRunInput = z.infer<typeof agentRunInputSchema>;
 
+export const assistantConversationMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string().min(1),
+});
+
+export const assistantRunInputSchema = z.object({
+  user_message: z.string().min(1),
+  conversation: z.array(assistantConversationMessageSchema).default([]),
+  ui_context: z.object({
+    current_article_id: z.string().min(1).optional(),
+    display_language: z.string().min(1).default("zh-CN"),
+  }),
+  current_material: materialSummarySchema.nullable().optional(),
+  available_materials: z.array(materialSummarySchema).default([]),
+});
+
+export type AssistantRunInput = z.infer<typeof assistantRunInputSchema>;
+
 export const agentRunRequestSchema = z.object({
   id: z.string().min(1),
   type: z.literal("request"),
   method: z.literal("agent.run"),
-  params: z.object({
-    task_id: z.string().min(1),
-    task_type: z.string().min(1),
-    provider_config: runtimeProviderSchema,
-    input: agentRunInputSchema,
-  }),
+  params: z.discriminatedUnion("task_type", [
+    z.object({
+      task_id: z.string().min(1),
+      task_type: z.literal("mind_map.generate"),
+      provider_config: runtimeProviderSchema,
+      input: agentRunInputSchema,
+    }),
+    z.object({
+      task_id: z.string().min(1),
+      task_type: z.literal("assistant.agent_turn"),
+      provider_config: runtimeProviderSchema,
+      input: assistantRunInputSchema,
+    }),
+  ]),
 });
 
 export type AgentRunRequest = z.infer<typeof agentRunRequestSchema>;

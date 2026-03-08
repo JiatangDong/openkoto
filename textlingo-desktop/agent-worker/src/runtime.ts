@@ -10,13 +10,14 @@ import type {
 } from "./protocol.js";
 import {
   createTaskErrorEvent,
-  createTaskProgressEvent,
   createTaskResultEvent,
+  createTaskProgressEvent,
   createTaskStartedEvent,
   createWorkerHeartbeatEvent,
   parseAgentRunRequest,
 } from "./protocol.js";
 import { runMindMapTask, type MindMapTaskDeps } from "./mindMapTask.js";
+import { runAssistantTask, type AssistantTaskDeps } from "./assistantTask.js";
 import { parseMindMapResult } from "./mindMapSchema.js";
 import { z } from "zod";
 
@@ -87,40 +88,65 @@ export async function executeAgentRunRequest(
   request: AgentRunRequest,
   deps: {
     runMindMapTask?: typeof runMindMapTask;
+    runAssistantTask?: typeof runAssistantTask;
     saveArtifact: MindMapTaskDeps["saveArtifact"];
     reportProgress: MindMapTaskDeps["reportProgress"];
     log?: MindMapTaskDeps["log"];
     promptRunner?: MindMapTaskDeps["promptRunner"];
     workspaceRoot?: string;
+    writeEvent?: (event: TaskResultEvent) => void;
   },
 ) {
-  if (request.params.task_type !== "mind_map.generate") {
-    throw new Error(`Unsupported task type: ${request.params.task_type}`);
+  if (request.params.task_type === "mind_map.generate") {
+    const runner = deps.runMindMapTask ?? runMindMapTask;
+    return runner(
+      {
+        taskId: request.params.task_id,
+        articleId: request.params.input.article_id,
+        displayLanguage: request.params.input.display_language,
+        maxDepth: request.params.input.max_depth,
+        mode: request.params.input.mode,
+        articleSnapshot: {
+          title: request.params.input.article_snapshot.title,
+          content: request.params.input.article_snapshot.content,
+          sourceType: request.params.input.article_snapshot.source_type ?? null,
+        },
+      },
+      {
+        saveArtifact: deps.saveArtifact,
+        reportProgress: deps.reportProgress,
+        log: deps.log,
+        promptRunner: deps.promptRunner,
+        workspaceRoot: deps.workspaceRoot,
+        providerConfig: request.params.provider_config,
+      },
+    );
   }
 
-  const runner = deps.runMindMapTask ?? runMindMapTask;
-  return runner(
-    {
-      taskId: request.params.task_id,
-      articleId: request.params.input.article_id,
-      displayLanguage: request.params.input.display_language,
-      maxDepth: request.params.input.max_depth,
-      mode: request.params.input.mode,
-      articleSnapshot: {
-        title: request.params.input.article_snapshot.title,
-        content: request.params.input.article_snapshot.content,
-        sourceType: request.params.input.article_snapshot.source_type ?? null,
+  if (request.params.task_type === "assistant.agent_turn") {
+    const runner = deps.runAssistantTask ?? runAssistantTask;
+    const result = await runner(
+      {
+        taskId: request.params.task_id,
+        userMessage: request.params.input.user_message,
+        conversation: request.params.input.conversation,
+        uiContext: request.params.input.ui_context,
+        currentMaterial: request.params.input.current_material ?? null,
+        availableMaterials: request.params.input.available_materials,
       },
-    },
-    {
-      saveArtifact: deps.saveArtifact,
-      reportProgress: deps.reportProgress,
-      log: deps.log,
-      promptRunner: deps.promptRunner,
-      workspaceRoot: deps.workspaceRoot,
-      providerConfig: request.params.provider_config,
-    },
-  );
+      {
+        reportProgress: deps.reportProgress,
+        log: deps.log as AssistantTaskDeps["log"],
+        promptRunner: deps.promptRunner,
+        workspaceRoot: deps.workspaceRoot,
+        providerConfig: request.params.provider_config,
+      },
+    );
+    deps.writeEvent?.(createTaskResultEvent(request.params.task_id, result, "article_answer"));
+    return result;
+  }
+
+  throw new Error("Unsupported task type");
 }
 
 export async function handleAgentRunRequest(

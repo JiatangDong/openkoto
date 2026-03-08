@@ -371,6 +371,8 @@ export function resolveProviderModel(providerConfig: RuntimeProvider): {
   config: Config;
 } {
   const baseConfig: Config = {
+    plugin: [],
+    autoupdate: false,
     permission: {
       edit: "deny",
       bash: "deny",

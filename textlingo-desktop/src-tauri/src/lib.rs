@@ -51,6 +51,7 @@ pub fn run() {
             commands::task_report_progress_cmd,
             commands::artifact_save_cmd,
             commands::create_mind_map_task_cmd,
+            commands::run_agent_turn_cmd,
             commands::get_agent_task_cmd,
             commands::get_artifact_cmd,
             commands::get_agent_worker_status_cmd,

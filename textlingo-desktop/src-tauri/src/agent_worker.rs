@@ -3,7 +3,10 @@ use crate::storage::{
     list_agent_tasks_in_dir, load_agent_task_in_dir, save_agent_task_in_dir,
     update_article_active_mind_map_artifact_in_dir,
 };
-use crate::types::{AgentTask, AgentTaskStatus, Article, Artifact, ModelConfig};
+use crate::types::{
+    AgentTask, AgentTaskStatus, Article, Artifact, AssistantConversationMessage, MaterialSummary,
+    ModelConfig,
+};
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -123,7 +126,7 @@ pub struct WorkerReadyPayload {
     pub version: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerTaskLogPayload {
     pub task_id: String,
     pub level: WorkerLogLevel,
@@ -135,7 +138,13 @@ pub struct WorkerTaskLogPayload {
 #[derive(Debug, Clone, Deserialize)]
 pub struct WorkerTaskResultPayload {
     pub task_id: String,
+    #[serde(default = "default_worker_task_result_artifact_type")]
+    pub artifact_type: String,
     pub content: Value,
+}
+
+fn default_worker_task_result_artifact_type() -> String {
+    "mind_map".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -379,6 +388,61 @@ impl AgentWorkerManager {
         Ok(())
     }
 
+    pub fn submit_assistant_turn(
+        &self,
+        app_handle: &AppHandle,
+        task: &AgentTask,
+        user_message: String,
+        conversation: Vec<AssistantConversationMessage>,
+        current_material: MaterialSummary,
+        available_materials: Vec<MaterialSummary>,
+        provider_config: &RuntimeProviderConfig,
+    ) -> Result<(), String> {
+        self.ensure_started(app_handle)?;
+        let mut persisted_task = task.clone();
+        persisted_task.status = AgentTaskStatus::Running;
+        persisted_task.stage = Some("queued".to_string());
+        persisted_task.updated_at = Utc::now().to_rfc3339();
+        if persisted_task.started_at.is_none() {
+            persisted_task.started_at = Some(persisted_task.updated_at.clone());
+        }
+        let session_id = self.runtime_state.lock().unwrap().worker_session_id.clone();
+        if persisted_task.worker_session_id.is_none() {
+            persisted_task.worker_session_id = session_id;
+        }
+        save_agent_task_in_dir(
+            &app_handle
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("Failed to get app data dir: {}", e))?,
+            &persisted_task,
+        )?;
+
+        let request = build_assistant_worker_request(
+            &persisted_task.id,
+            provider_config,
+            user_message,
+            conversation,
+            Some(current_material),
+            available_materials,
+            Some(task.article_id.clone()),
+            task.input.display_language.clone(),
+        );
+        self.record_log(
+            WorkerLogLevel::Info,
+            "task",
+            format!("submitted assistant.agent_turn for article {}", task.article_id),
+        );
+        let mut guard = self.stdin.lock().unwrap();
+        let stdin = guard
+            .as_mut()
+            .ok_or_else(|| "Agent worker stdin is not available".to_string())?;
+        writeln!(stdin, "{}", request)
+            .and_then(|_| stdin.flush())
+            .map_err(|e| format!("Failed to send task to agent worker: {}", e))?;
+        Ok(())
+    }
+
     fn is_process_alive(&self) -> Result<bool, String> {
         let mut guard = self.child.lock().unwrap();
         let Some(child) = guard.as_mut() else {
@@ -576,6 +640,38 @@ pub fn build_mind_map_worker_request(
     })
 }
 
+pub fn build_assistant_worker_request(
+    task_id: &str,
+    provider_config: &RuntimeProviderConfig,
+    user_message: String,
+    conversation: Vec<AssistantConversationMessage>,
+    current_material: Option<MaterialSummary>,
+    available_materials: Vec<MaterialSummary>,
+    current_article_id: Option<String>,
+    display_language: String,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": task_id,
+        "type": "request",
+        "method": "agent.run",
+        "params": {
+            "task_id": task_id,
+            "task_type": "assistant.agent_turn",
+            "provider_config": provider_config,
+            "input": {
+                "user_message": user_message,
+                "conversation": conversation,
+                "ui_context": {
+                    "current_article_id": current_article_id,
+                    "display_language": display_language,
+                },
+                "current_material": current_material,
+                "available_materials": available_materials,
+            }
+        }
+    })
+}
+
 pub fn parse_worker_event_line(line: &str) -> Result<WorkerEvent, String> {
     let envelope: WorkerEventEnvelope =
         serde_json::from_str(line).map_err(|e| format!("Failed to parse worker event: {}", e))?;
@@ -666,33 +762,37 @@ pub fn apply_worker_event_in_dir(
         WorkerEvent::TaskLog { .. } => Ok(None),
         WorkerEvent::TaskResult { payload } => {
             let mut task = load_agent_task_in_dir(data_dir, &payload.task_id)?;
-            let artifact = save_mind_map_artifact_in_dir(
-                data_dir,
-                &task.id,
-                &task.article_id,
-                payload.content,
-            )?;
-            update_article_active_mind_map_artifact_in_dir(
-                data_dir,
-                &task.article_id,
-                Some(artifact.id.clone()),
-            )?;
             task.status = AgentTaskStatus::Succeeded;
             task.progress = 1.0;
             task.stage = Some("done".to_string());
-            task.message = Some("Mind map generated".to_string());
+            task.message = Some(match task.task_type {
+                crate::types::AgentTaskType::AssistantAgentTurn => "Agent turn completed".to_string(),
+                _ => "Mind map generated".to_string(),
+            });
             task.error = None;
             task.updated_at = Utc::now().to_rfc3339();
             task.finished_at = Some(task.updated_at.clone());
             task.worker_session_id = runtime_state.worker_session_id.clone();
-            if !task.artifact_ids.iter().any(|id| id == &artifact.id) {
-                task.artifact_ids.push(artifact.id.clone());
-            }
             if task.started_at.is_none() {
                 task.started_at = Some(task.updated_at.clone());
             }
+            let artifact = if payload.artifact_type == "article_answer" {
+                None
+            } else {
+                let artifact =
+                    save_mind_map_artifact_in_dir(data_dir, &task.id, &task.article_id, payload.content)?;
+                update_article_active_mind_map_artifact_in_dir(
+                    data_dir,
+                    &task.article_id,
+                    Some(artifact.id.clone()),
+                )?;
+                if !task.artifact_ids.iter().any(|id| id == &artifact.id) {
+                    task.artifact_ids.push(artifact.id.clone());
+                }
+                Some(artifact)
+            };
             save_agent_task_in_dir(data_dir, &task)?;
-            Ok(Some(artifact))
+            Ok(artifact)
         }
         WorkerEvent::TaskError { payload } => {
             let mut task = load_agent_task_in_dir(data_dir, &payload.task_id)?;
@@ -711,6 +811,16 @@ pub fn apply_worker_event_in_dir(
             Ok(None)
         }
     }
+}
+
+fn extract_open_material_id(content: &Value) -> Option<String> {
+    content
+        .get("action")
+        .and_then(|value| value.as_object())
+        .filter(|action| action.get("kind").and_then(|value| value.as_str()) == Some("open_material"))
+        .and_then(|action| action.get("material_id"))
+        .and_then(|value| value.as_str())
+        .map(ToOwned::to_owned)
 }
 
 pub fn mark_running_tasks_interrupted_in_dir(
@@ -799,9 +909,44 @@ fn worker_project_dir() -> PathBuf {
         .join("agent-worker")
 }
 
+pub fn worker_bundle_is_fresh(cwd: &Path) -> Result<bool, String> {
+    let dist_dir = cwd.join("dist");
+    let src_dir = cwd.join("src");
+    let required_outputs = [
+        dist_dir.join("index.js"),
+        dist_dir.join("assistantTask.js"),
+        dist_dir.join("mindMapTask.js"),
+        dist_dir.join("protocol.js"),
+        dist_dir.join("runtime.js"),
+    ];
+
+    if required_outputs.iter().any(|path| !path.exists()) {
+        return Ok(false);
+    }
+
+    let newest_src = std::fs::read_dir(&src_dir)
+        .map_err(|e| format!("Failed to read agent worker src directory: {}", e))?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("ts"))
+        .filter_map(|path| std::fs::metadata(path).ok())
+        .filter_map(|metadata| metadata.modified().ok())
+        .max();
+
+    let oldest_dist = required_outputs
+        .iter()
+        .filter_map(|path| std::fs::metadata(path).ok())
+        .filter_map(|metadata| metadata.modified().ok())
+        .min();
+
+    match (newest_src, oldest_dist) {
+        (Some(src_modified), Some(dist_modified)) => Ok(src_modified <= dist_modified),
+        _ => Ok(false),
+    }
+}
+
 fn ensure_worker_bundle(cwd: &Path) -> Result<(), String> {
-    let entry = cwd.join("dist").join("index.js");
-    if entry.exists() {
+    if worker_bundle_is_fresh(cwd)? {
         return Ok(());
     }
 
@@ -926,14 +1071,41 @@ fn emit_worker_event(
         }
         WorkerEvent::TaskProgress { payload } => {
             if let Ok(task) = load_agent_task_in_dir(data_dir, &payload.task_id) {
-                let _ = app_handle.emit(&format!("mind-map-progress://{}", payload.task_id), &task);
+                let progress_event = match task.task_type {
+                    crate::types::AgentTaskType::AssistantAgentTurn => {
+                        format!("assistant-agent-progress://{}", payload.task_id)
+                    }
+                    _ => format!("mind-map-progress://{}", payload.task_id),
+                };
+                let _ = app_handle.emit(&progress_event, &task);
                 let _ = app_handle.emit("agent-task-updated", &task);
             }
         }
-        WorkerEvent::TaskLog { .. } => {}
+        WorkerEvent::TaskLog { payload } => {
+            let _ = app_handle.emit(&format!("agent-task-log://{}", payload.task_id), payload);
+        }
         WorkerEvent::TaskResult { payload } => {
             if let Ok(task) = load_agent_task_in_dir(data_dir, &payload.task_id) {
-                let _ = app_handle.emit(&format!("mind-map-finished://{}", payload.task_id), &task);
+                match task.task_type {
+                    crate::types::AgentTaskType::AssistantAgentTurn => {
+                        let _ = app_handle.emit(
+                            &format!("assistant-agent-result://{}", payload.task_id),
+                            &payload.content,
+                        );
+                        if let Some(material_id) = extract_open_material_id(&payload.content) {
+                            let _ = app_handle.emit(
+                                "agent://open-material",
+                                serde_json::json!({ "materialId": material_id }),
+                            );
+                        }
+                    }
+                    _ => {
+                        let _ = app_handle.emit(
+                            &format!("mind-map-finished://{}", payload.task_id),
+                            &task,
+                        );
+                    }
+                }
                 let _ = app_handle.emit("agent-task-updated", &task);
             }
             if let Some(saved_artifact) = artifact {
@@ -942,7 +1114,13 @@ fn emit_worker_event(
         }
         WorkerEvent::TaskError { payload } => {
             if let Ok(task) = load_agent_task_in_dir(data_dir, &payload.task_id) {
-                let _ = app_handle.emit(&format!("mind-map-error://{}", payload.task_id), &task);
+                let error_event = match task.task_type {
+                    crate::types::AgentTaskType::AssistantAgentTurn => {
+                        format!("assistant-agent-error://{}", payload.task_id)
+                    }
+                    _ => format!("mind-map-error://{}", payload.task_id),
+                };
+                let _ = app_handle.emit(&error_event, &task);
                 let _ = app_handle.emit("agent-task-updated", &task);
             }
         }

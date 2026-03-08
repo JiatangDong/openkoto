@@ -1,14 +1,18 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, thread::sleep, time::Duration};
 
 use openkoto_desktop_lib::{
     agent_worker::{
-        apply_worker_event_in_dir, build_mind_map_worker_request, build_status_snapshot,
-        mark_running_tasks_interrupted_in_dir, parse_worker_event_line, push_worker_log,
-        resolve_runtime_provider_config, worker_event_log_entry, WorkerHealth, WorkerLogEntry,
-        WorkerLogLevel, WorkerRuntimeState,
+        apply_worker_event_in_dir, build_assistant_worker_request, build_mind_map_worker_request,
+        build_status_snapshot, mark_running_tasks_interrupted_in_dir, parse_worker_event_line,
+        push_worker_log, resolve_runtime_provider_config, worker_bundle_is_fresh,
+        worker_event_log_entry, WorkerHealth, WorkerLogEntry, WorkerLogLevel,
+        WorkerRuntimeState,
     },
     storage::{load_agent_task_in_dir, load_artifact_in_dir, save_agent_task_in_dir},
-    types::{AgentTask, AgentTaskInput, AgentTaskStatus, AgentTaskType, Article, ModelConfig},
+    types::{
+        AgentTask, AgentTaskInput, AgentTaskStatus, AgentTaskType, Article,
+        AssistantConversationMessage, MaterialSummary, ModelConfig,
+    },
 };
 
 fn temp_data_dir(name: &str) -> PathBuf {
@@ -18,6 +22,17 @@ fn temp_data_dir(name: &str) -> PathBuf {
         uuid::Uuid::new_v4()
     ));
     fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn temp_worker_project_dir(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "openkoto-agent-worker-project-{}-{}",
+        name,
+        uuid::Uuid::new_v4()
+    ));
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::create_dir_all(dir.join("dist")).unwrap();
     dir
 }
 
@@ -43,6 +58,32 @@ fn sample_task(status: AgentTaskStatus) -> AgentTask {
             max_depth: 3,
             evidence_mode: "strict".to_string(),
             prefer_structure: "topic_tree".to_string(),
+        },
+        progress: 0.0,
+        stage: Some("queued".to_string()),
+        message: None,
+        error: None,
+        worker_session_id: None,
+        artifact_ids: Vec::new(),
+        created_at: "2026-03-07T00:00:00Z".to_string(),
+        updated_at: "2026-03-07T00:00:00Z".to_string(),
+        started_at: None,
+        finished_at: None,
+    }
+}
+
+fn sample_assistant_task(status: AgentTaskStatus) -> AgentTask {
+    AgentTask {
+        id: "task-assistant-1".to_string(),
+        task_type: AgentTaskType::AssistantAgentTurn,
+        status,
+        article_id: "article-1".to_string(),
+        input: AgentTaskInput {
+            article_id: "article-1".to_string(),
+            display_language: "zh-CN".to_string(),
+            max_depth: 0,
+            evidence_mode: "none".to_string(),
+            prefer_structure: "none".to_string(),
         },
         progress: 0.0,
         stage: Some("queued".to_string()),
@@ -121,6 +162,16 @@ fn sample_model_config(provider: &str, model: &str, base_url: Option<&str>) -> M
     }
 }
 
+fn sample_material_summary(id: &str, title: &str, material_type: &str) -> MaterialSummary {
+    MaterialSummary {
+        id: id.to_string(),
+        title: title.to_string(),
+        material_type: material_type.to_string(),
+        created_at: "2026-03-08T00:00:00Z".to_string(),
+        translated: false,
+    }
+}
+
 #[test]
 fn worker_request_uses_agent_run_and_provider_config() {
     let provider_config = resolve_runtime_provider_config(&sample_model_config(
@@ -154,6 +205,43 @@ fn worker_request_uses_agent_run_and_provider_config() {
     assert_eq!(
         request["params"]["provider_config"]["baseUrl"],
         "https://openrouter.ai/api/v1"
+    );
+}
+
+#[test]
+fn build_assistant_worker_request_serializes_conversation_and_ui_context() {
+    let provider_config = resolve_runtime_provider_config(&sample_model_config(
+        "openrouter",
+        "openai/gpt-4o-mini",
+        None,
+    ));
+
+    let request = build_assistant_worker_request(
+        "task-assistant-1",
+        &provider_config,
+        "打开最近的 PDF".to_string(),
+        vec![AssistantConversationMessage {
+            role: "user".to_string(),
+            content: "先帮我看一下当前素材".to_string(),
+        }],
+        Some(sample_material_summary("article-1", "Current PDF", "pdf")),
+        vec![sample_material_summary("article-2", "N1 PDF", "pdf")],
+        Some("article-1".to_string()),
+        "zh-CN".to_string(),
+    );
+
+    assert_eq!(request["params"]["task_type"], "assistant.agent_turn");
+    assert_eq!(
+        request["params"]["input"]["ui_context"]["current_article_id"],
+        "article-1"
+    );
+    assert_eq!(
+        request["params"]["input"]["conversation"][0]["content"],
+        "先帮我看一下当前素材"
+    );
+    assert_eq!(
+        request["params"]["input"]["available_materials"][0]["title"],
+        "N1 PDF"
     );
 }
 
@@ -285,6 +373,51 @@ fn result_events_persist_artifact_and_complete_task() {
     .unwrap();
     assert_eq!(artifact.article_id, "article-1");
     assert_eq!(artifact.content["status"], "applicable");
+}
+
+#[test]
+fn assistant_result_events_complete_task_without_persisting_artifacts() {
+    let data_dir = temp_data_dir("assistant-result");
+    let task = sample_assistant_task(AgentTaskStatus::Running);
+    save_article_fixture(&data_dir, &sample_article());
+    save_agent_task_in_dir(&data_dir, &task).unwrap();
+
+    let event = parse_worker_event_line(
+        &serde_json::json!({
+            "type": "event",
+            "event": "task.result",
+            "payload": {
+                "task_id": task.id,
+                "artifact_type": "article_answer",
+                "content": {
+                    "reply": "我已经打开了 N1 PDF",
+                    "action": {
+                        "kind": "open_material",
+                        "material_id": "article-2"
+                    }
+                },
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let artifact = apply_worker_event_in_dir(
+        &data_dir,
+        &mut WorkerRuntimeState {
+            worker_session_id: Some("worker-1".to_string()),
+            started_at: Some(chrono::Utc::now()),
+            last_heartbeat_at: None,
+        },
+        event,
+    )
+    .unwrap();
+
+    let stored_task = load_agent_task_in_dir(&data_dir, &task.id).unwrap();
+    assert!(matches!(stored_task.status, AgentTaskStatus::Succeeded));
+    assert!(stored_task.artifact_ids.is_empty());
+    assert_eq!(stored_task.message.as_deref(), Some("Agent turn completed"));
+    assert!(artifact.is_none());
 }
 
 #[test]
@@ -483,4 +616,33 @@ fn task_log_events_are_converted_into_log_entries() {
     let entry = worker_event_log_entry(&log_event).expect("expected log entry");
     assert!(matches!(entry.0, WorkerLogLevel::Warn));
     assert_eq!(entry.1, "provider: rate limit approaching");
+}
+
+#[test]
+fn worker_bundle_is_stale_when_required_output_is_missing() {
+    let project_dir = temp_worker_project_dir("missing-output");
+    for file in ["index", "assistantTask", "mindMapTask", "protocol", "runtime"] {
+        fs::write(project_dir.join("src").join(format!("{file}.ts")), "export {};\n").unwrap();
+    }
+    fs::write(project_dir.join("dist").join("index.js"), "export {};\n").unwrap();
+
+    assert!(!worker_bundle_is_fresh(&project_dir).unwrap());
+}
+
+#[test]
+fn worker_bundle_is_stale_when_source_is_newer_than_dist() {
+    let project_dir = temp_worker_project_dir("stale-output");
+    for file in ["index", "assistantTask", "mindMapTask", "protocol", "runtime"] {
+        fs::write(project_dir.join("src").join(format!("{file}.ts")), "export {};\n").unwrap();
+        fs::write(project_dir.join("dist").join(format!("{file}.js")), "export {};\n").unwrap();
+    }
+
+    sleep(Duration::from_millis(20));
+    fs::write(
+        project_dir.join("src").join("assistantTask.ts"),
+        "export const newer = true;\n",
+    )
+    .unwrap();
+
+    assert!(!worker_bundle_is_fresh(&project_dir).unwrap());
 }

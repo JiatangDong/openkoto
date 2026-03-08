@@ -40,9 +40,10 @@ use crate::storage::{
 use crate::types::{
     AgentTask, AgentTaskInput, AgentTaskStatus, AgentTaskType, AnalysisRequest, AnalysisResponse,
     AnalysisType, Article, ArticleEvidenceItem, ArticleEvidenceResult, ArticleOverview,
-    ArticleSearchHit, ArticleSearchResult, ArticleSegment, ArticleTextWindow, Artifact,
-    ArtifactType, Bookmark, ChatRequest, ChatResponse, FavoriteGrammar, FavoriteVocabulary,
-    ModelConfig, TimeRange, TranslationRequest, TranslationResponse, WordPack,
+    ArticleSearchHit, ArticleSearchResult, ArticleSegment, ArticleTextWindow,
+    AssistantConversationMessage, Artifact, ArtifactType, Bookmark, ChatRequest, ChatResponse,
+    FavoriteGrammar, FavoriteVocabulary, ModelConfig, TimeRange,
+    TranslationRequest, TranslationResponse, WordPack,
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -53,6 +54,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 pub type AppState<'a> = State<'a, AIServiceCache>;
+
+pub use crate::types::MaterialSummary;
 
 // Helper function to create segments from content
 // 按句子分隔内容（使用.或。作为分隔符），并标记是否需要换行
@@ -209,6 +212,53 @@ pub fn build_article_overview(article: &Article) -> ArticleOverview {
         language_hint: None,
         book_type: article.book_type.clone(),
     }
+}
+
+pub fn material_summary_from_article(article: &Article) -> MaterialSummary {
+    let material_type = article
+        .book_type
+        .clone()
+        .or_else(|| match article.source_type.as_deref() {
+            Some("youtube") | Some("local_video") => Some("video".to_string()),
+            Some(source_type) => Some(source_type.to_string()),
+            None => None,
+        })
+        .unwrap_or_else(|| "article".to_string());
+
+    MaterialSummary {
+        id: article.id.clone(),
+        title: article.title.clone(),
+        material_type,
+        created_at: article.created_at.clone(),
+        translated: article.translated,
+    }
+}
+
+pub fn filter_material_summaries(
+    items: &[MaterialSummary],
+    keyword: Option<&str>,
+    material_type: Option<&str>,
+    limit: usize,
+) -> Vec<MaterialSummary> {
+    let normalized_keyword = keyword.map(|value| value.trim().to_lowercase()).filter(|value| !value.is_empty());
+    let normalized_type = material_type.map(|value| value.trim().to_lowercase()).filter(|value| !value.is_empty());
+
+    items.iter()
+        .filter(|item| {
+            normalized_keyword
+                .as_ref()
+                .map(|keyword| item.title.to_lowercase().contains(keyword))
+                .unwrap_or(true)
+        })
+        .filter(|item| {
+            normalized_type
+                .as_ref()
+                .map(|material_type| item.material_type.to_lowercase() == *material_type)
+                .unwrap_or(true)
+        })
+        .take(limit)
+        .cloned()
+        .collect()
 }
 
 pub fn read_article_window(
@@ -495,6 +545,74 @@ pub async fn create_mind_map_task_cmd(
         save_agent_task(&app_handle, &failed_task)?;
         return Err(error);
     }
+    load_agent_task(&app_handle, &task.id)
+}
+
+#[tauri::command]
+pub async fn run_agent_turn_cmd(
+    app_handle: AppHandle,
+    worker_manager: State<'_, AgentWorkerManager>,
+    task_id: String,
+    article_id: String,
+    user_message: String,
+    conversation: Vec<AssistantConversationMessage>,
+    display_language: Option<String>,
+) -> Result<AgentTask, String> {
+    let article = get_article(app_handle.clone(), article_id.clone()).await?;
+    let articles = list_articles_cmd(app_handle.clone()).await?;
+    let active_model = require_active_agent_model_config(load_config(&app_handle)?)?;
+    let provider_config = resolve_runtime_provider_config(&active_model);
+    let now = chrono::Utc::now().to_rfc3339();
+    let task = AgentTask {
+        id: task_id,
+        task_type: AgentTaskType::AssistantAgentTurn,
+        status: AgentTaskStatus::Queued,
+        article_id: article_id.clone(),
+        input: AgentTaskInput {
+            article_id: article_id.clone(),
+            display_language: display_language.unwrap_or_else(|| "zh-CN".to_string()),
+            max_depth: 0,
+            evidence_mode: "none".to_string(),
+            prefer_structure: "none".to_string(),
+        },
+        progress: 0.0,
+        stage: Some("queued".to_string()),
+        message: None,
+        error: None,
+        worker_session_id: None,
+        artifact_ids: Vec::new(),
+        created_at: now.clone(),
+        updated_at: now,
+        started_at: None,
+        finished_at: None,
+    };
+    save_agent_task(&app_handle, &task)?;
+
+    let current_material = material_summary_from_article(&article);
+    let available_materials = articles
+        .iter()
+        .map(material_summary_from_article)
+        .collect::<Vec<_>>();
+
+    if let Err(error) = worker_manager.submit_assistant_turn(
+        &app_handle,
+        &task,
+        user_message,
+        conversation,
+        current_material,
+        available_materials,
+        &provider_config,
+    ) {
+        let mut failed_task = load_agent_task(&app_handle, &task.id)?;
+        failed_task.status = AgentTaskStatus::Failed;
+        failed_task.error = Some(error.clone());
+        failed_task.stage = Some("failed_to_start".to_string());
+        failed_task.updated_at = chrono::Utc::now().to_rfc3339();
+        failed_task.finished_at = Some(failed_task.updated_at.clone());
+        save_agent_task(&app_handle, &failed_task)?;
+        return Err(error);
+    }
+
     load_agent_task(&app_handle, &task.id)
 }
 

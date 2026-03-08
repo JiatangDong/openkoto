@@ -16,7 +16,12 @@ export interface Article {
     segments?: ArticleSegment[];
 }
 
-export type AgentTaskType = "mind_map_generate" | "ppt_outline" | "ppt_slides" | "article_ask";
+export type AgentTaskType =
+    | "mind_map_generate"
+    | "assistant_agent_turn"
+    | "ppt_outline"
+    | "ppt_slides"
+    | "article_ask";
 export type AgentTaskStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
 
 export interface AgentTaskInput {
