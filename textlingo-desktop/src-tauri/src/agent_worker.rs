@@ -1,3 +1,4 @@
+use crate::moonshot::moonshot_base_url;
 use crate::commands::save_mind_map_artifact_in_dir;
 use crate::storage::{
     list_agent_tasks_in_dir, load_agent_task_in_dir, save_agent_task_in_dir,
@@ -549,8 +550,12 @@ fn default_base_url(provider: &str) -> Option<&'static str> {
     match provider {
         "openai" => Some(OPENAI_BASE_URL),
         "openrouter" => Some(OPENROUTER_BASE_URL),
+        "deepseek" => Some("https://api.deepseek.com/v1"),
+        "siliconflow" => Some("https://api.siliconflow.cn/v1"),
+        "302ai" => Some("https://api.302.ai/v1"),
         "ollama" => Some(OLLAMA_BASE_URL),
         "lmstudio" => Some(LMSTUDIO_BASE_URL),
+        _ if moonshot_base_url(provider).is_some() => moonshot_base_url(provider),
         _ => None,
     }
 }
@@ -585,22 +590,27 @@ pub fn resolve_runtime_provider_config(config: &ModelConfig) -> RuntimeProviderC
         "openai",
         "openai-compatible",
         "openrouter",
+        "deepseek",
+        "siliconflow",
+        "302ai",
         "ollama",
         "lmstudio",
     ]
     .contains(&provider.as_str())
-        && base_url.is_some()
+        || moonshot_base_url(&provider).is_some()
     {
-        return RuntimeProviderConfig::OpenAiCompatible {
-            provider,
-            model: config.model.clone(),
-            api_key: if config.api_key.trim().is_empty() {
-                None
-            } else {
-                Some(config.api_key.clone())
-            },
-            base_url: base_url.expect("base_url checked"),
-        };
+        if base_url.is_some() {
+            return RuntimeProviderConfig::OpenAiCompatible {
+                provider,
+                model: config.model.clone(),
+                api_key: if config.api_key.trim().is_empty() {
+                    None
+                } else {
+                    Some(config.api_key.clone())
+                },
+                base_url: base_url.expect("base_url checked"),
+            };
+        }
     }
 
     RuntimeProviderConfig::Unsupported {

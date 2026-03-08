@@ -36,19 +36,44 @@ export type ResolvedRuntimeProvider =
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
+const DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
+const SILICONFLOW_BASE_URL = "https://api.siliconflow.cn/v1";
+const PROVIDER_302AI_BASE_URL = "https://api.302.ai/v1";
 const OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1";
 const LMSTUDIO_BASE_URL = "http://127.0.0.1:1234/v1";
+const LEGACY_KIMI_PROVIDER = "moonshot";
+const KIMI_CHINA_PROVIDER = "moonshot-cn";
+const KIMI_GLOBAL_PROVIDER = "moonshot-global";
+
+function isKimiProvider(provider: string) {
+  return (
+    provider === LEGACY_KIMI_PROVIDER ||
+    provider === KIMI_CHINA_PROVIDER ||
+    provider === KIMI_GLOBAL_PROVIDER
+  );
+}
 
 function resolveDefaultBaseUrl(provider: string) {
   switch (provider) {
     case "openai":
       return OPENAI_BASE_URL;
+    case "deepseek":
+      return DEEPSEEK_BASE_URL;
+    case "siliconflow":
+      return SILICONFLOW_BASE_URL;
+    case "302ai":
+      return PROVIDER_302AI_BASE_URL;
     case "openrouter":
       return OPENROUTER_BASE_URL;
     case "ollama":
       return OLLAMA_BASE_URL;
     case "lmstudio":
       return LMSTUDIO_BASE_URL;
+    case LEGACY_KIMI_PROVIDER:
+    case KIMI_CHINA_PROVIDER:
+      return "https://api.moonshot.cn/v1";
+    case KIMI_GLOBAL_PROVIDER:
+      return "https://api.moonshot.ai/v1";
     default:
       return undefined;
   }
@@ -77,7 +102,17 @@ export function resolveRuntimeProvider(config: RuntimeModelConfig): ResolvedRunt
   }
 
   if (
-    ["openai", "openai-compatible", "openrouter", "ollama", "lmstudio"].includes(provider) &&
+    ([
+      "openai",
+      "openai-compatible",
+      "openrouter",
+      "deepseek",
+      "siliconflow",
+      "302ai",
+      "ollama",
+      "lmstudio",
+    ].includes(provider) ||
+      isKimiProvider(provider)) &&
     baseUrl
   ) {
     return {

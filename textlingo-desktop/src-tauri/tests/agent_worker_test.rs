@@ -266,6 +266,75 @@ fn resolve_runtime_provider_config_maps_google_and_openai_compatible_providers()
 }
 
 #[test]
+fn resolve_runtime_provider_config_maps_kimi_to_openai_compatible() {
+    let kimi_cn = resolve_runtime_provider_config(&sample_model_config(
+        "moonshot-cn",
+        "kimi-k2-0711-preview",
+        None,
+    ));
+    let kimi_legacy = resolve_runtime_provider_config(&sample_model_config(
+        "moonshot",
+        "kimi-k2-0711-preview",
+        None,
+    ));
+
+    assert_eq!(
+        serde_json::to_value(&kimi_cn).unwrap()["kind"],
+        "openai_compatible"
+    );
+    assert_eq!(
+        serde_json::to_value(&kimi_cn).unwrap()["baseUrl"],
+        "https://api.moonshot.cn/v1"
+    );
+    assert_eq!(
+        serde_json::to_value(&kimi_legacy).unwrap()["kind"],
+        "openai_compatible"
+    );
+    assert_eq!(
+        serde_json::to_value(&kimi_legacy).unwrap()["baseUrl"],
+        "https://api.moonshot.cn/v1"
+    );
+}
+
+#[test]
+fn resolve_runtime_provider_config_maps_other_openai_compatible_providers() {
+    let deepseek =
+        resolve_runtime_provider_config(&sample_model_config("deepseek", "deepseek-chat", None));
+    let siliconflow = resolve_runtime_provider_config(&sample_model_config(
+        "siliconflow",
+        "deepseek-ai/DeepSeek-V3",
+        None,
+    ));
+    let provider_302 =
+        resolve_runtime_provider_config(&sample_model_config("302ai", "gpt-4o", None));
+
+    assert_eq!(
+        serde_json::to_value(&deepseek).unwrap()["kind"],
+        "openai_compatible"
+    );
+    assert_eq!(
+        serde_json::to_value(&deepseek).unwrap()["baseUrl"],
+        "https://api.deepseek.com/v1"
+    );
+    assert_eq!(
+        serde_json::to_value(&siliconflow).unwrap()["kind"],
+        "openai_compatible"
+    );
+    assert_eq!(
+        serde_json::to_value(&siliconflow).unwrap()["baseUrl"],
+        "https://api.siliconflow.cn/v1"
+    );
+    assert_eq!(
+        serde_json::to_value(&provider_302).unwrap()["kind"],
+        "openai_compatible"
+    );
+    assert_eq!(
+        serde_json::to_value(&provider_302).unwrap()["baseUrl"],
+        "https://api.302.ai/v1"
+    );
+}
+
+#[test]
 fn worker_health_turns_unhealthy_after_timeout() {
     let now = chrono::Utc::now();
     let stale = WorkerRuntimeState {

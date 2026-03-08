@@ -161,6 +161,59 @@ describe("AgentPanel", () => {
     expect(screen.getByText("calling list_materials()")).toBeInTheDocument();
   });
 
+  it("renders markdown only in assistant reply bubbles", async () => {
+    Object.defineProperty(globalThis, "crypto", {
+      value: {
+        randomUUID: () => "task-1",
+      },
+      configurable: true,
+    });
+
+    invokeMock.mockResolvedValue({
+      id: "task-1",
+      task_type: "assistant_agent_turn",
+      status: "queued",
+      article_id: "article-1",
+      input: {
+        article_id: "article-1",
+        display_language: "zh-CN",
+        max_depth: 0,
+        evidence_mode: "none",
+        prefer_structure: "none",
+      },
+      progress: 0,
+      artifact_ids: [],
+      created_at: "2026-03-08T00:00:00Z",
+      updated_at: "2026-03-08T00:00:00Z",
+    });
+
+    render(
+      <AgentPanel
+        articleId="article-1"
+        articleTitle="Sample"
+        targetLanguage="zh-CN"
+      />,
+    );
+
+    await userEvent.type(screen.getByPlaceholderText("让 AI 帮你操作软件"), "请回复 **重点**");
+    await userEvent.click(screen.getByRole("button", { name: "发送 Agent 消息" }));
+
+    listenerMap.get("assistant-agent-result://task-1")?.({
+      payload: {
+        reply: "这是 **重点**\n\n- 第一项",
+        action: null,
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("重点", { selector: "strong" })).toBeInTheDocument();
+    });
+    expect(screen.getByRole("list")).toBeInTheDocument();
+
+    const userBubble = screen.getByText("请回复 **重点**").closest("div");
+    expect(userBubble?.querySelector("strong")).toBeNull();
+  });
+
   it("subscribes to agent events before invoking the command", async () => {
     Object.defineProperty(globalThis, "crypto", {
       value: {
