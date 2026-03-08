@@ -2,6 +2,7 @@ use crate::agent_worker::{
     resolve_runtime_provider_config, AgentWorkerManager, AgentWorkerStatusSnapshot,
 };
 use crate::ai_service::{get_ai_service, get_or_create_ai_service, AIServiceCache};
+use crate::moonshot::is_moonshot_provider;
 use crate::storage::{
     delete_article,
     delete_bookmark,
@@ -2507,7 +2508,7 @@ pub async fn extract_subtitles_cmd(
         || model.starts_with("google/gemini")
         || provider == "google"
         || provider == "google-ai-studio"
-        || (provider == "moonshot" && model.contains("kimi"))
+        || (is_moonshot_provider(provider) && model.contains("kimi"))
         || model.contains("kimi");
 
     if !is_supported {

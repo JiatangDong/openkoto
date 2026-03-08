@@ -2,6 +2,7 @@
 pub mod agent_worker;
 mod ai_service;
 pub mod commands;
+pub mod moonshot;
 mod plugin_manager;
 pub mod storage;
 mod subtitle_extraction;

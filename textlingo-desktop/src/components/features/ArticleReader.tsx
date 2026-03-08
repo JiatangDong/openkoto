@@ -24,6 +24,7 @@ import {
   ChevronDown
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { isKimiProvider } from "../../lib/kimiProvider";
 import ReactMarkdown from "react-markdown";
 import { AnalysisType, AppConfig } from "../../lib/tauri";
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
@@ -305,7 +306,7 @@ export function ArticleReader({
         || model.startsWith("google/gemini")
         || provider === "google"
         || provider === "google-ai-studio"
-        || (provider === "moonshot" && model.includes("kimi"))
+        || (isKimiProvider(provider) && model.includes("kimi"))
         || model.includes("kimi");
 
       if (!isSupported) {

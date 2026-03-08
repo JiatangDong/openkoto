@@ -255,6 +255,8 @@
         "gpt-4o-mini": "GPT-4o Mini",
         "gpt-4-turbo": "GPT-4 Turbo",
         "gpt-3.5-turbo": "GPT-3.5 Turbo"
+      "moonshot-cn": "Moonshot AI (Kimi China)",
+      "moonshot-global": "Moonshot AI (Kimi Global)",
       },
       "openrouter": {
         "openai/gpt-4o": "GPT-4o",

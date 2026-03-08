@@ -9,6 +9,14 @@ import { Select } from "../ui/select";
 import { Settings, Plus, Trash2, Edit2, Check, RefreshCw, Loader2, HelpCircle } from "lucide-react";
 import { useTheme } from "../theme-provider";
 import { PluginSettings } from "./PluginSettings";
+import {
+  getKimiModelsUrl,
+  isKimiProvider,
+  KIMI_CHINA_PROVIDER,
+  KIMI_GLOBAL_PROVIDER,
+  LEGACY_KIMI_PROVIDER,
+  normalizeKimiProvider,
+} from "../../lib/kimiProvider";
 
 interface ModelConfig {
   id: string;
@@ -42,7 +50,7 @@ interface OpenRouterModel {
   };
 }
 
-const SUPPORTED_PROVIDERS = ["openai", "anthropic", "openrouter", "deepseek", "siliconflow", "302ai", "google", "google-ai-studio", "moonshot", "openai-compatible", "ollama", "lmstudio"] as const;
+const SUPPORTED_PROVIDERS = ["openai", "anthropic", "openrouter", "deepseek", "siliconflow", "302ai", "google", "google-ai-studio", KIMI_CHINA_PROVIDER, KIMI_GLOBAL_PROVIDER, "openai-compatible", "ollama", "lmstudio"] as const;
 
 // Default base URLs for local providers
 const DEFAULT_BASE_URLS: Record<string, string> = {
@@ -94,7 +102,19 @@ const DEFAULT_MODELS = {
     { value: "gemini-1.5-pro", labelKey: "settings.models.google-ai-studio.gemini-1.5-pro" },
     { value: "gemini-1.5-flash", labelKey: "settings.models.google-ai-studio.gemini-1.5-flash" },
   ],
-  moonshot: [
+  [LEGACY_KIMI_PROVIDER]: [
+    { value: "kimi-k2.5", labelKey: "settings.models.moonshot.kimi-k2.5" },
+    { value: "moonshot-v1-128k", labelKey: "settings.models.moonshot.moonshot-v1-128k" },
+    { value: "moonshot-v1-32k", labelKey: "settings.models.moonshot.moonshot-v1-32k" },
+    { value: "moonshot-v1-8k", labelKey: "settings.models.moonshot.moonshot-v1-8k" },
+  ],
+  [KIMI_CHINA_PROVIDER]: [
+    { value: "kimi-k2.5", labelKey: "settings.models.moonshot.kimi-k2.5" },
+    { value: "moonshot-v1-128k", labelKey: "settings.models.moonshot.moonshot-v1-128k" },
+    { value: "moonshot-v1-32k", labelKey: "settings.models.moonshot.moonshot-v1-32k" },
+    { value: "moonshot-v1-8k", labelKey: "settings.models.moonshot.moonshot-v1-8k" },
+  ],
+  [KIMI_GLOBAL_PROVIDER]: [
     { value: "kimi-k2.5", labelKey: "settings.models.moonshot.kimi-k2.5" },
     { value: "moonshot-v1-128k", labelKey: "settings.models.moonshot.moonshot-v1-128k" },
     { value: "moonshot-v1-32k", labelKey: "settings.models.moonshot.moonshot-v1-32k" },
@@ -145,7 +165,9 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
     "302ai": DEFAULT_MODELS["302ai"].map(m => ({ value: m.value, label: t(m.labelKey) })),
     google: DEFAULT_MODELS.google.map(m => ({ value: m.value, label: t(m.labelKey) })),
     "google-ai-studio": DEFAULT_MODELS["google-ai-studio"].map(m => ({ value: m.value, label: t(m.labelKey) })),
-    moonshot: DEFAULT_MODELS.moonshot.map(m => ({ value: m.value, label: t(m.labelKey) })),
+    [LEGACY_KIMI_PROVIDER]: DEFAULT_MODELS[LEGACY_KIMI_PROVIDER].map(m => ({ value: m.value, label: t(m.labelKey) })),
+    [KIMI_CHINA_PROVIDER]: DEFAULT_MODELS[KIMI_CHINA_PROVIDER].map(m => ({ value: m.value, label: t(m.labelKey) })),
+    [KIMI_GLOBAL_PROVIDER]: DEFAULT_MODELS[KIMI_GLOBAL_PROVIDER].map(m => ({ value: m.value, label: t(m.labelKey) })),
     ollama: DEFAULT_MODELS.ollama.map(m => ({ value: m.value, label: t(m.labelKey) })),
   });
   const [modelFilter, setModelFilter] = useState("");
@@ -206,10 +228,16 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
   };
 
   const startEditConfig = (modelConfig: ModelConfig) => {
-    setEditingConfig(modelConfig);
+    const normalizedProvider = normalizeKimiProvider(modelConfig.api_provider) || modelConfig.api_provider;
+    const normalizedConfig = {
+      ...modelConfig,
+      api_provider: normalizedProvider,
+    };
+
+    setEditingConfig(normalizedConfig);
     setIsEditing(true);
     // Check if current model is a custom model
-    const providerModels = dynamicModels[modelConfig.api_provider];
+    const providerModels = dynamicModels[normalizedProvider];
     const isCustom = !providerModels?.some(m => m.value === modelConfig.model);
     setUseCustomModel(isCustom);
     if (isCustom) {
@@ -330,7 +358,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
 
     const provider = editingConfig.api_provider;
     // Ensure provider is defined and valid
-    if (!provider || !["openrouter", "openai", "openai-compatible", "deepseek", "siliconflow", "302ai", "google", "moonshot", "ollama"].includes(provider)) {
+    if (!provider || !["openrouter", "openai", "openai-compatible", "deepseek", "siliconflow", "302ai", "google", "google-ai-studio", KIMI_CHINA_PROVIDER, KIMI_GLOBAL_PROVIDER, LEGACY_KIMI_PROVIDER, "ollama"].includes(provider)) {
       if (!isAuto) setSyncError(t("settings.syncErrors.providerNotSupported") || "Provider not supported for sync");
       return;
     }
@@ -388,8 +416,8 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
         headers = {
           "Content-Type": "application/json",
         };
-      } else if (provider === "moonshot") {
-        url = "https://api.moonshot.cn/v1/models";
+      } else if (isKimiProvider(provider)) {
+        url = getKimiModelsUrl(provider) || "";
         headers = {
           "Authorization": `Bearer ${editingConfig.api_key}`,
           "Content-Type": "application/json",
@@ -469,7 +497,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
             }))
             .filter((m: { value: string }) => m.value.includes("gemini"));
         }
-      } else if (provider === "moonshot") {
+      } else if (isKimiProvider(provider)) {
         if (data.data && Array.isArray(data.data)) {
           syncedModels = data.data
             .map((m: any) => ({
@@ -803,7 +831,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
                     <label className="block text-sm font-medium text-foreground">
                       {t("settings.model")}
                     </label>
-                    {["openrouter", "openai", "deepseek", "google", "google-ai-studio", "302ai", "siliconflow", "moonshot", "ollama"].includes(editingConfig.api_provider || "") && (
+                    {(["openrouter", "openai", "deepseek", "google", "google-ai-studio", "302ai", "siliconflow", "ollama"].includes(editingConfig.api_provider || "") || isKimiProvider(editingConfig.api_provider || "")) && (
                       <Button
                         type="button"
                         variant="ghost"

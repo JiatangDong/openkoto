@@ -9,6 +9,7 @@ import { AppConfig, ModelConfig } from "../../lib/tauri";
 import { invoke } from "@tauri-apps/api/core";
 import { Palette, Sparkles, CheckCircle2, Cpu, Zap, Star, HelpCircle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../ui/tooltip.tsx";
+import { KIMI_CHINA_PROVIDER } from "../../lib/kimiProvider";
 
 interface OnboardingDialogProps {
     isOpen: boolean;
@@ -25,8 +26,8 @@ export function OnboardingDialog({ isOpen, onFinish }: OnboardingDialogProps) {
     const [isFinishing, setIsFinishing] = useState(false);
     // 用户区域选择：global = Google AI Studio, china = 302.ai / Kimi
     const [userRegion, setUserRegion] = useState<"global" | "china">("global");
-    // 中国用户的服务商选择：302ai 或 moonshot (Kimi)
-    const [chinaProvider, setChinaProvider] = useState<"302ai" | "moonshot">("302ai");
+    // 中国用户的服务商选择：302ai 或 Kimi 中国版
+    const [chinaProvider, setChinaProvider] = useState<"302ai" | typeof KIMI_CHINA_PROVIDER>("302ai");
 
     const INTERFACE_LANGUAGES = [
         { value: "en", label: "English" },
@@ -340,15 +341,15 @@ export function OnboardingDialog({ isOpen, onFinish }: OnboardingDialogProps) {
                                             </button>
                                             <button
                                                 onClick={() => {
-                                                    setChinaProvider("moonshot");
+                                                    setChinaProvider(KIMI_CHINA_PROVIDER);
                                                     setSelectedModel("kimi-k2.5");
                                                 }}
-                                                className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-all ${chinaProvider === "moonshot"
+                                                className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-all ${chinaProvider === KIMI_CHINA_PROVIDER
                                                     ? "border-primary bg-primary/5 shadow-md ring-2 ring-primary/20"
                                                     : "border-border hover:border-primary/50"
                                                     }`}
                                             >
-                                                <div className={`p-1.5 rounded-lg ${chinaProvider === "moonshot" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                                                <div className={`p-1.5 rounded-lg ${chinaProvider === KIMI_CHINA_PROVIDER ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
                                                     <Sparkles size={16} />
                                                 </div>
                                                 <div className="text-left">
@@ -398,7 +399,7 @@ export function OnboardingDialog({ isOpen, onFinish }: OnboardingDialogProps) {
                                         )}
 
                                         {/* Kimi 模型选择 */}
-                                        {chinaProvider === "moonshot" && (
+                                        {chinaProvider === KIMI_CHINA_PROVIDER && (
                                             <div className="space-y-2">
                                                 <button
                                                     onClick={() => setSelectedModel("kimi-k2.5")}

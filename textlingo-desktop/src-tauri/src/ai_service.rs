@@ -2,6 +2,9 @@ use crate::types::{
     AnalysisRequest, AnalysisResponse, AnalysisType, ChatRequest, ChatResponse, TranslationRequest,
     TranslationResponse,
 };
+use crate::moonshot::{
+    is_moonshot_provider, moonshot_chat_completions_url, moonshot_files_url,
+};
 use futures::StreamExt;
 use regex::Regex;
 use reqwest::Client;
@@ -78,7 +81,9 @@ impl AIService {
                 self.model.strip_prefix("models/").unwrap_or(&self.model)
             ),
             "anthropic" => ANTHROPIC_API_URL.to_string(),
-            "moonshot" => "https://api.moonshot.cn/v1/chat/completions".to_string(),
+            provider if is_moonshot_provider(provider) => {
+                moonshot_chat_completions_url(provider).unwrap_or_else(|| OPENAI_API_URL.to_string())
+            }
             "ollama" => OLLAMA_DEFAULT_URL.to_string(),
             "lmstudio" => LMSTUDIO_DEFAULT_URL.to_string(),
             "openai-compatible" => {
@@ -155,7 +160,7 @@ impl AIService {
         enable_thinking: bool,
     ) -> Result<String, String> {
         // Moonshot specific fix: "only 1 is allowed for this model"
-        let temp = if self.provider == "moonshot" {
+        let temp = if is_moonshot_provider(&self.provider) {
             1.0
         } else {
             temperature.unwrap_or(0.7)
@@ -168,7 +173,7 @@ impl AIService {
         });
 
         // Moonshot specific fix: Enable thinking if requested and model supports it (like k2.5)
-        if enable_thinking && self.provider == "moonshot" && self.model.contains("k2.5") {
+        if enable_thinking && is_moonshot_provider(&self.provider) && self.model.contains("k2.5") {
             if let Some(obj) = request_body.as_object_mut() {
                 obj.insert("thinking".to_string(), json!({"type": "enabled"}));
             }
@@ -460,7 +465,7 @@ impl AIService {
         if self.provider == "anthropic" {
             return self.chat_anthropic(request).await;
         }
-        if self.provider == "moonshot" {
+        if is_moonshot_provider(&self.provider) {
             // Moonshot requires specific message formatting for multimedia
             let messages = self.format_messages_for_provider(&request.messages);
             return Ok(ChatResponse {
@@ -520,7 +525,7 @@ impl AIService {
             .collect();
 
         // Moonshot specific fix
-        let temp = if self.provider == "moonshot" {
+        let temp = if is_moonshot_provider(&self.provider) {
             1.0
         } else {
             request.temperature.unwrap_or(0.7)
@@ -534,7 +539,7 @@ impl AIService {
         });
 
         // Moonshot specific fix: Enable thinking if likely a chat (stream is usually chat)
-        if self.provider == "moonshot" && self.model.contains("k2.5") {
+        if is_moonshot_provider(&self.provider) && self.model.contains("k2.5") {
             if let Some(obj) = request_body.as_object_mut() {
                 obj.insert("thinking".to_string(), json!({"type": "enabled"}));
             }
@@ -865,7 +870,7 @@ Ensure all explanations, meanings, and descriptive text are written in {0}."#,
         &self,
         file_path: &std::path::Path,
     ) -> Result<FileUploadResponse, String> {
-        if self.provider != "moonshot" {
+        if !is_moonshot_provider(&self.provider) {
             return Err("File upload currently only supported for Moonshot provider".to_string());
         }
 
@@ -904,11 +909,12 @@ Ensure all explanations, meanings, and descriptive text are written in {0}."#,
             .part("file", part)
             .text("purpose", "file-extract"); // Moonshot requires 'file-extract' for Kimi
 
-        let url = "https://api.moonshot.cn/v1/files";
+        let url = moonshot_files_url(&self.provider)
+            .ok_or_else(|| "File upload currently only supported for Moonshot provider".to_string())?;
 
         let response = self
             .client
-            .post(url)
+            .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .multipart(form)
             .send()

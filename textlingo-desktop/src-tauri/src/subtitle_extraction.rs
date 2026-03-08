@@ -8,6 +8,7 @@
 // 4. 解析转录结果为 ArticleSegment
 
 use crate::ai_service::AIService;
+use crate::moonshot::{is_moonshot_provider, moonshot_chat_completions_url};
 use crate::types::{
     ArticleSegment, ChatContent, ChatMessage, ChatRequest, ContentPart, TranscriptionResult,
     TranscriptionSegment, VideoUrl,
@@ -27,7 +28,6 @@ use uuid::Uuid;
 const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
 const OPENROUTER_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
 const API_302AI_URL: &str = "https://api.302.ai/v1/chat/completions";
-const MOONSHOT_API_URL: &str = "https://api.moonshot.cn/v1/chat/completions";
 const GOOGLE_GEMINI_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /// 从视频中提取字幕的主函数
@@ -73,12 +73,12 @@ pub async fn extract_subtitles(
     const CHUNK_THRESHOLD_SECONDS: f64 = 10.0 * 60.0;
 
     // Kimi K2.5 视频理解模式
-    if provider == "moonshot" && model.contains("k2.5") {
+    if is_moonshot_provider(provider) && model.contains("k2.5") {
         println!("[SubtitleExtraction] 检测到 Kimi K2.5 模型，启用视频理解模式");
         let _ = app.emit(&format!("subtitle-extraction-progress://{}", event_id), 
             serde_json::json!({ "phase": "processing", "message": "正在使用 Kimi 视频理解模式..." }));
 
-        return extract_subtitles_with_kimi(app, video_path, video_id, api_key, model, event_id)
+        return extract_subtitles_with_kimi(app, video_path, video_id, provider, api_key, model, event_id)
             .await;
     }
 
@@ -714,6 +714,7 @@ async fn extract_subtitles_with_kimi(
     app: AppHandle,
     video_path: &Path,
     video_id: &str,
+    provider: &str,
     api_key: &str,
     model: &str,
     event_id: &str,
@@ -784,7 +785,7 @@ async fn extract_subtitles_with_kimi(
 
     let ai_service = AIService::new(
         api_key.to_string(),
-        "moonshot".to_string(),
+        provider.to_string(),
         model.to_string(),
     );
 
@@ -1001,7 +1002,14 @@ IMPORTANT: Each segment = one sentence. Timestamps must be precise to the second
                     match provider {
                         "openrouter" => OPENROUTER_API_URL.to_string(),
                         "302ai" => API_302AI_URL.to_string(),
-                        "moonshot" => MOONSHOT_API_URL.to_string(),
+                        provider if is_moonshot_provider(provider) => {
+                            moonshot_chat_completions_url(provider).ok_or_else(|| {
+                                format!(
+                                    "Unsupported provider '{}' for subtitle transcription without base_url",
+                                    provider
+                                )
+                            })?
+                        }
                         "openai" => OPENAI_API_URL.to_string(),
                         "openai-compatible" => {
                             return Err("openai-compatible provider requires base_url in settings"
