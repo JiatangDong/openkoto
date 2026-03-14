@@ -3,10 +3,10 @@ import { Send } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import ReactMarkdown from "react-markdown";
 
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { MarkdownContent } from "../ui/MarkdownContent";
 import type { AgentTask, AgentWorkerStatusSnapshot } from "../../types";
 
 interface AgentPanelProps {
@@ -266,30 +266,7 @@ export function AgentPanel({
                 }
               >
                 {message.role === "assistant" ? (
-                  <ReactMarkdown
-                    components={{
-                      p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
-                      ul: ({ children }) => <ul className="mb-3 list-disc pl-5 last:mb-0">{children}</ul>,
-                      ol: ({ children }) => <ol className="mb-3 list-decimal pl-5 last:mb-0">{children}</ol>,
-                      li: ({ children }) => <li className="mb-1">{children}</li>,
-                      code: ({ className, children, ...props }) =>
-                        className ? (
-                          <code
-                            className="block overflow-x-auto rounded-md bg-muted/80 px-3 py-2 font-mono text-xs"
-                            {...props}
-                          >
-                            {children}
-                          </code>
-                        ) : (
-                          <code className="rounded bg-muted/80 px-1 py-0.5 font-mono text-[0.85em]" {...props}>
-                            {children}
-                          </code>
-                        ),
-                      pre: ({ children }) => <pre className="mb-3 overflow-x-auto last:mb-0">{children}</pre>,
-                    }}
-                  >
-                    {message.content}
-                  </ReactMarkdown>
+                  <MarkdownContent content={message.content} />
                 ) : (
                   message.content
                 )}

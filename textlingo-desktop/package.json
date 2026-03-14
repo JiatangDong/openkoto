@@ -1,7 +1,7 @@
 {
   "name": "openkoto-desktop",
   "private": true,
-  "version": "0.5.6",
+  "version": "0.5.7",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -43,6 +43,7 @@
     "react-markdown": "^10.1.0",
     "react-pdf": "^10.3.0",
     "react-reader": "^2.0.15",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {

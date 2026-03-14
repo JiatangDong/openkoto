@@ -110,16 +110,14 @@ jobs:
           releaseName: "OpenKoto Desktop ${{ github.ref_name }}"
           releaseBody: |
             ## Release Highlights
-            - Added a true editable mind map experience with local save support.
-            - Added `1/3`, `2/3`, and full-screen assistant panel layouts.
-            - Fixed the assistant layout overflow bug when switching into the mind map tab.
-            - Unified the right-side AI assistant shell across article and book readers.
-            - Added mind map support for TXT, PDF, and EPUB book reading.
+            - Added GFM table rendering support for AI chat replies and analysis outputs.
+            - Unified AI Markdown rendering so assistant responses now share the same table, list, and code formatting.
+            - Improved narrow-screen table behavior with touch-friendly horizontal scrolling and better column wrapping.
 
             ## Changed
-            - Article and book readers now reuse the same assistant sidebar shell.
-            - Mind map editing can now be saved back as a local artifact.
-            - Release builds are now published as official multi-platform GitHub releases.
+            - Agent replies, article chat replies, explanation notes, and analysis results now use the shared Markdown renderer.
+            - Desktop version is bumped to `${{ github.ref_name }}` for this release.
+            - Multi-platform GitHub release publishing remains tag-driven through this workflow.
           releaseDraft: false
           prerelease: false
           projectPath: "./textlingo-desktop"

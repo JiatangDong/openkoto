@@ -34,6 +34,7 @@ import { ArticleChatAssistant } from "./ArticleChatAssistant";
 import { ArticleExplanationPanel } from "./ArticleExplanationPanel";
 import { ArticleMindMapPanel } from "./ArticleMindMapPanel";
 import { AssistantSidebarShell, type AssistantPanelMode } from "./AssistantSidebarShell";
+import { MarkdownContent } from "../ui/MarkdownContent";
 import { VideoSubtitlePlayer, ViewMode } from "./VideoSubtitlePlayer";
 import {
   DropdownMenu,
@@ -1309,7 +1310,7 @@ export function ArticleReader({
                     </div>
                   ) : analysisResult ? (
                     <div className="prose dark:prose-invert max-w-none">
-                      <ReactMarkdown>{analysisResult}</ReactMarkdown>
+                      <MarkdownContent content={analysisResult} />
                     </div>
                   ) : (
                     <div className="h-full flex items-center justify-center text-muted-foreground">

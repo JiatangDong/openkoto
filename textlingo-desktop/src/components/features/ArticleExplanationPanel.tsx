@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { ArticleSegment, SegmentExplanation, VocabularyItem, GrammarPoint } from "../../types";
 import { Button } from "../ui/button";
 import { RefreshCw, BookOpen, MessageCircle, Languages, SpellCheck, Star, Check } from "lucide-react";
-import ReactMarkdown from "react-markdown";
+import { MarkdownContent } from "../ui/MarkdownContent";
 import { SelectPackDialog } from "./SelectPackDialog";
 
 interface ArticleExplanationPanelProps {
@@ -265,7 +265,7 @@ export const ArticleExplanationPanel: React.FC<ArticleExplanationPanelProps> = (
                         title={t("articleReader.notes") || "Notes"}
                     >
                         <div className="text-sm text-muted-foreground leading-relaxed">
-                            <ReactMarkdown>{explanation.explanation}</ReactMarkdown>
+                            <MarkdownContent content={explanation.explanation} />
                         </div>
                     </Section>
                 )}

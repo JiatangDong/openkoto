@@ -6,7 +6,6 @@ import {
     Loader2, Copy, Paperclip, File as FileIcon,
     Lightbulb, GraduationCap, Zap
 } from "lucide-react";
-import ReactMarkdown from 'react-markdown';
 import { useTranslation, Trans } from "react-i18next";
 import { cn } from "../../lib/utils";
 import {
@@ -14,6 +13,7 @@ import {
     NovelSession,
     QuickAction
 } from "../../lib/api";
+import { MarkdownContent } from "../ui/MarkdownContent";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -683,28 +683,10 @@ export function ArticleChatAssistant({
                                     {message.role === 'user' ? (
                                         <div className="whitespace-pre-wrap">{message.content}</div>
                                     ) : (
-                                        <div className="prose prose-sm dark:prose-invert max-w-none break-words [&>p]:mb-2 [&>p:last-child]:mb-0 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4">
-                                            <ReactMarkdown
-                                                components={{
-                                                    code({ node, className, children, ...props }: any) {
-                                                        const match = /language-(\w+)/.exec(className || '')
-                                                        return match ? (
-                                                            <div className="relative rounded bg-muted-foreground/20 p-2 my-2 font-mono text-xs overflow-x-auto">
-                                                                <code className={className} {...props}>
-                                                                    {children}
-                                                                </code>
-                                                            </div>
-                                                        ) : (
-                                                            <code className="bg-muted-foreground/20 rounded px-1 py-0.5 font-mono text-xs" {...props}>
-                                                                {children}
-                                                            </code>
-                                                        )
-                                                    }
-                                                }}
-                                            >
-                                                {message.content}
-                                            </ReactMarkdown>
-                                        </div>
+                                        <MarkdownContent
+                                            content={message.content}
+                                            className="prose prose-sm dark:prose-invert max-w-none"
+                                        />
                                     )}
                                     {message.isStreaming && (
                                         <span className="inline-block w-1 h-4 ml-1 bg-current animate-pulse align-middle" />
