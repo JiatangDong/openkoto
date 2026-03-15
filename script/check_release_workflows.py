@@ -5,9 +5,16 @@ import re
 import sys
 
 
-REQUIRED_SNIPPETS = (
+REQUIRED_CI_GATE_SNIPPETS = (
     'name: setup python',
     'name: build bundled PDF sidecar',
+    'name: verify bundled PDF sidecar',
+)
+
+REQUIRED_PUBLISH_SNIPPETS = (
+    'name: setup python',
+    'name: build bundled PDF sidecar',
+    'name: verify bundled PDF sidecar',
 )
 
 REQUIRED_MACOS_MATRIX_ROWS = (
@@ -36,7 +43,7 @@ def main() -> int:
             missing.append(f"{workflow_path}: missing `ci-gate` job")
             continue
         ci_gate_body = ci_gate_match.group("body")
-        for snippet in REQUIRED_SNIPPETS:
+        for snippet in REQUIRED_CI_GATE_SNIPPETS:
             if snippet not in ci_gate_body:
                 missing.append(f"{workflow_path}: ci-gate missing `{snippet}`")
 
@@ -49,6 +56,9 @@ def main() -> int:
             continue
 
         publish_tauri_body = publish_tauri_match.group("body")
+        for snippet in REQUIRED_PUBLISH_SNIPPETS:
+            if snippet not in publish_tauri_body:
+                missing.append(f"{workflow_path}: publish-tauri missing `{snippet}`")
         for row in REQUIRED_MACOS_MATRIX_ROWS:
             if row not in publish_tauri_body:
                 missing.append(f"{workflow_path}: publish-tauri missing macOS matrix row `{row}`")
@@ -63,7 +73,7 @@ def main() -> int:
         print("\n".join(missing))
         return 1
 
-    print("release workflows contain ci-gate python + pdf sidecar steps and correct macOS publish matrix")
+    print("release workflows contain pdf sidecar build/verify steps and correct macOS publish matrix")
     return 0
 
 

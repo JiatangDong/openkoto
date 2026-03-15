@@ -1,6 +1,6 @@
 [project]
 name = "openkoto-pdf-translator"
-version = "0.5.10"
+version = "0.5.11"
 description = "Bundled PDF translation sidecar for OpenKoto - preserves layout and supports bilingual output"
 authors = [
     { name = "Byaidu", email = "byaidux@gmail.com" },
