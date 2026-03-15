@@ -31,6 +31,11 @@ jobs:
           cache: npm
           cache-dependency-path: textlingo-desktop/package-lock.json
 
+      - name: setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
@@ -46,6 +51,20 @@ jobs:
         run: |
           chmod +x script/download_binaries.sh
           bash script/download_binaries.sh
+
+      - name: build bundled PDF sidecar
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -e ./textlingo-desktop/pdf-sidecar
+          cd textlingo-desktop/pdf-sidecar
+          python build.py
+          cd ../..
+          chmod +x script/sync_pdf_sidecar_binaries.sh
+          bash script/sync_pdf_sidecar_binaries.sh
+        shell: bash
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
       - name: Prepare frontend dist for Tauri context
         run: mkdir -p textlingo-desktop/dist
