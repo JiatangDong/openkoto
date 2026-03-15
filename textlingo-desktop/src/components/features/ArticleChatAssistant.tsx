@@ -13,6 +13,8 @@ import {
     NovelSession,
     QuickAction
 } from "../../lib/api";
+import type { AppConfig } from "../../lib/tauri";
+import { getDefaultChatFeature, getVisibleQuickActions, renderPromptTemplate } from "../../lib/promptFeatures";
 import { MarkdownContent } from "../ui/MarkdownContent";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -84,6 +86,7 @@ export function ArticleChatAssistant({
     const [isLoading, setIsLoading] = useState(false);
     const [isInitializing, setIsInitializing] = useState(true);
     const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
+    const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
     const [attachment, setAttachment] = useState<Attachment | null>(null);
     const [activeModel, setActiveModel] = useState<ModelConfig | null>(null);
     const [isFastTranslateEnabled, setIsFastTranslateEnabled] = useState(false);
@@ -99,6 +102,7 @@ export function ArticleChatAssistant({
         const init = async () => {
             setIsInitializing(true);
             await fetchActiveModel();
+            await fetchAppConfig();
             await initializeSession();
             setIsInitializing(false);
         };
@@ -118,32 +122,41 @@ export function ArticleChatAssistant({
                 },); // Auto-run translate
             }
 
-            // Define local quick actions if no session or just to be instant
-            const actions: QuickAction[] = [
-                {
-                    action: "translate",
-                    label: t("novelChat.quickTranslate", "Translate"),
-                    description: t("novelChat.quickTranslateDesc", "Translate to target language"),
-                    prompt_template: "Translate the following text to {target_language}:\n\n{text}"
-                },
-                {
-                    action: "explain",
-                    label: t("novelChat.quickExplain", "Explain"),
-                    description: t("novelChat.quickExplainDesc", "Explain the text"),
-                    prompt_template: "Explain the following text in {target_language}:\n\n{text}"
-                },
-                {
-                    action: "grammar",
-                    label: t("novelChat.quickGrammar", "Grammar"),
-                    description: t("novelChat.quickGrammarDesc", "Analyze grammar"),
-                    prompt_template: "Analyze the grammar of the following text in {target_language}:\n\n{text}"
-                }
-            ];
+            const configuredActions = getVisibleQuickActions(appConfig?.prompt_features ?? []).map((feature) => ({
+                action: feature.id,
+                label: feature.name,
+                description: feature.description,
+                prompt_template: feature.prompt_template,
+                icon: feature.icon,
+            }));
+
+            const actions: QuickAction[] = configuredActions.length > 0
+                ? configuredActions
+                : [
+                    {
+                        action: "selection.translate",
+                        label: t("novelChat.quickTranslate", "Translate"),
+                        description: t("novelChat.quickTranslateDesc", "Translate to target language"),
+                        prompt_template: "Translate the following text to {target_language}:\n\n{text}"
+                    },
+                    {
+                        action: "selection.explain",
+                        label: t("novelChat.quickExplain", "Explain"),
+                        description: t("novelChat.quickExplainDesc", "Explain the text"),
+                        prompt_template: "Explain the following text in {target_language}:\n\n{text}"
+                    },
+                    {
+                        action: "selection.grammar",
+                        label: t("novelChat.quickGrammar", "Grammar"),
+                        description: t("novelChat.quickGrammarDesc", "Analyze grammar"),
+                        prompt_template: "Analyze the grammar of the following text in {target_language}:\n\n{text}"
+                    }
+                ];
             setQuickActions(actions);
         } else {
             setQuickActions([]);
         }
-    }, [selectedText, t, isFastTranslateEnabled]);
+    }, [selectedText, t, isFastTranslateEnabled, appConfig]);
 
     // Auto-scroll to bottom
     useEffect(() => {
@@ -160,6 +173,15 @@ export function ArticleChatAssistant({
             setActiveModel(config);
         } catch (e) {
             console.error("Failed to fetch active model config:", e);
+        }
+    };
+
+    const fetchAppConfig = async () => {
+        try {
+            const config = await invoke<AppConfig | null>("get_config");
+            setAppConfig(config);
+        } catch (e) {
+            console.error("Failed to fetch app config:", e);
         }
     };
 
@@ -185,8 +207,10 @@ export function ArticleChatAssistant({
                 console.log("Backend not configured, using local mode");
             }
 
-            // Updated Welcome Message
-            const welcomeMessage = "Hello! I'm your reading assistant. I can help translate, explain text, analyze grammar, or discuss the article.";
+            const welcomeMessage = t(
+                "novelChat.welcome",
+                "Hello! I'm your reading assistant. I can help translate, explain text, analyze grammar, or discuss the article."
+            );
 
             setMessages([{
                 id: 'welcome',
@@ -238,6 +262,15 @@ export function ArticleChatAssistant({
         }
     };
 
+    const buildPromptContext = (userInput?: string) => ({
+        text: selectedText ?? "",
+        user_input: userInput ?? "",
+        target_language: targetLanguage,
+        source_language: sourceLanguage,
+        article_title: articleTitle,
+        current_segment: currentSegment ?? "",
+    });
+
     const handleSendMessage = async (message?: string, actionType?: string) => {
         const messageToSend = message || input.trim();
         if ((!messageToSend && !attachment) || isLoading) return;
@@ -280,6 +313,10 @@ export function ArticleChatAssistant({
 
         const api = getApiClient();
         const useRemote = session && !currentAttachment && api.isBackendConfigured();
+        const defaultChatFeature = getDefaultChatFeature(appConfig?.prompt_features ?? []);
+        const systemPrompt = defaultChatFeature
+            ? renderPromptTemplate(defaultChatFeature.prompt_template, buildPromptContext(messageToSend))
+            : "";
 
         // Augment prompt with context if meaningful
         let effectiveMessage = messageToSend;
@@ -294,7 +331,9 @@ export function ArticleChatAssistant({
                 await api.streamNovelChat(
                     {
                         session_id: session!.id,
-                        message: messageToSend,
+                        message: systemPrompt
+                            ? `${systemPrompt}\n\nUser message:\n${messageToSend}`
+                            : messageToSend,
                         selected_text: selectedText,
                         current_segment: currentSegment,
                         reading_progress: readingProgress,
@@ -362,7 +401,12 @@ export function ArticleChatAssistant({
                         content: content
                     }];
 
-                    if (history.length === 0) {
+                    if (systemPrompt) {
+                        requestMessages.unshift({
+                            role: "system",
+                            content: systemPrompt,
+                        } as any);
+                    } else if (history.length === 0) {
                         requestMessages.unshift({
                             role: "user",
                             content: `You are a helpful reading assistant. The user is reading: "${articleTitle}". \nTarget Language: ${targetLanguage}.`
@@ -459,7 +503,7 @@ export function ArticleChatAssistant({
     const handleQuickAction = async (action: QuickAction) => {
         if (!selectedText) return;
 
-        if (action.action === 'translate') {
+        if (action.action === 'translate' || action.action === 'selection.translate') {
             const userMessageContent = `Translate:\n"${selectedText}"`;
 
             const userMessage: ChatMessage = {
@@ -531,10 +575,7 @@ export function ArticleChatAssistant({
             return;
         }
 
-        const prompt = action.prompt_template
-            .replace('{text}', selectedText)
-            .replace('{target_language}', targetLanguage)
-            .replace('{source_language}', sourceLanguage);
+        const prompt = renderPromptTemplate(action.prompt_template, buildPromptContext(input));
 
         handleSendMessage(prompt, action.action);
     };
@@ -744,7 +785,7 @@ export function ArticleChatAssistant({
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && handleSendMessage()}
-                        placeholder={t("novelChat.inputPlaceholder") || "Ask a question..."}
+                        placeholder={t("novelChat.inputPlaceholder", "Ask a question...")}
                         disabled={isLoading}
                         className="flex-1 bg-background border-input"
                     />

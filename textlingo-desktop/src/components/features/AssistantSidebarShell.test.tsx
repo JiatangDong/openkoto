@@ -82,4 +82,28 @@ describe("AssistantSidebarShell", () => {
     expect(screen.getByTestId("assistant-sidebar-shell")).toHaveAttribute("data-assistant-mode", "wide");
     expect(screen.getByText("Chat Content")).toBeInTheDocument();
   });
+
+  it("keeps the assistant pane stretchable inside nested flex layouts", async () => {
+    render(
+      <AssistantSidebarShell
+        storageKey="test-assistant-mode"
+        tabs={[
+          { value: "mind_map", label: "思维导图", content: <div>Mind Map Content</div> },
+          { value: "chat", label: "对话", content: <div>Chat Content</div> },
+        ]}
+        defaultTab="chat"
+        mainContent={<div>Main Content</div>}
+      />,
+    );
+
+    const shell = screen.getByTestId("assistant-sidebar-shell");
+    const mainPane = screen.getByTestId("assistant-sidebar-main-pane");
+    const assistantPane = screen.getByTestId("assistant-sidebar-pane");
+    const activeTabContent = screen.getByText("Chat Content").parentElement;
+
+    expect(shell.className).toContain("min-h-0");
+    expect(mainPane.className).toContain("min-h-0");
+    expect(assistantPane.className).toContain("min-h-0");
+    expect(activeTabContent?.className).toContain("min-h-0");
+  });
 });

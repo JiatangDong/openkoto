@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 /// A single model configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +32,60 @@ impl ModelConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptFeature {
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub description: String,
+    pub prompt_template: String,
+    #[serde(default)]
+    pub requires_selection: bool,
+    #[serde(default)]
+    pub show_in_quick_actions: bool,
+    pub icon: String,
+    #[serde(default)]
+    pub sort_order: i32,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub is_builtin: bool,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+impl PromptFeature {
+    fn builtin(
+        id: &str,
+        kind: &str,
+        name: &str,
+        description: &str,
+        prompt_template: &str,
+        requires_selection: bool,
+        show_in_quick_actions: bool,
+        icon: &str,
+        sort_order: i32,
+    ) -> Self {
+        Self {
+            id: id.to_string(),
+            kind: kind.to_string(),
+            name: name.to_string(),
+            description: description.to_string(),
+            prompt_template: prompt_template.to_string(),
+            requires_selection,
+            show_in_quick_actions,
+            icon: icon.to_string(),
+            sort_order,
+            enabled: true,
+            is_builtin: true,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     /// Whether onboarding has been completed at least once
     #[serde(default)]
@@ -59,6 +113,12 @@ pub struct AppConfig {
     /// Daily limit for review cards in SRS
     #[serde(default = "default_srs_daily_review_limit")]
     pub srs_daily_review_limit: i32,
+    /// User-editable prompt features for chat and quick actions
+    #[serde(
+        default = "default_prompt_features",
+        deserialize_with = "deserialize_prompt_features"
+    )]
+    pub prompt_features: Vec<PromptFeature>,
 }
 
 impl Default for AppConfig {
@@ -73,6 +133,7 @@ impl Default for AppConfig {
             auth_token: None,
             srs_daily_new_limit: default_srs_daily_new_limit(),
             srs_daily_review_limit: default_srs_daily_review_limit(),
+            prompt_features: default_prompt_features(),
         }
     }
 }
@@ -95,6 +156,85 @@ impl AppConfig {
 
 fn default_interface_language() -> String {
     "en".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+pub fn default_prompt_features() -> Vec<PromptFeature> {
+    vec![
+        PromptFeature::builtin(
+            "chat.default",
+            "chat_default",
+            "Default Chat",
+            "Default reading assistant behavior",
+            "You are a helpful reading assistant. Help the user understand the material, answer clearly, and prefer the target language when appropriate.",
+            false,
+            false,
+            "sparkles",
+            0,
+        ),
+        PromptFeature::builtin(
+            "selection.translate",
+            "quick_action",
+            "Translate",
+            "Translate the selected text",
+            "Translate the following text to {target_language}:\n\n{text}",
+            true,
+            true,
+            "translate",
+            10,
+        ),
+        PromptFeature::builtin(
+            "selection.explain",
+            "quick_action",
+            "Explain",
+            "Explain the selected text",
+            "Explain the following text in {target_language}:\n\n{text}",
+            true,
+            true,
+            "explain",
+            20,
+        ),
+        PromptFeature::builtin(
+            "selection.grammar",
+            "quick_action",
+            "Grammar",
+            "Analyze the grammar of the selected text",
+            "Analyze the grammar of the following text in {target_language}:\n\n{text}",
+            true,
+            true,
+            "grammar",
+            30,
+        ),
+    ]
+}
+
+pub fn merge_missing_builtin_prompt_features(features: Vec<PromptFeature>) -> Vec<PromptFeature> {
+    let mut merged = features;
+
+    for builtin in default_prompt_features() {
+        if !merged.iter().any(|item| item.id == builtin.id) {
+            merged.push(builtin);
+        }
+    }
+
+    merged.sort_by(|left, right| {
+        left.sort_order
+            .cmp(&right.sort_order)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    merged
+}
+
+fn deserialize_prompt_features<'de, D>(deserializer: D) -> Result<Vec<PromptFeature>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let features = Vec::<PromptFeature>::deserialize(deserializer)?;
+    Ok(merge_missing_builtin_prompt_features(features))
 }
 
 fn default_srs_daily_new_limit() -> i32 {
