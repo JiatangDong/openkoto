@@ -30,10 +30,6 @@ vi.mock("../theme-provider", () => ({
   }),
 }));
 
-vi.mock("./PluginSettings", () => ({
-  PluginSettings: () => null,
-}));
-
 describe("SettingsDialog", () => {
   afterEach(() => {
     cleanup();
@@ -121,5 +117,22 @@ describe("SettingsDialog", () => {
         }),
       );
     });
+  });
+
+  it("does not render the plugin settings section", async () => {
+    invokeMock.mockResolvedValue({
+      model_configs: [],
+      target_language: "zh-CN",
+      interface_language: "en",
+      prompt_features: [],
+    });
+
+    render(<SettingsDialog isOpen onClose={vi.fn()} onSave={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("get_config");
+    });
+
+    expect(screen.queryByText("settings.plugins.title")).not.toBeInTheDocument();
   });
 });

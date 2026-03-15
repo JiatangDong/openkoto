@@ -1,6 +1,6 @@
-# OpenKoto PDF Translator Plugin
+# OpenKoto PDF Translation Sidecar
 
-基于 [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate) 的 PDF 翻译插件，专为 OpenKoto 定制。
+基于 [PDFMathTranslate](https://github.com/Byaidu/PDFMathTranslate) 的 PDF 翻译 sidecar，专为 OpenKoto 桌面应用内置使用。
 
 ## 功能
 
@@ -20,7 +20,7 @@
 ## 安装（开发模式）
 
 ```bash
-cd plugins/openkoto-pdf-translator
+cd textlingo-desktop/pdf-sidecar
 pip install -e .
 ```
 

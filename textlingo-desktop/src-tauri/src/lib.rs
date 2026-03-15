@@ -2,8 +2,8 @@
 pub mod agent_worker;
 mod ai_service;
 pub mod commands;
+pub mod pdf_sidecar;
 pub mod moonshot;
-mod plugin_manager;
 pub mod storage;
 mod subtitle_extraction;
 pub mod types;
@@ -98,15 +98,6 @@ pub fn run() {
             commands::translate_pdf_document,
             commands::check_pdf_translation_files,
             commands::export_file_cmd,
-            // 插件管理
-            plugin_manager::list_plugins_cmd,
-            plugin_manager::open_plugins_directory,
-            plugin_manager::set_plugin_mode_cmd,
-            plugin_manager::get_plugin_modes_cmd,
-            // 插件自动安装
-            plugin_manager::check_plugin_installed_cmd,
-            plugin_manager::get_plugin_release_info_cmd,
-            plugin_manager::install_plugin_cmd,
             // 书签管理
             commands::add_bookmark_cmd,
             commands::list_bookmarks_cmd,

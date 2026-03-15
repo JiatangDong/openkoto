@@ -97,13 +97,13 @@ Built with **Tauri + React + Rust**, it runs locally on your machine for **fast 
    npm install
    ```
 
-   **Option A: Core Application Only** (Faster, no Python plugins)
+   **Option A: Core Application Only** (Faster, no PDF sidecar)
    ```bash
    npm run tauri dev
    ```
 
-   **Option B: Full Application with Plugins** (Recommended for PDF translation)
-   This script handles Python environment, dependencies, and plugin setup automatically.
+   **Option B: Full Application with PDF Sidecar** (Recommended for PDF translation)
+   This script handles the Python environment, dependencies, and bundled PDF sidecar setup automatically.
    ```bash
    # Make sure you are in the root directory
    chmod +x dev.sh

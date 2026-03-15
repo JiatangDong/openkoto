@@ -3,6 +3,7 @@ use openkoto_desktop_lib::{
         filter_material_summaries, material_summary_from_article, require_active_agent_model_config,
         MaterialSummary,
     },
+    pdf_sidecar::{build_pdf_sidecar_command_for_dir, resolve_pdf_sidecar_for_dir},
     types::{AppConfig, Article, ModelConfig},
 };
 
@@ -44,6 +45,127 @@ fn sample_material_summary(id: &str, title: &str, material_type: &str) -> Materi
         created_at: "2026-03-08T00:00:00Z".to_string(),
         translated: false,
     }
+}
+
+#[test]
+fn resolve_pdf_sidecar_for_dir_reports_missing_sidecar() {
+    let dir = std::env::temp_dir().join(format!(
+        "openkoto-missing-pdf-sidecar-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let error = resolve_pdf_sidecar_for_dir(&dir, true).unwrap_err();
+
+    assert!(error.contains("PDF sidecar"));
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn build_pdf_sidecar_command_for_dir_uses_dev_sidecar_entrypoint() {
+    let root = std::env::temp_dir().join(format!(
+        "openkoto-pdf-sidecar-command-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let base_dir = root.join("textlingo-desktop/src-tauri");
+    let sidecar_dir = root.join("textlingo-desktop/pdf-sidecar/openkoto_pdf_translator");
+
+    std::fs::create_dir_all(&base_dir).unwrap();
+    std::fs::create_dir_all(&sidecar_dir).unwrap();
+    std::fs::write(sidecar_dir.join("pdf2zh.py"), b"print('ok')").unwrap();
+
+    let command = build_pdf_sidecar_command_for_dir(
+        &base_dir,
+        true,
+        "/tmp/sample.pdf",
+        "auto",
+        "zh",
+        "/tmp/output",
+    )
+    .unwrap();
+
+    assert_eq!(command.program, "python");
+    assert_eq!(
+        command.args,
+        vec![
+            "-m",
+            "openkoto_pdf_translator.pdf2zh",
+            "/tmp/sample.pdf",
+            "-li",
+            "auto",
+            "-lo",
+            "zh",
+            "-s",
+            "openkoto",
+            "-o",
+            "/tmp/output",
+        ]
+    );
+    assert_eq!(
+        command.working_dir,
+        root.join("textlingo-desktop/pdf-sidecar").canonicalize().unwrap()
+    );
+
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn resolve_pdf_sidecar_for_dir_uses_bundled_binary_name() {
+    let root = std::env::temp_dir().join(format!(
+        "openkoto-pdf-sidecar-bundled-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let binaries_dir = root.join("binaries");
+    std::fs::create_dir_all(&binaries_dir).unwrap();
+
+    let binary_name = if cfg!(target_os = "macos") {
+        if cfg!(target_arch = "aarch64") {
+            "openkoto-pdf-translator-aarch64-apple-darwin"
+        } else {
+            "openkoto-pdf-translator-x86_64-apple-darwin"
+        }
+    } else if cfg!(target_os = "windows") {
+        "openkoto-pdf-translator-x86_64-pc-windows-msvc.exe"
+    } else {
+        "openkoto-pdf-translator-x86_64-unknown-linux-gnu"
+    };
+
+    let binary_path = binaries_dir.join(binary_name);
+    std::fs::write(&binary_path, b"binary").unwrap();
+
+    let command = resolve_pdf_sidecar_for_dir(&root, false).unwrap();
+
+    assert_eq!(command.program, binary_path.to_string_lossy().to_string());
+    assert_eq!(command.working_dir, binaries_dir.canonicalize().unwrap());
+
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn resolve_pdf_sidecar_for_dir_finds_macos_app_bundle_sidecar() {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+
+    let root = std::env::temp_dir().join(format!(
+        "openkoto-pdf-sidecar-app-bundle-{}",
+        uuid::Uuid::new_v4()
+    ));
+    let resources_dir = root.join("OpenKoto Desktop.app/Contents/Resources");
+    let macos_dir = root.join("OpenKoto Desktop.app/Contents/MacOS");
+    std::fs::create_dir_all(&resources_dir).unwrap();
+    std::fs::create_dir_all(&macos_dir).unwrap();
+
+    let binary_path = macos_dir.join("openkoto-pdf-translator");
+    std::fs::write(&binary_path, b"binary").unwrap();
+
+    let command = resolve_pdf_sidecar_for_dir(&resources_dir, false).unwrap();
+
+    assert_eq!(command.program, binary_path.to_string_lossy().to_string());
+    assert_eq!(command.working_dir, macos_dir.canonicalize().unwrap());
+
+    std::fs::remove_dir_all(&root).unwrap();
 }
 
 #[test]

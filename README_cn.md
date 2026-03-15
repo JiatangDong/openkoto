@@ -97,13 +97,13 @@ OpenKoto Desktop 是一款**开源的 AI 驱动语言学习应用**，让你可�
    npm install
    ```
 
-   **选项 A: 仅核心程序** (启动快，无 Python 插件功能)
+   **选项 A: 仅核心程序** (启动快，无 PDF Sidecar)
    ```bash
    npm run tauri dev
    ```
 
-   **选项 B: 完整应用（含插件）** (推荐，包含 PDF 翻译等功能)
-   此脚本会自动处理 Python 环境、依赖安装和插件配置。
+   **选项 B: 完整应用（含 PDF Sidecar）** (推荐，包含 PDF 翻译等功能)
+   此脚本会自动处理 Python 环境、依赖安装和内置 PDF Sidecar 配置。
    ```bash
    # 确保在项目根目录
    chmod +x dev.sh
