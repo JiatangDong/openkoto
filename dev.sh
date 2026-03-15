@@ -27,7 +27,7 @@ check_uv() {
             if [ -f "$HOME/.cargo/env" ]; then source "$HOME/.cargo/env"; fi
             export PATH="$HOME/.local/bin:$PATH"
         else
-            echo -e "${RED}uv is required for plugin setup. Aborting.${NC}"
+            echo -e "${RED}uv is required for PDF sidecar setup. Aborting.${NC}"
             exit 1
         fi
     fi
@@ -48,9 +48,9 @@ check_rust() {
     fi
 }
 
-# Helper for Python/Plugin setup
-setup_plugins() {
-    echo -e "${GREEN}🔧 Setting up Plugin Environment...${NC}"
+# Helper for Python sidecar setup
+setup_pdf_sidecar() {
+    echo -e "${GREEN}🔧 Setting up PDF Sidecar Environment...${NC}"
     check_uv
     
     # 1. Install managed Python 3.10
@@ -81,12 +81,12 @@ setup_plugins() {
     
     echo -e "${GREEN}✅ Using Python: $(python --version)${NC}"
     
-    PLUGIN_DIR="plugins/openkoto-pdf-translator"
-    if [ -d "$PLUGIN_DIR" ]; then
-        echo -e "${GREEN}🔌 Installing PDF Translator plugin (with extras)...${NC}"
-        uv pip install -e "$PLUGIN_DIR[extra-translators]"
+    SIDECAR_DIR="textlingo-desktop/pdf-sidecar"
+    if [ -d "$SIDECAR_DIR" ]; then
+        echo -e "${GREEN}🔌 Installing bundled PDF sidecar dependencies...${NC}"
+        uv pip install -e "$SIDECAR_DIR[extra-translators]"
     else
-        echo -e "${RED}❌ Plugin directory missing: $PLUGIN_DIR${NC}"
+        echo -e "${RED}❌ PDF sidecar directory missing: $SIDECAR_DIR${NC}"
     fi
 }
 
@@ -104,21 +104,21 @@ setup_core() {
 clear
 echo -e "${GREEN}🚀 OpenKoto Development Launcher${NC}"
 echo "----------------------------------------"
-echo "1. Full Setup & Start (Install Plugins + Core Deps + Start)"
+echo "1. Full Setup & Start (Install PDF Sidecar + Core Deps + Start)"
 echo "2. Quick Start Full (Skip checks, assume env ready)"
 echo "3. Core Install & Start (Install Core Deps only + Start)"
-echo "4. Quick Start Core (Start only, no python plugins)"
+echo "4. Quick Start Core (Start only, no PDF sidecar setup)"
 echo "----------------------------------------"
 read -p "Select option [1-4]: " choice
 
 case $choice in
     1)
         check_rust
-        setup_plugins
+        setup_pdf_sidecar
         setup_core
         echo -e "${GREEN}✨ Starting Full App...${NC}"
         # Start app
-        export PATH="$PWD/.venv/bin:$PATH" # Ensure venv python is first in path for correct plugin loading
+        export PATH="$PWD/.venv/bin:$PATH" # Ensure venv python is first in path for the PDF sidecar
         cd textlingo-desktop && npm run tauri dev
         ;;
     2)
@@ -128,7 +128,7 @@ case $choice in
             echo -e "${GREEN}✅ Venv activated.${NC}"
         else
             echo -e "${YELLOW}⚠️  Venv not found, attempting setup...${NC}"
-            setup_plugins
+            setup_pdf_sidecar
         fi
         echo -e "${GREEN}🚀 Quick Starting Full App...${NC}"
         cd textlingo-desktop && npm run tauri dev

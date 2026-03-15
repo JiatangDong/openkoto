@@ -22,7 +22,6 @@ import { PdfReader } from "./PdfReader";
 import { ArticleChatAssistant } from "./ArticleChatAssistant";
 import { ArticleMindMapPanel } from "./ArticleMindMapPanel";
 import { AssistantSidebarShell, type AssistantPanelMode } from "./AssistantSidebarShell";
-import { PluginInstallDialog } from "./PluginInstallDialog";
 import { useConfig } from "../../lib/hooks";
 
 interface BookReaderProps {
@@ -57,9 +56,6 @@ export function BookReader({ article, onBack }: BookReaderProps) {
 
     // PDF翻译状态
     const [isTranslating, setIsTranslating] = useState(false);
-
-    // 插件安装对话框
-    const [showPluginInstallDialog, setShowPluginInstallDialog] = useState(false);
 
     // 判断书籍类型
     const isEpub = article.book_type === "epub";
@@ -190,17 +186,6 @@ export function BookReader({ article, onBack }: BookReaderProps) {
         if (!article.book_path || isTranslating) return;
 
         try {
-            // 首先检查插件是否已安装
-            const isInstalled = await invoke<boolean>("check_plugin_installed_cmd", {
-                pluginName: "openkoto-pdf-translator"
-            });
-
-            if (!isInstalled) {
-                // 未安装则弹出安装对话框
-                setShowPluginInstallDialog(true);
-                return;
-            }
-
             setIsTranslating(true);
 
             // 获取配置
@@ -219,7 +204,7 @@ export function BookReader({ article, onBack }: BookReaderProps) {
             }
 
             const targetLang = config.target_language || "zh";
-            const sourceLang = "en"; // 默认源语言
+            const sourceLang = "auto";
 
             console.log("[PDF Translate] Starting with:", {
                 provider: activeModel.api_provider,
@@ -256,13 +241,7 @@ export function BookReader({ article, onBack }: BookReaderProps) {
             }
         } catch (error) {
             console.error("[PDF Translate] Error:", error);
-            const errorStr = String(error);
-            // 插件未找到 / 执行失败 → 引导用户安装
-            if (errorStr.includes("Plugin") || errorStr.includes("not found") || errorStr.includes("Executable")) {
-                setShowPluginInstallDialog(true);
-            } else {
-                alert(t("pdfTranslate.error", "翻译失败: {{error}}", { error: errorStr }));
-            }
+            alert(t("pdfTranslate.error", "翻译失败: {{error}}", { error: String(error) }));
         } finally {
             setIsTranslating(false);
         }
@@ -449,52 +428,41 @@ export function BookReader({ article, onBack }: BookReaderProps) {
     );
 
     return (
-        <>
-            <AssistantSidebarShell
-                storageKey={assistantModeStorageKey}
-                showAssistant={showAssistant}
-                activeTab={activeTab}
-                onTabChange={(value) => setActiveTab(value as "mind_map" | "chat")}
-                shellTestId="book-reader-shell"
-                mainPaneTestId="book-reader-main-pane"
-                assistantPaneTestId="book-reader-assistant-pane"
-                defaultTab="mind_map"
-                tabs={[
-                    {
-                        value: "mind_map",
-                        label: t("articleReader.mindMap", "思维导图"),
-                        content: ({ panelMode }: { panelMode: AssistantPanelMode }) => (
-                            <ArticleMindMapPanel
-                                article={article}
-                                targetLanguage={targetLanguage}
-                                panelMode={panelMode}
-                            />
-                        ),
-                    },
-                    {
-                        value: "chat",
-                        label: t("articleReader.chat", "对话"),
-                        content: (
-                            <ArticleChatAssistant
-                                articleId={article.id}
-                                articleTitle={article.title}
-                                targetLanguage={targetLanguage}
-                                selectedText={selectedText}
-                            />
-                        ),
-                    },
-                ]}
-                mainContent={mainContent}
-            />
-
-            <PluginInstallDialog
-                isOpen={showPluginInstallDialog}
-                onClose={() => setShowPluginInstallDialog(false)}
-                onInstallComplete={() => {
-                    setShowPluginInstallDialog(false);
-                    handlePdfTranslate();
-                }}
-            />
-        </>
+        <AssistantSidebarShell
+            storageKey={assistantModeStorageKey}
+            showAssistant={showAssistant}
+            activeTab={activeTab}
+            onTabChange={(value) => setActiveTab(value as "mind_map" | "chat")}
+            shellTestId="book-reader-shell"
+            mainPaneTestId="book-reader-main-pane"
+            assistantPaneTestId="book-reader-assistant-pane"
+            defaultTab="mind_map"
+            tabs={[
+                {
+                    value: "mind_map",
+                    label: t("articleReader.mindMap", "思维导图"),
+                    content: ({ panelMode }: { panelMode: AssistantPanelMode }) => (
+                        <ArticleMindMapPanel
+                            article={article}
+                            targetLanguage={targetLanguage}
+                            panelMode={panelMode}
+                        />
+                    ),
+                },
+                {
+                    value: "chat",
+                    label: t("articleReader.chat", "对话"),
+                    content: (
+                        <ArticleChatAssistant
+                            articleId={article.id}
+                            articleTitle={article.title}
+                            targetLanguage={targetLanguage}
+                            selectedText={selectedText}
+                        />
+                    ),
+                },
+            ]}
+            mainContent={mainContent}
+        />
     );
 }

@@ -54,10 +54,6 @@ vi.mock("./ArticleMindMapPanel", () => ({
   ),
 }));
 
-vi.mock("./PluginInstallDialog", () => ({
-  PluginInstallDialog: () => null,
-}));
-
 function createBookArticle(overrides: Partial<Article> = {}): Article {
   return {
     id: "book-1",
@@ -75,6 +71,8 @@ describe("BookReader", () => {
   beforeEach(() => {
     invokeMock.mockReset();
     invokeMock.mockResolvedValue({});
+    vi.stubGlobal("confirm", vi.fn(() => false));
+    vi.stubGlobal("alert", vi.fn());
     localStorageStore.clear();
     Object.defineProperty(window, "localStorage", {
       value: {
@@ -118,5 +116,52 @@ describe("BookReader", () => {
     expect(screen.getByTestId("book-reader-shell")).toBeInTheDocument();
     expect(screen.getByTestId("pdf-reader")).toBeInTheDocument();
     expect(screen.getByTestId("article-mind-map-panel")).toBeInTheDocument();
+  });
+
+  it("starts pdf translation without plugin install gating", async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === "check_pdf_translation_files") {
+        return {};
+      }
+      if (command === "get_config") {
+        return {
+          target_language: "zh-CN",
+          active_model_id: "model-1",
+          model_configs: [
+            {
+              id: "model-1",
+              api_provider: "openai",
+              api_key: "secret",
+              model: "gpt-4o-mini",
+            },
+          ],
+        };
+      }
+      if (command === "translate_pdf_document") {
+        return {
+          success: true,
+          mono_pdf: "/tmp/book-mono.pdf",
+          dual_pdf: "/tmp/book-dual.pdf",
+          original_pdf: "/tmp/book.pdf",
+        };
+      }
+
+      return {};
+    });
+
+    render(<BookReader article={createBookArticle({ book_type: "pdf", book_path: "/tmp/book.pdf" })} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "翻译全文" }));
+
+    expect(invokeMock.mock.calls.some(([command]) => command === "check_plugin_installed_cmd")).toBe(false);
+    expect(invokeMock).toHaveBeenCalledWith("translate_pdf_document", {
+      pdfPath: "/tmp/book.pdf",
+      langIn: "auto",
+      langOut: "zh-CN",
+      provider: "openai",
+      apiKey: "secret",
+      model: "gpt-4o-mini",
+      baseUrl: undefined,
+    });
   });
 });

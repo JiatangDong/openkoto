@@ -2891,7 +2891,7 @@ pub async fn translate_pdf_document(
     model: String,
     base_url: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    use crate::plugin_manager;
+    use crate::pdf_sidecar;
     use std::process::Command;
 
     println!(
@@ -2923,33 +2923,26 @@ pub async fn translate_pdf_document(
         envs.push(("OPENKOTO_BASE_URL", url.clone()));
     }
 
-    // 使用 PluginManager 获取执行命令
-    // 假设插件名称为 "openkoto-pdf-translator"
-    let plugin_name = "openkoto-pdf-translator";
+    let sidecar = pdf_sidecar::resolve_pdf_sidecar(&app_handle)
+        .map_err(|e| format!("PDF sidecar error: {e}"))?;
+    let cmd = sidecar.program;
+    let mut args = sidecar.args;
+    let plugin_dir = sidecar.working_dir;
 
-    let (cmd, mut args, plugin_dir) =
-        match plugin_manager::get_plugin_execution_command(&app_handle, plugin_name) {
-            Ok(res) => res,
-            Err(e) => return Err(format!("Plugin error: {}", e)),
-        };
+    args.extend([
+        pdf_path.clone(),
+        "-li".to_string(),
+        lang_in,
+        "-lo".to_string(),
+        lang_out,
+        "-s".to_string(),
+        "openkoto".to_string(),
+        "-o".to_string(),
+        output_dir.clone(),
+    ]);
 
-    // 动态添加参数
-    // 我们约定 entry_point.args 包含固定前缀，如 ["-m", "openkoto_pdf_translator.pdf2zh"]
-    // 我们需要追加 PDF 相关的参数
-    // 原 args: -m openkoto_pdf_translator.pdf2zh [input] -li ...
-
-    args.push(pdf_path.clone());
-    args.push("-li".to_string());
-    args.push(lang_in);
-    args.push("-lo".to_string());
-    args.push(lang_out);
-    args.push("-s".to_string());
-    args.push("openkoto".to_string());
-    args.push("-o".to_string());
-    args.push(output_dir.clone());
-
-    println!("[Plugin] Executing: {} {:?}", cmd, args);
-    println!("[Plugin] CWD: {:?}", plugin_dir);
+    println!("[PDF Sidecar] Executing: {} {:?}", cmd, args);
+    println!("[PDF Sidecar] CWD: {:?}", plugin_dir);
 
     // 在插件目录下执行，以确保 Python 模块导入正确 (如果是 Dev 模式)
     // 或者对于 Prod 模式，通常也不影响
@@ -2984,7 +2977,7 @@ pub async fn translate_pdf_document(
                 Err(format!("PDF translation failed: {}", stderr))
             }
         }
-        Err(e) => Err(format!("Failed to execute plugin command '{}': {}", cmd, e)),
+        Err(e) => Err(format!("Failed to execute PDF sidecar '{}': {}", cmd, e)),
     }
 }
 

@@ -1,4 +1,4 @@
-name: Build PDF Translator Plugin
+name: Build PDF Translation Sidecar
 
 on:
   push:
@@ -32,21 +32,21 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        working-directory: plugins/openkoto-pdf-translator
+        working-directory: textlingo-desktop/pdf-sidecar
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller
           pip install -e .
 
       - name: Build executable
-        working-directory: plugins/openkoto-pdf-translator
+        working-directory: textlingo-desktop/pdf-sidecar
         run: python build.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: openkoto-pdf-translator-${{ matrix.platform }}
-          path: plugins/openkoto-pdf-translator/dist/openkoto-pdf-translator-*
+          path: textlingo-desktop/pdf-sidecar/dist/openkoto-pdf-translator-*
           retention-days: 7
 
   release:
@@ -64,9 +64,9 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          name: PDF Translator Plugin ${{ github.ref_name }}
+          name: PDF Translation Sidecar ${{ github.ref_name }}
           body: |
-            ## OpenKoto PDF Translator Plugin
+            ## OpenKoto PDF Translation Sidecar
             
             下载适合您系统的版本：
             - **Windows**: `openkoto-pdf-translator-win-x64.exe`
@@ -75,8 +75,8 @@ jobs:
             - **Linux**: `openkoto-pdf-translator-linux-x64`
             
             ### 使用方法
-            1. 下载后放到 OpenKoto 的 plugins 目录
-            2. 在 OpenKoto 中打开 PDF，点击"翻译全文"
+            1. 该产物供 OpenKoto Desktop 内置 PDF sidecar 使用
+            2. 发布流程可将其复制到桌面应用打包所需的二进制目录
             
           files: dist/*
           draft: true
