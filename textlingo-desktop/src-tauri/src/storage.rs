@@ -1,4 +1,4 @@
-use crate::types::{AgentTask, AppConfig, Artifact, Article};
+use crate::types::{merge_missing_builtin_prompt_features, AgentTask, AppConfig, Artifact, Article};
 use serde_json;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -56,12 +56,14 @@ pub fn load_config(app_handle: &AppHandle) -> Result<Option<AppConfig>, String> 
         fs::read_to_string(config_path).map_err(|e| format!("Failed to read config: {}", e))?;
 
     let mut deserializer = serde_json::Deserializer::from_str(&config_content);
-    let config: AppConfig = match serde::Deserialize::deserialize(&mut deserializer) {
+    let mut config: AppConfig = match serde::Deserialize::deserialize(&mut deserializer) {
         Ok(c) => c,
         Err(e) => {
             return Err(format!("FATAL_CONFIG_CORRUPTION: {}", e));
         }
     };
+
+    config.prompt_features = merge_missing_builtin_prompt_features(config.prompt_features);
 
     Ok(Some(config))
 }

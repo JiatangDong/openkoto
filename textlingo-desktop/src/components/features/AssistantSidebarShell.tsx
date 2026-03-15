@@ -69,18 +69,18 @@ export function AssistantSidebarShell({
     showAssistant && effectivePanelMode === "full"
       ? "hidden"
       : effectivePanelMode === "wide"
-        ? "basis-[36%] min-w-0 flex flex-col bg-background relative"
-        : "basis-[64%] min-w-0 flex flex-col bg-background relative";
+        ? "basis-[36%] min-w-0 min-h-0 flex flex-col bg-background relative"
+        : "basis-[64%] min-w-0 min-h-0 flex flex-col bg-background relative";
 
   const assistantPaneClass =
     effectivePanelMode === "full"
-      ? "w-full min-w-0 overflow-hidden border-l-0 bg-card flex flex-col shrink-0 transition-all duration-300"
+      ? "w-full min-w-0 min-h-0 overflow-hidden border-l-0 bg-card flex flex-col shrink-0 transition-all duration-300"
       : effectivePanelMode === "wide"
-        ? "basis-[64%] min-w-0 overflow-hidden border-l border-border bg-card flex flex-col shrink-0 transition-all duration-300"
-        : "basis-[36%] min-w-[360px] overflow-hidden border-l border-border bg-card flex flex-col shrink-0 transition-all duration-300";
+        ? "basis-[64%] min-w-0 min-h-0 overflow-hidden border-l border-border bg-card flex flex-col shrink-0 transition-all duration-300"
+        : "basis-[36%] min-w-[360px] min-h-0 overflow-hidden border-l border-border bg-card flex flex-col shrink-0 transition-all duration-300";
 
   return (
-    <div className="h-full flex overflow-hidden" data-testid={shellTestId} data-assistant-mode={effectivePanelMode}>
+    <div className="h-full min-h-0 flex overflow-hidden" data-testid={shellTestId} data-assistant-mode={effectivePanelMode}>
       <div
         className={mainPaneClass}
         data-testid={mainPaneTestId}
@@ -101,7 +101,7 @@ export function AssistantSidebarShell({
               setInternalActiveTab(value);
               onTabChange?.(value);
             }}
-            className="flex-1 flex flex-col h-full overflow-hidden"
+            className="flex-1 min-h-0 flex flex-col h-full overflow-hidden"
           >
             {topContent ? <div className="border-b border-border bg-card px-4 py-3">{topContent}</div> : null}
 
@@ -135,7 +135,7 @@ export function AssistantSidebarShell({
             {headerContent ? <div className="border-b border-border bg-card">{headerContent}</div> : null}
 
             {tabs.map((tab) => (
-              <TabsContent key={tab.value} value={tab.value} className="flex-1 overflow-hidden mt-0">
+              <TabsContent key={tab.value} value={tab.value} className="flex-1 min-h-0 overflow-hidden mt-0">
                 {typeof tab.content === "function" ? tab.content({ panelMode: effectivePanelMode }) : tab.content}
               </TabsContent>
             ))}

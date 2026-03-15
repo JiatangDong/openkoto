@@ -329,7 +329,7 @@ export interface NovelChatMessageRequest {
 }
 
 export interface QuickAction {
-  action: 'translate' | 'explain' | 'grammar' | 'vocabulary' | 'culture' | 'plot' | 'character' | 'summary';
+  action: string;
   label: string;
   description: string;
   prompt_template: string;

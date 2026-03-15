@@ -8,6 +8,23 @@ export interface ModelConfig {
   model: string;
   is_default: boolean;
   created_at?: string;
+  base_url?: string;
+}
+
+export interface PromptFeature {
+  id: string;
+  kind: string;
+  name: string;
+  description: string;
+  prompt_template: string;
+  requires_selection: boolean;
+  show_in_quick_actions: boolean;
+  icon: string;
+  sort_order: number;
+  enabled: boolean;
+  is_builtin: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface AppConfig {
@@ -18,10 +35,10 @@ export interface AppConfig {
   model?: string;
   // New model config system
   active_model_id?: string;
-  model_configs?: ModelConfig[];
+  model_configs: ModelConfig[];
   // Other settings
   target_language: string;
-  interface_language?: string;
+  interface_language: string;
   // Backend API URL for services like webpage fetching
   backend_url?: string;
   // Auth token for backend API
@@ -29,6 +46,8 @@ export interface AppConfig {
   // SRS daily limits
   srs_daily_new_limit?: number;
   srs_daily_review_limit?: number;
+  // User-configurable prompt features for AI chat
+  prompt_features?: PromptFeature[];
 }
 
 import { AgentTask, AgentWorkerStatusSnapshot, Artifact, Article, MindMapResult } from "../types";

@@ -9,6 +9,7 @@ import { Select } from "../ui/select";
 import { Settings, Plus, Trash2, Edit2, Check, RefreshCw, Loader2, HelpCircle } from "lucide-react";
 import { useTheme } from "../theme-provider";
 import { PluginSettings } from "./PluginSettings";
+import type { AppConfig, ModelConfig, PromptFeature } from "../../lib/tauri";
 import {
   getKimiModelsUrl,
   isKimiProvider,
@@ -17,27 +18,6 @@ import {
   LEGACY_KIMI_PROVIDER,
   normalizeKimiProvider,
 } from "../../lib/kimiProvider";
-
-interface ModelConfig {
-  id: string;
-  name: string;
-  api_key: string;
-  api_provider: string;
-  model: string;
-  is_default: boolean;
-  created_at?: string;
-  base_url?: string;
-}
-
-interface AppConfig {
-  onboarding_completed?: boolean;
-  active_model_id?: string;
-  model_configs: ModelConfig[];
-  target_language: string;
-  interface_language: string;
-  backend_url?: string;
-  auth_token?: string;
-}
 
 interface OpenRouterModel {
   id: string;
@@ -58,6 +38,64 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
   "ollama": "http://localhost:11434/v1",
   "lmstudio": "http://localhost:1234/v1",
 };
+
+const BUILTIN_PROMPT_FEATURE_DEFAULTS: Record<string, PromptFeature> = {
+  "chat.default": {
+    id: "chat.default",
+    kind: "chat_default",
+    name: "Default Chat",
+    description: "Default reading assistant behavior",
+    prompt_template:
+      "You are a helpful reading assistant. Help the user understand the material, answer clearly, and prefer the target language when appropriate.",
+    requires_selection: false,
+    show_in_quick_actions: false,
+    icon: "sparkles",
+    sort_order: 0,
+    enabled: true,
+    is_builtin: true,
+  },
+  "selection.translate": {
+    id: "selection.translate",
+    kind: "quick_action",
+    name: "Translate",
+    description: "Translate the selected text",
+    prompt_template: "Translate the following text to {target_language}:\n\n{text}",
+    requires_selection: true,
+    show_in_quick_actions: true,
+    icon: "translate",
+    sort_order: 10,
+    enabled: true,
+    is_builtin: true,
+  },
+  "selection.explain": {
+    id: "selection.explain",
+    kind: "quick_action",
+    name: "Explain",
+    description: "Explain the selected text",
+    prompt_template: "Explain the following text in {target_language}:\n\n{text}",
+    requires_selection: true,
+    show_in_quick_actions: true,
+    icon: "explain",
+    sort_order: 20,
+    enabled: true,
+    is_builtin: true,
+  },
+  "selection.grammar": {
+    id: "selection.grammar",
+    kind: "quick_action",
+    name: "Grammar",
+    description: "Analyze the grammar of the selected text",
+    prompt_template: "Analyze the grammar of the following text in {target_language}:\n\n{text}",
+    requires_selection: true,
+    show_in_quick_actions: true,
+    icon: "grammar",
+    sort_order: 30,
+    enabled: true,
+    is_builtin: true,
+  },
+};
+
+const PROMPT_FEATURE_ICON_OPTIONS = ["sparkles", "translate", "explain", "grammar", "book-open"];
 
 // Default preset models
 const DEFAULT_MODELS = {
@@ -142,6 +180,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
     model_configs: [],
     target_language: "zh-CN",
     interface_language: i18n.language,
+    prompt_features: [],
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -171,6 +210,8 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
     ollama: DEFAULT_MODELS.ollama.map(m => ({ value: m.value, label: t(m.labelKey) })),
   });
   const [modelFilter, setModelFilter] = useState("");
+  const [editingPromptFeatureId, setEditingPromptFeatureId] = useState<string | null>(null);
+  const [isPromptTemplateHelpOpen, setIsPromptTemplateHelpOpen] = useState(false);
 
   // Load config on mount
   useEffect(() => {
@@ -210,6 +251,65 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
     setIsCorrupted(false);
     setError(null);
     startNewConfig();
+  };
+
+  const promptFeatures = config.prompt_features ?? [];
+  const editingPromptFeature = promptFeatures.find((item) => item.id === editingPromptFeatureId) ?? null;
+
+  const updatePromptFeatures = (updater: (current: PromptFeature[]) => PromptFeature[]) => {
+    setConfig((current) => ({
+      ...current,
+      prompt_features: updater(current.prompt_features ?? []),
+    }));
+  };
+
+  const startNewPromptFeature = () => {
+    const nextSortOrder =
+      promptFeatures.reduce((max, item) => Math.max(max, item.sort_order || 0), 0) + 10;
+    const newFeature: PromptFeature = {
+      id: crypto.randomUUID(),
+      kind: "quick_action",
+      name: "",
+      description: "",
+      prompt_template: "{text}",
+      requires_selection: true,
+      show_in_quick_actions: true,
+      icon: "sparkles",
+      sort_order: nextSortOrder,
+      enabled: true,
+      is_builtin: false,
+    };
+
+    updatePromptFeatures((current) => [...current, newFeature]);
+    setEditingPromptFeatureId(newFeature.id);
+    setIsPromptTemplateHelpOpen(false);
+  };
+
+  const updatePromptFeature = (featureId: string, patch: Partial<PromptFeature>) => {
+    updatePromptFeatures((current) =>
+      current.map((item) => (item.id === featureId ? { ...item, ...patch } : item)),
+    );
+  };
+
+  const resetPromptFeature = (featureId: string) => {
+    const builtinDefault = BUILTIN_PROMPT_FEATURE_DEFAULTS[featureId];
+    if (!builtinDefault) {
+      return;
+    }
+
+    updatePromptFeatures((current) =>
+      current.map((item) => (item.id === featureId ? { ...builtinDefault } : item)),
+    );
+    setEditingPromptFeatureId(featureId);
+    setIsPromptTemplateHelpOpen(false);
+  };
+
+  const deletePromptFeature = (featureId: string) => {
+    updatePromptFeatures((current) => current.filter((item) => item.id !== featureId));
+    if (editingPromptFeatureId === featureId) {
+      setEditingPromptFeatureId(null);
+    }
+    setIsPromptTemplateHelpOpen(false);
   };
 
   const startNewConfig = () => {
@@ -931,6 +1031,239 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
             )}
           </div>
 
+          <div className="border-t border-border pt-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-medium text-foreground">
+                {t("settings.promptFeatures.title", "AI Chat Features")}
+              </h3>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={startNewPromptFeature}
+                className="gap-1"
+              >
+                <Plus size={14} />
+                {t("settings.promptFeatures.add", "Add feature")}
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              {promptFeatures.length === 0 ? (
+                <div className="text-center py-6 text-muted-foreground border border-dashed border-border rounded-lg">
+                  {t("settings.promptFeatures.empty", "No chat features configured")}
+                </div>
+              ) : (
+                promptFeatures
+                  .slice()
+                  .sort((left, right) => left.sort_order - right.sort_order || left.name.localeCompare(right.name))
+                  .map((feature) => (
+                    <div
+                      key={feature.id}
+                      className={`p-3 rounded-lg border flex items-center justify-between gap-3 ${editingPromptFeatureId === feature.id
+                        ? "bg-primary/5 border-primary"
+                        : "bg-card border-border"
+                        }`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-foreground truncate">
+                            {feature.name || t("settings.promptFeatures.untitled", "Untitled feature")}
+                          </span>
+                          {feature.is_builtin && (
+                            <span className="text-xs px-1.5 py-0.5 bg-muted text-muted-foreground rounded">
+                              {t("settings.promptFeatures.builtin", "Built-in")}
+                            </span>
+                          )}
+                          {!feature.enabled && (
+                            <span className="text-xs px-1.5 py-0.5 bg-muted text-muted-foreground rounded">
+                              {t("settings.promptFeatures.disabled", "Disabled")}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {feature.kind === "chat_default"
+                            ? t("settings.promptFeatures.chatDefault", "Default chat prompt")
+                            : t("settings.promptFeatures.quickAction", "Quick action")}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEditingPromptFeatureId(feature.id)}
+                          className="h-7 w-7 p-0"
+                          title={t("settings.editConfig", "Edit")}
+                        >
+                          <Edit2 size={14} />
+                        </Button>
+                        {feature.is_builtin ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => resetPromptFeature(feature.id)}
+                            className="h-7 px-2 text-xs"
+                          >
+                            {t("settings.promptFeatures.resetBuiltin", "Reset to default")}
+                          </Button>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => deletePromptFeature(feature.id)}
+                            className="h-7 w-7 p-0 text-destructive hover:text-destructive/80"
+                            title={t("settings.promptFeatures.deleteCustom", "Delete feature")}
+                          >
+                            <Trash2 size={14} />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+              )}
+            </div>
+
+            {editingPromptFeature && (
+              <div className="p-4 bg-muted/50 rounded-lg border border-border space-y-4">
+                <h4 className="font-medium text-foreground">
+                  {editingPromptFeature.is_builtin
+                    ? t("settings.promptFeatures.editBuiltin", "Edit built-in feature")
+                    : t("settings.promptFeatures.editCustom", "Edit custom feature")}
+                </h4>
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2" htmlFor="prompt-feature-name">
+                    {t("settings.promptFeatures.name", "Feature name")}
+                  </label>
+                  <Input
+                    id="prompt-feature-name"
+                    aria-label={t("settings.promptFeatures.name", "Feature name")}
+                    type="text"
+                    value={editingPromptFeature.name}
+                    onChange={(e) => updatePromptFeature(editingPromptFeature.id, { name: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2" htmlFor="prompt-feature-description">
+                    {t("settings.promptFeatures.description", "Description")}
+                  </label>
+                  <Input
+                    id="prompt-feature-description"
+                    aria-label={t("settings.promptFeatures.description", "Description")}
+                    type="text"
+                    value={editingPromptFeature.description}
+                    onChange={(e) => updatePromptFeature(editingPromptFeature.id, { description: e.target.value })}
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <label className="block text-sm font-medium text-foreground" htmlFor="prompt-feature-template">
+                      {t("settings.promptFeatures.template", "Prompt template")}
+                    </label>
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-primary transition-colors focus:outline-none"
+                      aria-label={t("settings.promptFeatures.templateHelpAriaLabel", "What is {text}?")}
+                      onClick={() => setIsPromptTemplateHelpOpen((current) => !current)}
+                    >
+                      <HelpCircle size={14} />
+                    </button>
+                  </div>
+                  {isPromptTemplateHelpOpen && (
+                    <p className="mb-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+                      {t(
+                        "settings.promptFeatures.templateHelp",
+                        "{text} will be replaced with the selected text when this feature runs.",
+                      )}
+                    </p>
+                  )}
+                  <textarea
+                    id="prompt-feature-template"
+                    aria-label={t("settings.promptFeatures.template", "Prompt template")}
+                    value={editingPromptFeature.prompt_template}
+                    onChange={(e) => updatePromptFeature(editingPromptFeature.id, { prompt_template: e.target.value })}
+                    className="flex min-h-28 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2" htmlFor="prompt-feature-icon">
+                    {t("settings.promptFeatures.icon", "Icon")}
+                  </label>
+                  <Select
+                    value={editingPromptFeature.icon}
+                    onChange={(e) => updatePromptFeature(editingPromptFeature.id, { icon: e.target.value })}
+                    id="prompt-feature-icon"
+                    aria-label={t("settings.promptFeatures.icon", "Icon")}
+                  >
+                    {PROMPT_FEATURE_ICON_OPTIONS.map((icon) => (
+                      <option key={icon} value={icon}>
+                        {icon}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-2" htmlFor="prompt-feature-sort-order">
+                    {t("settings.promptFeatures.sortOrder", "Sort order")}
+                  </label>
+                  <Input
+                    id="prompt-feature-sort-order"
+                    aria-label={t("settings.promptFeatures.sortOrder", "Sort order")}
+                    type="number"
+                    value={editingPromptFeature.sort_order}
+                    onChange={(e) =>
+                      updatePromptFeature(editingPromptFeature.id, {
+                        sort_order: Number.parseInt(e.target.value, 10) || 0,
+                      })
+                    }
+                  />
+                </div>
+
+                <label className="flex items-center gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={editingPromptFeature.enabled}
+                    onChange={(e) => updatePromptFeature(editingPromptFeature.id, { enabled: e.target.checked })}
+                  />
+                  {t("settings.promptFeatures.enabled", "Enabled")}
+                </label>
+
+                <label className="flex items-center gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={editingPromptFeature.requires_selection}
+                    onChange={(e) =>
+                      updatePromptFeature(editingPromptFeature.id, { requires_selection: e.target.checked })
+                    }
+                    disabled={editingPromptFeature.kind === "chat_default"}
+                  />
+                  {t("settings.promptFeatures.requiresSelection", "Requires selection")}
+                </label>
+
+                <label className="flex items-center gap-2 text-sm text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={editingPromptFeature.show_in_quick_actions}
+                    onChange={(e) =>
+                      updatePromptFeature(editingPromptFeature.id, {
+                        show_in_quick_actions: e.target.checked,
+                      })
+                    }
+                    disabled={editingPromptFeature.kind === "chat_default"}
+                  />
+                  {t("settings.promptFeatures.showInQuickActions", "Show in quick actions")}
+                </label>
+              </div>
+            )}
+          </div>
+
           {/* Other Settings */}
           <div className="border-t border-border pt-4 space-y-4">
 
@@ -1026,7 +1359,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
           }
           onClose();
         }} disabled={isSaving}>
-          {isSaving ? t("settings.saving") : t("settings.close")}
+          {isSaving ? t("settings.saving", "Saving...") : t("settings.close", "Close")}
         </Button>
       </DialogFooter>
     </Dialog >
