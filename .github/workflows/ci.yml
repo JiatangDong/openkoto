@@ -33,11 +33,39 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: setup python
+        working-directory: .
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
       - name: Download sidecar binaries
         working-directory: .
         run: |
           chmod +x script/download_binaries.sh
           bash script/download_binaries.sh
+
+      - name: build bundled PDF sidecar
+        working-directory: .
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -e ./textlingo-desktop/pdf-sidecar
+          cd textlingo-desktop/pdf-sidecar
+          python build.py
+          cd ../..
+          chmod +x script/sync_pdf_sidecar_binaries.sh
+          bash script/sync_pdf_sidecar_binaries.sh
+        shell: bash
+        env:
+          PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+      - name: verify bundled PDF sidecar
+        working-directory: .
+        run: |
+          bash script/sync_pdf_sidecar_binaries.sh
+          ls -la textlingo-desktop/src-tauri/binaries
+        shell: bash
 
       - name: Prepare frontend dist for Tauri context
         working-directory: .
