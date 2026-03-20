@@ -24,8 +24,8 @@ REQUIRED_PUBLISH_SNIPPETS = (
 )
 
 REQUIRED_MACOS_MATRIX_ROWS = (
-    '- platform: "macos-14"\n            args: "--target aarch64-apple-darwin --bundles app"',
-    '- platform: "macos-15-intel"\n            args: "--target x86_64-apple-darwin --bundles app"',
+    '- platform: "macos-14"\n            args: "--target aarch64-apple-darwin --bundles app,dmg"',
+    '- platform: "macos-15-intel"\n            args: "--target x86_64-apple-darwin --bundles app,dmg"',
 )
 
 LEGACY_MACOS_PLATFORM_SNIPPETS = (
