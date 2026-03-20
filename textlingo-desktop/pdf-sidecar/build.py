@@ -103,7 +103,7 @@ def build():
 
     PyInstaller.__main__.run(args)
 
-    print(f"\n✅ Build complete! Executable: dist/{output_name}")
+    print(f"\nBuild complete! Executable: dist/{output_name}")
     
 
 if __name__ == "__main__":

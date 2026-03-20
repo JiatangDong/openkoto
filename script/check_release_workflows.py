@@ -6,12 +6,18 @@ import sys
 
 
 REQUIRED_CI_GATE_SNIPPETS = (
+    'uses: actions/checkout@v5',
+    'uses: actions/setup-node@v5',
+    'uses: actions/setup-python@v6',
     'name: setup python',
     'name: build bundled PDF sidecar',
     'name: verify bundled PDF sidecar',
 )
 
 REQUIRED_PUBLISH_SNIPPETS = (
+    'uses: actions/checkout@v5',
+    'uses: actions/setup-node@v5',
+    'uses: actions/setup-python@v6',
     'name: setup python',
     'name: build bundled PDF sidecar',
     'name: verify bundled PDF sidecar',
@@ -19,7 +25,7 @@ REQUIRED_PUBLISH_SNIPPETS = (
 
 REQUIRED_MACOS_MATRIX_ROWS = (
     '- platform: "macos-14"\n            args: "--target aarch64-apple-darwin --bundles app"',
-    '- platform: "macos-13"\n            args: "--target x86_64-apple-darwin --bundles app"',
+    '- platform: "macos-15-intel"\n            args: "--target x86_64-apple-darwin --bundles app"',
 )
 
 LEGACY_MACOS_PLATFORM_SNIPPETS = (

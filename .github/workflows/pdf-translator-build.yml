@@ -13,7 +13,7 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux-x64
-          - os: macos-13
+          - os: macos-15-intel
             platform: macos-x64
           - os: macos-14
             platform: macos-arm64
@@ -24,10 +24,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
