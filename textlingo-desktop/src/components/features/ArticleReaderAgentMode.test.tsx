@@ -6,6 +6,7 @@ import { ArticleReader } from "./ArticleReader";
 import type { Article } from "../../types";
 
 const invokeMock = vi.fn();
+const openMock = vi.fn();
 const localStorageStore = new Map<string, string>();
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -18,6 +19,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   save: vi.fn(),
+  open: (...args: unknown[]) => openMock(...args),
 }));
 
 vi.mock("docx", () => ({
@@ -49,7 +51,15 @@ vi.mock("./ArticleMindMapPanel", () => ({
 }));
 
 vi.mock("./VideoSubtitlePlayer", () => ({
-  VideoSubtitlePlayer: () => <div data-testid="video-subtitle-player" />,
+  VideoSubtitlePlayer: ({ onImportSubtitles }: { onImportSubtitles?: () => void }) => (
+    <div data-testid="video-subtitle-player">
+      {onImportSubtitles ? (
+        <button type="button" onClick={onImportSubtitles}>
+          Import subtitles
+        </button>
+      ) : null}
+    </div>
+  ),
 }));
 
 function createArticle(overrides: Partial<Article> = {}): Article {
@@ -75,6 +85,7 @@ function createArticle(overrides: Partial<Article> = {}): Article {
 describe("ArticleReader agent mode", () => {
   beforeEach(() => {
     invokeMock.mockReset();
+    openMock.mockReset();
     localStorageStore.clear();
     Object.defineProperty(window, "localStorage", {
       value: {
@@ -106,5 +117,44 @@ describe("ArticleReader agent mode", () => {
 
     expect(screen.getByText("当前支持")).toBeInTheDocument();
     expect(screen.getByText("查看当前素材")).toBeInTheDocument();
+  });
+
+  it("lets media articles import subtitles from a local srt file", async () => {
+    openMock.mockResolvedValue("/tmp/sample.srt");
+    invokeMock.mockResolvedValue({
+      ...createArticle({
+        media_path: "/tmp/sample.mp4",
+        segments: [],
+      }),
+      segments: [
+        {
+          id: "seg-2",
+          article_id: "article-1",
+          order: 0,
+          text: "Imported subtitle",
+          created_at: "2026-03-08T00:00:00Z",
+          start_time: 0,
+          end_time: 1,
+        },
+      ],
+      content: "Imported subtitle",
+    });
+
+    render(
+      <ArticleReader
+        article={createArticle({
+          media_path: "/tmp/sample.mp4",
+          segments: [],
+        })}
+      />
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Import subtitles" }));
+
+    expect(openMock).toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledWith("import_article_subtitles_cmd", {
+      articleId: "article-1",
+      subtitlePath: "/tmp/sample.srt",
+    });
   });
 });

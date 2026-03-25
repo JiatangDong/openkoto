@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { save } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../ui/tabs";
@@ -93,6 +93,7 @@ export function ArticleReader({
 
   // 字幕提取状态
   const [isExtractingSubtitles, setIsExtractingSubtitles] = useState(false);
+  const [isImportingSubtitles, setIsImportingSubtitles] = useState(false);
   const [extractionProgress, setExtractionProgress] = useState<string | null>(null);
 
   // 成功提示消息状态
@@ -345,6 +346,50 @@ export function ArticleReader({
       setError(t("subtitleExtraction.error") + ": " + String(err));
     } finally {
       setIsExtractingSubtitles(false);
+    }
+  };
+
+  const handleImportSubtitles = async () => {
+    if (!article.media_path) return;
+
+    setError(null);
+
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{
+          name: "Subtitle",
+          extensions: ["srt"],
+        }],
+      });
+
+      if (!selected || typeof selected !== "string") {
+        return;
+      }
+
+      setIsImportingSubtitles(true);
+      const updatedArticle = await invoke<Article>("import_article_subtitles_cmd", {
+        articleId: article.id,
+        subtitlePath: selected,
+      });
+      const importedCount = updatedArticle.segments?.length || 0;
+      const successTemplate = t(
+        "subtitleImport.successMessage",
+        "Imported {{count}} subtitle segments"
+      );
+
+      setLocalSegments(updatedArticle.segments || []);
+      setContent(updatedArticle.content);
+      setSuccessMessage(successTemplate.replace("{{count}}", String(importedCount)));
+
+      onUpdate?.();
+      await refreshArticle();
+      setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err) {
+      console.error("[ArticleReader] Subtitle import failed:", err);
+      setError(t("subtitleImport.error", "Subtitle import failed") + ": " + String(err));
+    } finally {
+      setIsImportingSubtitles(false);
     }
   };
 
@@ -1154,7 +1199,9 @@ export function ArticleReader({
                         fontSize={fontSize}
                         viewMode={viewMode}
                         isExtractingSubtitles={isExtractingSubtitles}
+                        isImportingSubtitles={isImportingSubtitles}
                         onExtractSubtitles={handleExtractSubtitles}
+                        onImportSubtitles={handleImportSubtitles}
                         articleTitle={article.title}
                         articleId={article.id}
                         extractionProgress={extractionProgress}

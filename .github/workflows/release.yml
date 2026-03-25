@@ -158,12 +158,14 @@ jobs:
           releaseName: "OpenKoto Desktop ${{ github.ref_name }}"
           releaseBody: |
             ## Release Highlights
-            - Added GFM table rendering support for AI chat replies and analysis outputs.
-            - Unified AI Markdown rendering so assistant responses now share the same table, list, and code formatting.
-            - Improved narrow-screen table behavior with touch-friendly horizontal scrolling and better column wrapping.
+            - Added native `.srt` subtitle import for local video and audio materials.
+            - Added a manual subtitle import action for existing media articles.
+            - Added standalone subtitle-file import so `.srt` files can be read as regular materials.
 
             ## Changed
-            - Agent replies, article chat replies, explanation notes, and analysis results now use the shared Markdown renderer.
+            - Subtitle import now uses a shared backend parsing pipeline across all entry points.
+            - Local media import forms now support an optional subtitle attachment field.
+            - Added reader/player controls to import or replace subtitles without cloud transcription.
             - Desktop version is bumped to `${{ github.ref_name }}` for this release.
             - Multi-platform GitHub release publishing remains tag-driven through this workflow.
           releaseDraft: false

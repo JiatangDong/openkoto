@@ -7,39 +7,19 @@ import { Input } from "../ui/input";
 import { Loader2, FolderOpen, Import } from "lucide-react";
 import { Article } from "../../types";
 
-interface LocalAudioImportFormProps {
+interface LocalSubtitleImportFormProps {
     onSave?: (article: Article) => void;
     onCancel: () => void;
 }
 
-export function LocalAudioImportForm({ onSave, onCancel }: LocalAudioImportFormProps) {
+export function LocalSubtitleImportForm({ onSave, onCancel }: LocalSubtitleImportFormProps) {
     const { t } = useTranslation();
     const [filePath, setFilePath] = useState("");
-    const [subtitlePath, setSubtitlePath] = useState("");
+    const [title, setTitle] = useState("");
     const [isImporting, setIsImporting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
     const handleSelectFile = async () => {
-        try {
-            const selected = await open({
-                multiple: false,
-                filters: [{
-                    name: 'Audio',
-                    extensions: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'wma']
-                }]
-            });
-
-            if (selected) {
-                setFilePath(selected as string);
-                setError(null);
-            }
-        } catch (err) {
-            console.error("Failed to open file dialog:", err);
-            setError("Failed to open file dialog");
-        }
-    };
-
-    const handleSelectSubtitle = async () => {
         try {
             const selected = await open({
                 multiple: false,
@@ -50,7 +30,7 @@ export function LocalAudioImportForm({ onSave, onCancel }: LocalAudioImportFormP
             });
 
             if (selected) {
-                setSubtitlePath(selected as string);
+                setFilePath(selected as string);
                 setError(null);
             }
         } catch (err) {
@@ -61,7 +41,7 @@ export function LocalAudioImportForm({ onSave, onCancel }: LocalAudioImportFormP
 
     const handleImport = async () => {
         if (!filePath) {
-            setError(t("audioImport.errors.fileRequired"));
+            setError(t("subtitleImport.errors.fileRequired", "Please select a subtitle file"));
             return;
         }
 
@@ -69,13 +49,13 @@ export function LocalAudioImportForm({ onSave, onCancel }: LocalAudioImportFormP
         setError(null);
 
         try {
-            const article = await invoke<Article>("import_local_video_cmd", {
+            const article = await invoke<Article>("import_srt_file_cmd", {
                 filePath,
-                ...(subtitlePath ? { subtitlePath } : {}),
+                ...(title.trim() ? { title: title.trim() } : {}),
             });
             onSave?.(article);
         } catch (err) {
-            console.error("Audio import failed:", err);
+            console.error("Subtitle import failed:", err);
             setError(String(err));
         } finally {
             setIsImporting(false);
@@ -93,13 +73,13 @@ export function LocalAudioImportForm({ onSave, onCancel }: LocalAudioImportFormP
 
                 <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
-                        {t("audioImport.fileLabel")}
+                        {t("subtitleImport.fileLabel", "Subtitle File")}
                     </label>
                     <div className="flex gap-2">
                         <Input
                             value={filePath}
                             readOnly
-                            placeholder={t("audioImport.filePlaceholder")}
+                            placeholder={t("subtitleImport.filePlaceholder", "Select a subtitle file...")}
                             disabled={isImporting}
                             className="text-muted-foreground"
                         />
@@ -107,42 +87,27 @@ export function LocalAudioImportForm({ onSave, onCancel }: LocalAudioImportFormP
                             variant="secondary"
                             onClick={handleSelectFile}
                             disabled={isImporting}
-                            title={t("audioImport.selectFileTitle", "Select audio file")}
-                            aria-label={t("audioImport.selectFileTitle", "Select audio file")}
+                            title={t("subtitleImport.selectFileTitle", "Select subtitle file")}
+                            aria-label={t("subtitleImport.selectFileTitle", "Select subtitle file")}
                         >
                             <FolderOpen size={18} />
                         </Button>
                     </div>
                     <p className="text-xs text-muted-foreground mt-2">
-                        {t("audioImport.description")}
+                        {t("subtitleImport.description", "Import an .srt subtitle file as a standalone reading material.")}
                     </p>
                 </div>
 
                 <div>
                     <label className="block text-sm font-medium text-foreground mb-2">
-                        {t("audioImport.subtitleLabel", "Subtitle File (Optional)")}
+                        {t("subtitleImport.titleLabel", "Title (Optional)")}
                     </label>
-                    <div className="flex gap-2">
-                        <Input
-                            value={subtitlePath}
-                            readOnly
-                            placeholder={t("audioImport.subtitlePlaceholder", "Select a subtitle file...")}
-                            disabled={isImporting}
-                            className="text-muted-foreground"
-                        />
-                        <Button
-                            variant="secondary"
-                            onClick={handleSelectSubtitle}
-                            disabled={isImporting}
-                            title={t("audioImport.selectSubtitleTitle", "Select subtitle file")}
-                            aria-label={t("audioImport.selectSubtitleTitle", "Select subtitle file")}
-                        >
-                            <FolderOpen size={18} />
-                        </Button>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-2">
-                        {t("audioImport.subtitleDescription", "Import an existing .srt file together with the audio.")}
-                    </p>
+                    <Input
+                        value={title}
+                        onChange={(event) => setTitle(event.target.value)}
+                        placeholder={t("subtitleImport.titlePlaceholder", "Leave empty to use the file name")}
+                        disabled={isImporting}
+                    />
                 </div>
             </div>
 
@@ -154,12 +119,12 @@ export function LocalAudioImportForm({ onSave, onCancel }: LocalAudioImportFormP
                     {isImporting ? (
                         <>
                             <Loader2 size={16} className="animate-spin" />
-                            {t("audioImport.importing")}
+                            {t("subtitleImport.importing", "Importing...")}
                         </>
                     ) : (
                         <>
                             <Import size={16} />
-                            {t("audioImport.import")}
+                            {t("subtitleImport.import", "Import")}
                         </>
                     )}
                 </Button>

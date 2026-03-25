@@ -5,6 +5,7 @@ pub mod commands;
 pub mod pdf_sidecar;
 pub mod moonshot;
 pub mod storage;
+pub mod subtitle_import;
 mod subtitle_extraction;
 pub mod types;
 mod video_server;
@@ -84,6 +85,8 @@ pub fn run() {
             // External
             commands::import_youtube_video_cmd,
             commands::import_local_video_cmd,
+            commands::import_article_subtitles_cmd,
+            commands::import_srt_file_cmd,
             // 书籍导入
             commands::import_book_cmd,
             // 字幕提取

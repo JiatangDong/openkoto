@@ -4,6 +4,7 @@ use openkoto_desktop_lib::{
         MaterialSummary,
     },
     pdf_sidecar::{build_pdf_sidecar_command_for_dir, resolve_pdf_sidecar_for_dir},
+    subtitle_import::{create_article_from_srt, import_subtitles_into_article, parse_srt_content},
     types::{AppConfig, Article, ModelConfig},
 };
 
@@ -228,4 +229,71 @@ fn filter_material_summaries_applies_keyword_and_type() {
 
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].id, "1");
+}
+
+#[test]
+fn parse_srt_content_handles_crlf_and_tags() {
+    let srt = "1\r\n00:00:00,000 --> 00:00:01,500\r\n<i>Hello</i>\r\n\r\n2\r\n00:00:02,000 --> 00:00:03,250\r\nWorld\r\n";
+
+    let segments = parse_srt_content(srt, "article-1").unwrap();
+
+    assert_eq!(segments.len(), 2);
+    assert_eq!(segments[0].text, "Hello");
+    assert_eq!(segments[0].start_time, Some(0.0));
+    assert_eq!(segments[0].end_time, Some(1.5));
+    assert_eq!(segments[1].text, "World");
+    assert_eq!(segments[1].start_time, Some(2.0));
+    assert_eq!(segments[1].end_time, Some(3.25));
+}
+
+#[test]
+fn import_subtitles_into_article_replaces_segments_and_content() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "openkoto-import-subtitles-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let srt_path = temp_dir.join("sample.srt");
+    std::fs::write(
+        &srt_path,
+        "1\n00:00:00,000 --> 00:00:01,000\nFirst line\n\n2\n00:00:01,250 --> 00:00:02,500\nSecond line\n",
+    )
+    .unwrap();
+
+    let mut article = Article {
+        segments: vec![],
+        content: "old".to_string(),
+        ..sample_article_defaults()
+    };
+
+    import_subtitles_into_article(&mut article, &srt_path).unwrap();
+
+    assert_eq!(article.content, "First line Second line");
+    assert_eq!(article.segments.len(), 2);
+    assert_eq!(article.segments[0].article_id, article.id);
+
+    std::fs::remove_dir_all(&temp_dir).unwrap();
+}
+
+#[test]
+fn create_article_from_srt_uses_file_stem_as_default_title() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "openkoto-create-srt-article-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+    let srt_path = temp_dir.join("lesson-01.srt");
+    std::fs::write(
+        &srt_path,
+        "1\n00:00:00,000 --> 00:00:01,000\nStandalone line\n",
+    )
+    .unwrap();
+
+    let article = create_article_from_srt(&srt_path, None).unwrap();
+
+    assert_eq!(article.title, "lesson-01");
+    assert_eq!(article.source_type.as_deref(), Some("article"));
+    assert_eq!(article.segments.len(), 1);
+
+    std::fs::remove_dir_all(&temp_dir).unwrap();
 }

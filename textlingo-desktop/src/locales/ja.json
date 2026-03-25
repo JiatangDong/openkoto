@@ -432,6 +432,11 @@
     "title": "ローカル動画",
     "fileLabel": "動画ファイル",
     "filePlaceholder": "動画ファイルを選択...",
+    "selectFileTitle": "動画ファイルを選択",
+    "subtitleLabel": "字幕ファイル（任意）",
+    "subtitlePlaceholder": "字幕ファイルを選択...",
+    "selectSubtitleTitle": "字幕ファイルを選択",
+    "subtitleDescription": ".srt 字幕ファイルを動画と一緒に取り込めます。",
     "description": "コンピュータから動画ファイルをインポートします。MP4, MKV, WebM, MOV, AVIに対応しています。",
     "import": "インポート",
     "importing": "インポート中...",
@@ -443,6 +448,11 @@
     "title": "ローカル音声",
     "fileLabel": "音声ファイル",
     "filePlaceholder": "音声ファイルを選択...",
+    "selectFileTitle": "音声ファイルを選択",
+    "subtitleLabel": "字幕ファイル（任意）",
+    "subtitlePlaceholder": "字幕ファイルを選択...",
+    "selectSubtitleTitle": "字幕ファイルを選択",
+    "subtitleDescription": ".srt 字幕ファイルを音声と一緒に取り込めます。",
     "description": "コンピュータから音声ファイルをインポートします。MP3, WAV, M4A, AAC, FLAC, OGGに対応しています。",
     "import": "インポート",
     "importing": "インポート中...",
@@ -527,6 +537,23 @@
       "chunk": "チャンク抽出中: {{current}}/{{total}}",
       "merge": "マージと重複排除中...",
       "done": "字幕抽出完了！"
+    }
+  },
+  "subtitleImport": {
+    "title": "字幕ファイル",
+    "fileLabel": "字幕ファイル",
+    "filePlaceholder": "字幕ファイルを選択...",
+    "selectFileTitle": "字幕ファイルを選択",
+    "description": ".srt 字幕ファイルを単独の教材として取り込みます。",
+    "titleLabel": "タイトル（任意）",
+    "titlePlaceholder": "空欄ならファイル名を使用",
+    "import": "インポート",
+    "importing": "インポート中...",
+    "importButton": "字幕をインポート",
+    "successMessage": "{{count}} 個の字幕セグメントを取り込みました",
+    "error": "字幕のインポートに失敗しました",
+    "errors": {
+      "fileRequired": "字幕ファイルを選択してください"
     }
   },
   "bookImport": {

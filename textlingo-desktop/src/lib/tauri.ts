@@ -161,4 +161,6 @@ export type TauriCommand = {
   get_artifact_cmd: (articleId: string, artifactId: string) => Promise<Artifact>;
   get_agent_worker_status_cmd: () => Promise<AgentWorkerStatusSnapshot>;
   stop_agent_worker_cmd: () => Promise<void>;
+  import_article_subtitles_cmd: (articleId: string, subtitlePath: string) => Promise<Article>;
+  import_srt_file_cmd: (filePath: string, title?: string) => Promise<Article>;
 };

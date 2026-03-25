@@ -437,6 +437,11 @@
     "title": "Local Video",
     "fileLabel": "Video File",
     "filePlaceholder": "Select a video file...",
+    "selectFileTitle": "Select video file",
+    "subtitleLabel": "Subtitle File (Optional)",
+    "subtitlePlaceholder": "Select a subtitle file...",
+    "selectSubtitleTitle": "Select subtitle file",
+    "subtitleDescription": "Import an existing .srt file together with the video.",
     "description": "Import a video file from your computer. Supports MP4, MKV, WebM, MOV, AVI.",
     "import": "Import",
     "importing": "Importing...",
@@ -448,6 +453,11 @@
     "title": "Local Audio",
     "fileLabel": "Audio File",
     "filePlaceholder": "Select an audio file...",
+    "selectFileTitle": "Select audio file",
+    "subtitleLabel": "Subtitle File (Optional)",
+    "subtitlePlaceholder": "Select a subtitle file...",
+    "selectSubtitleTitle": "Select subtitle file",
+    "subtitleDescription": "Import an existing .srt file together with the audio.",
     "description": "Import an audio file from your computer. Supports MP3, WAV, M4A, AAC, FLAC, OGG.",
     "import": "Import",
     "importing": "Importing...",
@@ -532,6 +542,23 @@
       "chunk": "Extracting chunks: {{current}}/{{total}}",
       "merge": "Merging and deduplicating...",
       "done": "Subtitle extraction complete!"
+    }
+  },
+  "subtitleImport": {
+    "title": "Subtitle File",
+    "fileLabel": "Subtitle File",
+    "filePlaceholder": "Select a subtitle file...",
+    "selectFileTitle": "Select subtitle file",
+    "description": "Import an .srt subtitle file as a standalone reading material.",
+    "titleLabel": "Title (Optional)",
+    "titlePlaceholder": "Leave empty to use the file name",
+    "import": "Import",
+    "importing": "Importing...",
+    "importButton": "Import subtitles",
+    "successMessage": "Imported {{count}} subtitle segments",
+    "error": "Subtitle import failed",
+    "errors": {
+      "fileRequired": "Please select a subtitle file"
     }
   },
   "bookImport": {

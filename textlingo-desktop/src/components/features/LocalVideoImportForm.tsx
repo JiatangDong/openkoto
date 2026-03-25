@@ -15,6 +15,7 @@ interface LocalVideoImportFormProps {
 export function LocalVideoImportForm({ onSave, onCancel }: LocalVideoImportFormProps) {
     const { t } = useTranslation();
     const [filePath, setFilePath] = useState("");
+    const [subtitlePath, setSubtitlePath] = useState("");
     const [isImporting, setIsImporting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -39,6 +40,26 @@ export function LocalVideoImportForm({ onSave, onCancel }: LocalVideoImportFormP
         }
     };
 
+    const handleSelectSubtitle = async () => {
+        try {
+            const selected = await open({
+                multiple: false,
+                filters: [{
+                    name: 'Subtitle',
+                    extensions: ['srt']
+                }]
+            });
+
+            if (selected) {
+                setSubtitlePath(selected as string);
+                setError(null);
+            }
+        } catch (err) {
+            console.error("Failed to open subtitle dialog:", err);
+            setError("Failed to open subtitle dialog");
+        }
+    };
+
     const handleImport = async () => {
         if (!filePath) {
             setError(t("localImport.errors.fileRequired"));
@@ -49,7 +70,10 @@ export function LocalVideoImportForm({ onSave, onCancel }: LocalVideoImportFormP
         setError(null);
 
         try {
-            const article = await invoke<Article>("import_local_video_cmd", { filePath });
+            const article = await invoke<Article>("import_local_video_cmd", {
+                filePath,
+                ...(subtitlePath ? { subtitlePath } : {}),
+            });
             onSave?.(article);
         } catch (err) {
             console.error("Local import failed:", err);
@@ -84,13 +108,41 @@ export function LocalVideoImportForm({ onSave, onCancel }: LocalVideoImportFormP
                             variant="secondary"
                             onClick={handleSelectFile}
                             disabled={isImporting}
-                            title="Select File"
+                            title={t("localImport.selectFileTitle", "Select video file")}
+                            aria-label={t("localImport.selectFileTitle", "Select video file")}
                         >
                             <FolderOpen size={18} />
                         </Button>
                     </div>
                     <p className="text-xs text-muted-foreground mt-2">
                         {t("localImport.description")}
+                    </p>
+                </div>
+
+                <div>
+                    <label className="block text-sm font-medium text-foreground mb-2">
+                        {t("localImport.subtitleLabel", "Subtitle File (Optional)")}
+                    </label>
+                    <div className="flex gap-2">
+                        <Input
+                            value={subtitlePath}
+                            readOnly
+                            placeholder={t("localImport.subtitlePlaceholder", "Select a subtitle file...")}
+                            disabled={isImporting}
+                            className="text-muted-foreground"
+                        />
+                        <Button
+                            variant="secondary"
+                            onClick={handleSelectSubtitle}
+                            disabled={isImporting}
+                            title={t("localImport.selectSubtitleTitle", "Select subtitle file")}
+                            aria-label={t("localImport.selectSubtitleTitle", "Select subtitle file")}
+                        >
+                            <FolderOpen size={18} />
+                        </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                        {t("localImport.subtitleDescription", "Import an existing .srt file together with the video.")}
                     </p>
                 </div>
             </div>

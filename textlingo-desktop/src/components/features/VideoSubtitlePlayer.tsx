@@ -11,7 +11,7 @@
 
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { Button } from "../ui/button";
-import { ChevronDown, ChevronUp, Loader2, FileText, Minimize2, Download, X, FileJson, FileType, Music } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, FileText, Minimize2, Download, X, FileJson, FileType, FolderOpen, Music } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -45,8 +45,12 @@ interface VideoSubtitlePlayerProps {
     viewMode: ViewMode;
     /** 是否正在提取字幕 */
     isExtractingSubtitles?: boolean;
+    /** 是否正在导入字幕 */
+    isImportingSubtitles?: boolean;
     /** 提取字幕回调 */
     onExtractSubtitles?: () => void;
+    /** 导入字幕回调 */
+    onImportSubtitles?: () => void;
     /** 文章标题（用于导出文件名） */
     articleTitle?: string;
     /** 文章ID（用于记忆播放位置） */
@@ -72,7 +76,9 @@ export function VideoSubtitlePlayer({
     fontSize,
     viewMode,
     isExtractingSubtitles = false,
+    isImportingSubtitles = false,
     onExtractSubtitles,
+    onImportSubtitles,
     articleTitle = "subtitles",
     articleId,
     extractionProgress,
@@ -421,7 +427,7 @@ export function VideoSubtitlePlayer({
                 </div>
 
                 {/* 字幕提取提示 */}
-                {onExtractSubtitles && (
+                {(onExtractSubtitles || onImportSubtitles) && (
                     <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg flex flex-col sm:flex-row items-start sm:items-center gap-3">
                         <div className="flex-1">
                             <p className="text-foreground font-medium">{t("subtitleExtraction.noSubtitles")}</p>
@@ -435,23 +441,47 @@ export function VideoSubtitlePlayer({
                                 <p className="text-sm text-muted-foreground mt-1">{t("subtitleExtraction.geminiRequired")}</p>
                             )}
                         </div>
-                        <Button
-                            onClick={onExtractSubtitles}
-                            disabled={isExtractingSubtitles}
-                            className="gap-2 shrink-0"
-                        >
-                            {isExtractingSubtitles ? (
-                                <>
-                                    <Loader2 size={16} className="animate-spin" />
-                                    {t("subtitleExtraction.extracting")}
-                                </>
-                            ) : (
-                                <>
-                                    <FileText size={16} />
-                                    {t("subtitleExtraction.extractButton")}
-                                </>
+                        <div className="flex gap-2 shrink-0">
+                            {onImportSubtitles && (
+                                <Button
+                                    variant="secondary"
+                                    onClick={onImportSubtitles}
+                                    disabled={isImportingSubtitles}
+                                    className="gap-2"
+                                >
+                                    {isImportingSubtitles ? (
+                                        <>
+                                            <Loader2 size={16} className="animate-spin" />
+                                            {t("subtitleImport.importing", "Importing...")}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <FolderOpen size={16} />
+                                            {t("subtitleImport.importButton", "Import subtitles")}
+                                        </>
+                                    )}
+                                </Button>
                             )}
-                        </Button>
+                            {onExtractSubtitles && (
+                                <Button
+                                    onClick={onExtractSubtitles}
+                                    disabled={isExtractingSubtitles}
+                                    className="gap-2"
+                                >
+                                    {isExtractingSubtitles ? (
+                                        <>
+                                            <Loader2 size={16} className="animate-spin" />
+                                            {t("subtitleExtraction.extracting")}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <FileText size={16} />
+                                            {t("subtitleExtraction.extractButton")}
+                                        </>
+                                    )}
+                                </Button>
+                            )}
+                        </div>
                     </div>
                 )}
             </div>
@@ -753,6 +783,24 @@ export function VideoSubtitlePlayer({
                     </DropdownMenu>
 
                     {/* 重新提取字幕按钮 */}
+                    {onImportSubtitles && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={onImportSubtitles}
+                            disabled={isImportingSubtitles}
+                            className="gap-2 shrink-0"
+                            title={t("subtitleImport.importButton", "Import subtitles")}
+                        >
+                            {isImportingSubtitles ? (
+                                <Loader2 size={16} className="animate-spin" />
+                            ) : (
+                                <FolderOpen size={16} />
+                            )}
+                            <span className="hidden sm:inline">{t("subtitleImport.importButton", "Import subtitles")}</span>
+                        </Button>
+                    )}
+
                     {onExtractSubtitles && (
                         <Button
                             variant="outline"

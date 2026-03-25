@@ -2859,7 +2859,7 @@ dependencies = [
 
 [[package]]
 name = "openkoto-desktop"
-version = "0.5.8"
+version = "0.5.14"
 dependencies = [
  "base64 0.22.1",
  "chrono",

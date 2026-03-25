@@ -37,6 +37,7 @@ use crate::storage::{
     save_word_pack,
     update_article_active_mind_map_artifact,
 };
+use crate::subtitle_import::{create_article_from_srt, import_subtitles_into_article};
 use crate::types::{
     AgentTask, AgentTaskInput, AgentTaskStatus, AgentTaskType, AnalysisRequest, AnalysisResponse,
     AnalysisType, Article, ArticleEvidenceItem, ArticleEvidenceResult, ArticleOverview,
@@ -2502,6 +2503,7 @@ pub async fn import_youtube_video_cmd(
 pub async fn import_local_video_cmd(
     app_handle: AppHandle,
     file_path: String,
+    subtitle_path: Option<String>,
 ) -> Result<Article, String> {
     let app_data_dir = app_handle
         .path()
@@ -2548,7 +2550,7 @@ pub async fn import_local_video_cmd(
         format!("[Local Import] {}", file_name)
     };
 
-    let article = Article {
+    let mut article = Article {
         id: id.clone(),
         title: file_name.into_owned(),
         content,
@@ -2567,10 +2569,50 @@ pub async fn import_local_video_cmd(
         segments: Vec::new(),
     };
 
+    if let Some(subtitle_path) = subtitle_path {
+        import_subtitles_into_article(&mut article, std::path::Path::new(&subtitle_path))?;
+    }
+
     let article_json = serde_json::to_string(&article)
         .map_err(|e| format!("Failed to serialize article: {}", e))?;
     save_article(&app_handle, &id, &article_json)?;
 
+    Ok(article)
+}
+
+#[tauri::command]
+pub async fn import_article_subtitles_cmd(
+    app_handle: AppHandle,
+    article_id: String,
+    subtitle_path: String,
+) -> Result<Article, String> {
+    let article_json = load_article(&app_handle, &article_id)?;
+    let mut article: Article = serde_json::from_str(&article_json)
+        .map_err(|e| format!("Failed to parse article: {}", e))?;
+
+    if article.media_path.is_none() {
+        return Err("仅媒体素材支持导入字幕".to_string());
+    }
+
+    import_subtitles_into_article(&mut article, std::path::Path::new(&subtitle_path))?;
+
+    let article_json = serde_json::to_string(&article)
+        .map_err(|e| format!("Failed to serialize article: {}", e))?;
+    save_article(&app_handle, &article_id, &article_json)?;
+
+    Ok(article)
+}
+
+#[tauri::command]
+pub async fn import_srt_file_cmd(
+    app_handle: AppHandle,
+    file_path: String,
+    title: Option<String>,
+) -> Result<Article, String> {
+    let article = create_article_from_srt(std::path::Path::new(&file_path), title)?;
+    let article_json = serde_json::to_string(&article)
+        .map_err(|e| format!("Failed to serialize article: {}", e))?;
+    save_article(&app_handle, &article.id, &article_json)?;
     Ok(article)
 }
 

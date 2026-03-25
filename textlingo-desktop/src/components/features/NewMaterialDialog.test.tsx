@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NewMaterialDialog } from "./NewMaterialDialog";
 
 const invokeMock = vi.fn();
@@ -38,11 +38,19 @@ vi.mock("./LocalAudioImportForm", () => ({
   LocalAudioImportForm: () => <div>local audio import form</div>,
 }));
 
+vi.mock("./LocalSubtitleImportForm", () => ({
+  LocalSubtitleImportForm: () => <div>local subtitle import form</div>,
+}));
+
 describe("NewMaterialDialog theme styling", () => {
   beforeEach(() => {
     invokeMock.mockReset();
     openMock.mockReset();
     invokeMock.mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("uses primary styling for each active material tab", async () => {
@@ -56,6 +64,7 @@ describe("NewMaterialDialog theme styling", () => {
       { name: "youtubeImport.title", forbiddenClass: "text-red-500" },
       { name: "localImport.title", forbiddenClass: "text-accent-foreground" },
       { name: "本地音频", forbiddenClass: "text-green-500" },
+      { name: "字幕文件", forbiddenClass: "text-blue-500" },
     ];
 
     for (const { name, forbiddenClass } of expectations) {
@@ -66,5 +75,14 @@ describe("NewMaterialDialog theme styling", () => {
       expect(tab.className).toContain("text-primary");
       expect(tab.className).not.toContain(forbiddenClass);
     }
+  });
+
+  it("renders the standalone subtitle import form from the new material dialog", async () => {
+    render(<NewMaterialDialog isOpen onClose={() => {}} />);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "字幕文件" }));
+
+    expect(screen.getByText("local subtitle import form")).toBeInTheDocument();
   });
 });

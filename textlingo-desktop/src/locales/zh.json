@@ -442,6 +442,11 @@
     "title": "本地视频",
     "fileLabel": "视频文件",
     "filePlaceholder": "选择视频文件...",
+    "selectFileTitle": "选择视频文件",
+    "subtitleLabel": "字幕文件（可选）",
+    "subtitlePlaceholder": "选择字幕文件...",
+    "selectSubtitleTitle": "选择字幕文件",
+    "subtitleDescription": "可同时导入现成的 .srt 字幕文件。",
     "description": "从电脑导入视频文件。支持 MP4, MKV, WebM, MOV, AVI。",
     "import": "导入",
     "importing": "导入中...",
@@ -453,6 +458,11 @@
     "title": "本地音频",
     "fileLabel": "音频文件",
     "filePlaceholder": "选择音频文件...",
+    "selectFileTitle": "选择音频文件",
+    "subtitleLabel": "字幕文件（可选）",
+    "subtitlePlaceholder": "选择字幕文件...",
+    "selectSubtitleTitle": "选择字幕文件",
+    "subtitleDescription": "可同时导入现成的 .srt 字幕文件。",
     "description": "从电脑导入音频文件。支持 MP3, WAV, M4A, AAC, FLAC, OGG。",
     "import": "导入",
     "importing": "导入中...",
@@ -537,6 +547,23 @@
       "chunk": "分片提取中: {{current}}/{{total}}",
       "merge": "合并排序去重中...",
       "done": "字幕提取完成！"
+    }
+  },
+  "subtitleImport": {
+    "title": "字幕文件",
+    "fileLabel": "字幕文件",
+    "filePlaceholder": "选择字幕文件...",
+    "selectFileTitle": "选择字幕文件",
+    "description": "将 .srt 字幕文件作为独立素材导入。",
+    "titleLabel": "标题（可选）",
+    "titlePlaceholder": "留空则使用文件名",
+    "import": "导入",
+    "importing": "导入中...",
+    "importButton": "导入字幕",
+    "successMessage": "已导入 {{count}} 个字幕片段",
+    "error": "导入字幕失败",
+    "errors": {
+      "fileRequired": "请选择字幕文件"
     }
   },
   "bookImport": {

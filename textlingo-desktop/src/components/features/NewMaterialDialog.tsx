@@ -9,6 +9,7 @@ import { YouTubeImportForm } from "./YouTubeImportForm";
 import { LocalVideoImportForm } from "./LocalVideoImportForm";
 import { BookImportForm } from "./BookImportForm";
 import { LocalAudioImportForm } from "./LocalAudioImportForm";
+import { LocalSubtitleImportForm } from "./LocalSubtitleImportForm";
 import { WebImportForm } from "./WebImportForm";
 import { cn } from "../../lib/utils";
 
@@ -19,7 +20,7 @@ function isAudioFile(path: string): boolean {
     return AUDIO_EXTENSIONS.includes(ext);
 }
 
-type MaterialType = "article" | "web" | "youtube" | "local" | "book" | "audio";
+type MaterialType = "article" | "web" | "youtube" | "local" | "book" | "audio" | "subtitle";
 
 interface NewMaterialDialogProps {
     isOpen: boolean;
@@ -162,6 +163,21 @@ export function NewMaterialDialog({ isOpen, onClose, onSave, editingArticle }: N
                         <Music size={18} />
                         {t("audioImport.title", "本地音频")}
                     </button>
+
+                    <button
+                        className={cn(
+                            "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-left",
+                            activeTab === "subtitle"
+                                ? activeTabClassName
+                                : inactiveTabClassName,
+                            isEditing && activeTab !== "subtitle" && "opacity-50 cursor-not-allowed"
+                        )}
+                        onClick={() => !isEditing && setActiveTab("subtitle")}
+                        disabled={isEditing}
+                    >
+                        <FileText size={18} />
+                        {t("subtitleImport.title", "字幕文件")}
+                    </button>
                 </div>
 
                 {/* Right Content */}
@@ -189,6 +205,7 @@ export function NewMaterialDialog({ isOpen, onClose, onSave, editingArticle }: N
                                 {activeTab === "youtube" && <YouTubeImportForm onSave={handleSave} onCancel={handleClose} />}
                                 {activeTab === "local" && <LocalVideoImportForm onSave={handleSave} onCancel={handleClose} />}
                                 {activeTab === "audio" && <LocalAudioImportForm onSave={handleSave} onCancel={handleClose} />}
+                                {activeTab === "subtitle" && <LocalSubtitleImportForm onSave={handleSave} onCancel={handleClose} />}
                             </>
                         )}
                     </div>
