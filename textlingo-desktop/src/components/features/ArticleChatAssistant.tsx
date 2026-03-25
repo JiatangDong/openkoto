@@ -19,6 +19,8 @@ import { MarkdownContent } from "../ui/MarkdownContent";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+const DEFAULT_TRANSLATE_PROMPT_TEMPLATE = "Translate the following text to {target_language}:\n\n{text}";
+
 // Simple Card component since we don't have one in UI
 const Card = ({ className, children }: { className?: string; children: React.ReactNode }) => (
     <div className={cn("bg-card border border-border rounded-lg", className)}>
@@ -112,16 +114,6 @@ export function ArticleChatAssistant({
     // Load quick actions when selected text changes
     useEffect(() => {
         if (selectedText) {
-            // Auto translate if enabled
-            if (isFastTranslateEnabled) {
-                handleQuickAction({
-                    action: "translate",
-                    label: "Translate",
-                    description: "Translate",
-                    prompt_template: ""
-                },); // Auto-run translate
-            }
-
             const configuredActions = getVisibleQuickActions(appConfig?.prompt_features ?? []).map((feature) => ({
                 action: feature.id,
                 label: feature.name,
@@ -137,7 +129,7 @@ export function ArticleChatAssistant({
                         action: "selection.translate",
                         label: t("novelChat.quickTranslate", "Translate"),
                         description: t("novelChat.quickTranslateDesc", "Translate to target language"),
-                        prompt_template: "Translate the following text to {target_language}:\n\n{text}"
+                        prompt_template: DEFAULT_TRANSLATE_PROMPT_TEMPLATE
                     },
                     {
                         action: "selection.explain",
@@ -152,6 +144,15 @@ export function ArticleChatAssistant({
                         prompt_template: "Analyze the grammar of the following text in {target_language}:\n\n{text}"
                     }
                 ];
+
+            // Auto translate if enabled
+            if (isFastTranslateEnabled) {
+                const translateAction = actions.find((action) => action.action === "selection.translate");
+                if (translateAction) {
+                    handleQuickAction(translateAction);
+                }
+            }
+
             setQuickActions(actions);
         } else {
             setQuickActions([]);
@@ -503,7 +504,11 @@ export function ArticleChatAssistant({
     const handleQuickAction = async (action: QuickAction) => {
         if (!selectedText) return;
 
-        if (action.action === 'translate' || action.action === 'selection.translate') {
+        const shouldUseFastTranslate =
+            (action.action === 'translate' || action.action === 'selection.translate')
+            && action.prompt_template.trim() === DEFAULT_TRANSLATE_PROMPT_TEMPLATE;
+
+        if (shouldUseFastTranslate) {
             const userMessageContent = `Translate:\n"${selectedText}"`;
 
             const userMessage: ChatMessage = {
@@ -582,9 +587,15 @@ export function ArticleChatAssistant({
 
     const getActionIcon = (action: string) => {
         switch (action) {
-            case 'translate': return <Languages size={14} className="mr-1" />;
-            case 'explain': return <Lightbulb size={14} className="mr-1" />;
-            case 'grammar': return <GraduationCap size={14} className="mr-1" />;
+            case 'translate':
+            case 'selection.translate':
+                return <Languages size={14} className="mr-1" />;
+            case 'explain':
+            case 'selection.explain':
+                return <Lightbulb size={14} className="mr-1" />;
+            case 'grammar':
+            case 'selection.grammar':
+                return <GraduationCap size={14} className="mr-1" />;
             default: return <Sparkles size={14} className="mr-1" />;
         }
     };
@@ -664,7 +675,7 @@ export function ArticleChatAssistant({
                 {quickActions.length > 0 && selectedText && (
                     <div className="mb-4">
                         <div className="flex flex-wrap gap-2">
-                            {quickActions.slice(0, 4).map((action) => (
+                            {quickActions.map((action) => (
                                 <Button
                                     key={action.action}
                                     variant="secondary"
