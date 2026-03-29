@@ -61,6 +61,8 @@ export function PdfReader({
     const { t } = useTranslation();
     const containerRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
+    const lastWheelNavigationAtRef = useRef(0);
+    const lastWheelDirectionRef = useRef<-1 | 0 | 1>(0);
 
     // PDF 状态
     const [numPages, setNumPages] = useState<number>(0);
@@ -126,6 +128,34 @@ export function PdfReader({
     const goToNextPage = useCallback(() => {
         setPageNumber((prev) => Math.min(prev + 1, numPages));
     }, [numPages]);
+
+    const handleWheelNavigation = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+        if (numPages <= 1 || Math.abs(e.deltaY) < 8) {
+            return;
+        }
+
+        const direction = e.deltaY > 0 ? 1 : -1;
+        const now = Date.now();
+        if (now - lastWheelNavigationAtRef.current < 250 && lastWheelDirectionRef.current === direction) {
+            e.preventDefault();
+            return;
+        }
+
+        if (e.deltaY > 0 && pageNumber < numPages) {
+            e.preventDefault();
+            lastWheelNavigationAtRef.current = now;
+            lastWheelDirectionRef.current = direction;
+            goToNextPage();
+            return;
+        }
+
+        if (e.deltaY < 0 && pageNumber > 1) {
+            e.preventDefault();
+            lastWheelNavigationAtRef.current = now;
+            lastWheelDirectionRef.current = direction;
+            goToPrevPage();
+        }
+    }, [goToNextPage, goToPrevPage, numPages, pageNumber]);
 
     // 进度条变化
     const handleProgressChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -374,12 +404,13 @@ export function PdfReader({
                 ref={contentRef}
                 className="flex-1 relative overflow-auto flex flex-col items-center"
                 onMouseUp={handleTextSelection}
+                onWheel={handleWheelNavigation}
             >
                 {/* 翻页按钮 - 左 */}
                 <button
                     onClick={goToPrevPage}
                     disabled={pageNumber <= 1}
-                    className="fixed left-4 top-1/2 -translate-y-1/2 z-10 p-2 rounded-full bg-background/80 border border-border shadow-sm hover:bg-muted transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="absolute left-4 top-1/2 -translate-y-1/2 z-10 p-2 rounded-full bg-background/80 border border-border shadow-sm hover:bg-muted transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                     title={t("pdfReader.prevPage", "上一页")}
                 >
                     <ChevronLeft size={20} />
@@ -431,7 +462,7 @@ export function PdfReader({
                 <button
                     onClick={goToNextPage}
                     disabled={pageNumber >= numPages}
-                    className="fixed right-4 top-1/2 -translate-y-1/2 z-10 p-2 rounded-full bg-background/80 border border-border shadow-sm hover:bg-muted transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="absolute right-4 top-1/2 -translate-y-1/2 z-10 p-2 rounded-full bg-background/80 border border-border shadow-sm hover:bg-muted transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                     title={t("pdfReader.nextPage", "下一页")}
                 >
                     <ChevronRight size={20} />

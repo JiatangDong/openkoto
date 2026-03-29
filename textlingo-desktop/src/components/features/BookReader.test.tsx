@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -116,6 +116,28 @@ describe("BookReader", () => {
     expect(screen.getByTestId("book-reader-shell")).toBeInTheDocument();
     expect(screen.getByTestId("pdf-reader")).toBeInTheDocument();
     expect(screen.getByTestId("article-mind-map-panel")).toBeInTheDocument();
+  });
+
+  it("keeps a back button available when the assistant is restored in full mode", async () => {
+    localStorageStore.set("book-reader-assistant-mode", "full");
+    const onBack = vi.fn();
+
+    render(
+      <BookReader
+        article={createBookArticle({ book_type: "pdf", book_path: "/tmp/book.pdf" })}
+        onBack={onBack}
+      />,
+    );
+
+    expect(screen.getByTestId("book-reader-shell")).toHaveAttribute("data-assistant-mode", "full");
+    expect(screen.getByTestId("book-reader-main-pane")).toHaveAttribute("data-hidden", "true");
+
+    const assistantPane = screen.getByTestId("book-reader-assistant-pane");
+    const backButton = within(assistantPane).getByRole("button", { name: "返回素材列表" });
+    expect(backButton).toBeInTheDocument();
+
+    await userEvent.click(backButton);
+    expect(onBack).toHaveBeenCalledTimes(1);
   });
 
   it("starts pdf translation without plugin install gating", async () => {

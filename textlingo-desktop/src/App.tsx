@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { BookOpen, RotateCw, Star, LayoutGrid, List, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -28,6 +28,7 @@ function App() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "card">("card");
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const onboardingDismissedRef = useRef(false);
 
   // Load config and articles on mount
   useEffect(() => {
@@ -67,19 +68,15 @@ function App() {
         invoke<Article[]>("list_articles_cmd"),
       ]);
       setConfig(configResult);
+      const hasSavedModelConfigs = !!configResult?.model_configs?.length;
+      const shouldShowOnboarding =
+        !onboardingDismissedRef.current &&
+        (!configResult || (!configResult.onboarding_completed && !hasSavedModelConfigs));
+
       if (configResult) {
         getApiClient(configResult); // Initialize API client
-        // Show onboarding only when it was never completed and no model config exists
-        if (
-          !configResult.onboarding_completed &&
-          (!configResult.model_configs || configResult.model_configs.length === 0)
-        ) {
-          setShowOnboarding(true);
-        }
-      } else {
-        // No config at all means first time
-        setShowOnboarding(true);
       }
+      setShowOnboarding(shouldShowOnboarding);
       setArticles(articlesResult);
       return articlesResult;
     } catch (err) {
@@ -226,6 +223,7 @@ function App() {
         <OnboardingDialog
           isOpen={showOnboarding}
           onFinish={() => {
+            onboardingDismissedRef.current = true;
             setShowOnboarding(false);
             loadData();
           }}

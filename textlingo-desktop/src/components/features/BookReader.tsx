@@ -33,6 +33,7 @@ interface BookReaderProps {
 export function BookReader({ article, onBack }: BookReaderProps) {
     const { t } = useTranslation();
     const assistantModeStorageKey = "book-reader-assistant-mode";
+    const backToMaterialsLabel = t("bookReader.backToMaterials", "返回素材列表");
 
     // 选中的文本（用于 AI 分析）
     const [selectedText, setSelectedText] = useState("");
@@ -253,7 +254,13 @@ export function BookReader({ article, onBack }: BookReaderProps) {
                 <div className="flex items-center justify-between p-3 border-b border-border bg-card/50 backdrop-blur-sm">
                     <div className="flex items-center gap-3">
                         {onBack && (
-                            <Button variant="ghost" size="sm" onClick={onBack}>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={onBack}
+                                aria-label={backToMaterialsLabel}
+                                title={backToMaterialsLabel}
+                            >
                                 <ChevronLeft size={18} />
                             </Button>
                         )}
@@ -462,6 +469,31 @@ export function BookReader({ article, onBack }: BookReaderProps) {
                     ),
                 },
             ]}
+            headerContent={({ panelMode }) =>
+                panelMode === "full" && onBack ? (
+                    <div className="flex items-center gap-3 px-4 py-3 min-w-0">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={onBack}
+                            aria-label={backToMaterialsLabel}
+                            title={backToMaterialsLabel}
+                            className="shrink-0 gap-1.5"
+                        >
+                            <ChevronLeft size={16} />
+                            <span>{t("common.back", "返回")}</span>
+                        </Button>
+                        <div className="min-w-0">
+                            <div className="text-sm font-medium truncate">
+                                {article.title || t("articleReader.untitled")}
+                            </div>
+                            <div className="text-xs text-muted-foreground uppercase">
+                                {article.book_type}
+                            </div>
+                        </div>
+                    </div>
+                ) : null
+            }
             mainContent={mainContent}
         />
     );

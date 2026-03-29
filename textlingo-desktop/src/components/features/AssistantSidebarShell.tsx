@@ -4,6 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Button } from "../ui/button";
 
 export type AssistantPanelMode = "compact" | "wide" | "full";
+type PanelSlot = ReactNode | ((context: { panelMode: AssistantPanelMode }) => ReactNode);
 
 export interface AssistantSidebarTab {
   value: string;
@@ -16,8 +17,8 @@ interface AssistantSidebarShellProps {
   tabs: AssistantSidebarTab[];
   defaultTab: string;
   mainContent: ReactNode;
-  topContent?: ReactNode;
-  headerContent?: ReactNode;
+  topContent?: PanelSlot;
+  headerContent?: PanelSlot;
   showAssistant?: boolean;
   activeTab?: string;
   onTabChange?: (value: string) => void;
@@ -64,6 +65,10 @@ export function AssistantSidebarShell({
   }, [assistantPanelMode, storageKey]);
 
   const effectivePanelMode = showAssistant ? assistantPanelMode : "compact";
+  const resolvePanelSlot = (slot?: PanelSlot) =>
+    typeof slot === "function" ? slot({ panelMode: effectivePanelMode }) : slot;
+  const resolvedTopContent = resolvePanelSlot(topContent);
+  const resolvedHeaderContent = resolvePanelSlot(headerContent);
 
   const mainPaneClass =
     showAssistant && effectivePanelMode === "full"
@@ -103,7 +108,9 @@ export function AssistantSidebarShell({
             }}
             className="flex-1 min-h-0 flex flex-col h-full overflow-hidden"
           >
-            {topContent ? <div className="border-b border-border bg-card px-4 py-3">{topContent}</div> : null}
+            {resolvedTopContent ? (
+              <div className="border-b border-border bg-card px-4 py-3">{resolvedTopContent}</div>
+            ) : null}
 
             <div className="px-4 py-3 border-b border-border bg-card flex items-center gap-3">
               {showTabList ? (
@@ -132,7 +139,9 @@ export function AssistantSidebarShell({
               </div>
             </div>
 
-            {headerContent ? <div className="border-b border-border bg-card">{headerContent}</div> : null}
+            {resolvedHeaderContent ? (
+              <div className="border-b border-border bg-card">{resolvedHeaderContent}</div>
+            ) : null}
 
             {tabs.map((tab) => (
               <TabsContent key={tab.value} value={tab.value} className="flex-1 min-h-0 overflow-hidden mt-0">
