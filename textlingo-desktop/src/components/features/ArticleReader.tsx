@@ -45,6 +45,7 @@ import {
   DropdownMenuSeparator,
 } from "../ui/dropdown-menu";
 import { useConfig } from "../../lib/hooks";
+import { buildMediaResourceUrl } from "../../lib/media";
 
 interface ArticleReaderProps {
   article: Article;
@@ -54,6 +55,7 @@ interface ArticleReaderProps {
   hasNext?: boolean;
   hasPrev?: boolean;
   onUpdate?: () => void;
+  onOpenKtvExport?: () => void;
 }
 
 export function ArticleReader({
@@ -64,6 +66,7 @@ export function ArticleReader({
   hasNext,
   hasPrev,
   onUpdate,
+  onOpenKtvExport,
 }: ArticleReaderProps) {
   const { t } = useTranslation();
   const assistantModeStorageKey = "article-reader-assistant-mode";
@@ -961,44 +964,47 @@ export function ArticleReader({
 
             {hasSegments ? (
               <>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant={viewMode !== 'original' ? "default" : "secondary"}
-                      size="sm"
-                      title={t("articleReader.viewMode") || "View Mode"}
-                      className="h-8 md:h-9"
-                    >
-                      {viewMode === 'original' && <Eye size={16} />}
-                      {viewMode === 'bilingual' && <Split size={16} />}
-                      {viewMode === 'translation' && <Languages size={16} />}
-                      <span className="ml-2 hidden xl:inline">
-                        {t(`articleReader.viewMode.${viewMode}`) || (viewMode === 'original' ? "Original" : viewMode === 'bilingual' ? "Bilingual" : "Translation")}
-                      </span>
-                      <ChevronDown size={14} className="ml-1 opacity-50" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => setViewMode('original')}>
-                      <div className="flex items-center justify-between w-full min-w-[120px]">
-                        <span>{t("articleReader.viewMode.original") || "Original"}</span>
-                        {viewMode === 'original' && <Check size={14} />}
-                      </div>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setViewMode('bilingual')}>
-                      <div className="flex items-center justify-between w-full">
-                        <span>{t("articleReader.viewMode.bilingual") || "Bilingual"}</span>
-                        {viewMode === 'bilingual' && <Check size={14} />}
-                      </div>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setViewMode('translation')}>
-                      <div className="flex items-center justify-between w-full">
-                        <span>{t("articleReader.viewMode.translation") || "Translation"}</span>
-                        {viewMode === 'translation' && <Check size={14} />}
-                      </div>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {!article.media_path && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant={viewMode !== 'original' ? "default" : "secondary"}
+                        size="sm"
+                        title={t("articleReader.viewMode") || "View Mode"}
+                        className="h-8 md:h-9"
+                        data-testid="reader-toolbar-view-mode-trigger"
+                      >
+                        {viewMode === 'original' && <Eye size={16} />}
+                        {viewMode === 'bilingual' && <Split size={16} />}
+                        {viewMode === 'translation' && <Languages size={16} />}
+                        <span className="ml-2 hidden xl:inline">
+                          {t(`articleReader.viewMode.${viewMode}`) || (viewMode === 'original' ? "Original" : viewMode === 'bilingual' ? "Bilingual" : "Translation")}
+                        </span>
+                        <ChevronDown size={14} className="ml-1 opacity-50" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => setViewMode('original')}>
+                        <div className="flex items-center justify-between w-full min-w-[120px]">
+                          <span>{t("articleReader.viewMode.original") || "Original"}</span>
+                          {viewMode === 'original' && <Check size={14} />}
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setViewMode('bilingual')}>
+                        <div className="flex items-center justify-between w-full">
+                          <span>{t("articleReader.viewMode.bilingual") || "Bilingual"}</span>
+                          {viewMode === 'bilingual' && <Check size={14} />}
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setViewMode('translation')}>
+                        <div className="flex items-center justify-between w-full">
+                          <span>{t("articleReader.viewMode.translation") || "Translation"}</span>
+                          {viewMode === 'translation' && <Check size={14} />}
+                        </div>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
 
                 {isBatchTranslating ? (
                   <div className="flex items-center gap-2 px-3 py-1.5 bg-muted rounded-md border border-border h-8 md:h-9">
@@ -1185,8 +1191,8 @@ export function ArticleReader({
                 <div className="h-full overflow-y-auto px-4 py-6 md:px-8 lg:px-12 scroll-smooth">
                   {/* 视频/音频模式：使用 VideoSubtitlePlayer 组件 */}
                   {article.media_path && (() => {
+                    const mediaUrl = buildMediaResourceUrl(article.media_path, "video");
                     const filename = article.media_path.split('/').pop() || article.media_path.split('\\').pop() || '';
-                    const mediaUrl = `http://127.0.0.1:19420/video/${encodeURIComponent(filename)}`;
                     const audioExtensions = ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'wma'];
                     const ext = filename.split('.').pop()?.toLowerCase() || '';
                     const isAudioFile = audioExtensions.includes(ext);
@@ -1209,6 +1215,8 @@ export function ArticleReader({
                         onQuickTranslate={handleTranslate}
                         translationProgress={translationProgress}
                         isAudio={isAudioFile}
+                        onOpenKtvExport={onOpenKtvExport}
+                        onViewModeChange={setViewMode}
                       />
                     );
                   })()}

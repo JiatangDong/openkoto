@@ -101,6 +101,40 @@ export interface ChatResponse {
   tokens_used?: number;
 }
 
+export interface KtvExportResult {
+  outputPath: string;
+}
+
+export type KtvDisplayMode = "original" | "bilingual" | "translation";
+export type KtvPositionPreset = "bottom" | "lower_third" | "center_lower";
+
+export interface KtvExportConfig {
+  displayMode: KtvDisplayMode;
+  showReading: boolean;
+  originalFontFamily: string;
+  translationFontFamily: string;
+  readingFontFamily: string;
+  fontSize: number;
+  readingScale: number;
+  lineGap: number;
+  bilingualGap: number;
+  originalColor: string;
+  translationColor: string;
+  readingColor: string;
+  outlineColor: string;
+  outlineWidth: number;
+  shadowEnabled: boolean;
+  shadowColor: string;
+  shadowOffsetX: number;
+  shadowOffsetY: number;
+  shadowBlur: number;
+  positionPreset: KtvPositionPreset;
+  bottomMargin: number;
+  horizontalMargin: number;
+  videoWidth?: number;
+  videoHeight?: number;
+}
+
 // Tauri command type imports
 export type TauriCommand = {
   init_app: () => Promise<string>;
@@ -163,4 +197,6 @@ export type TauriCommand = {
   stop_agent_worker_cmd: () => Promise<void>;
   import_article_subtitles_cmd: (articleId: string, subtitlePath: string) => Promise<Article>;
   import_srt_file_cmd: (filePath: string, title?: string) => Promise<Article>;
+  prepare_ktv_segments_cmd: (articleId: string, languageHint?: string) => Promise<Article>;
+  export_ktv_video_cmd: (articleId: string, outputPath: string, config: KtvExportConfig) => Promise<KtvExportResult>;
 };

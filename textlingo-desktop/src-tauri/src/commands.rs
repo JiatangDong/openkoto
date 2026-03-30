@@ -2,6 +2,7 @@ use crate::agent_worker::{
     resolve_runtime_provider_config, AgentWorkerManager, AgentWorkerStatusSnapshot,
 };
 use crate::ai_service::{get_ai_service, get_or_create_ai_service, AIServiceCache};
+use crate::ktv_export::{export_ktv_video, prepare_ktv_segments, KtvExportConfig, KtvExportResult};
 use crate::moonshot::is_moonshot_provider;
 use crate::storage::{
     delete_article,
@@ -41,10 +42,10 @@ use crate::subtitle_import::{create_article_from_srt, import_subtitles_into_arti
 use crate::types::{
     AgentTask, AgentTaskInput, AgentTaskStatus, AgentTaskType, AnalysisRequest, AnalysisResponse,
     AnalysisType, Article, ArticleEvidenceItem, ArticleEvidenceResult, ArticleOverview,
-    ArticleSearchHit, ArticleSearchResult, ArticleSegment, ArticleTextWindow,
-    AssistantConversationMessage, Artifact, ArtifactType, Bookmark, ChatRequest, ChatResponse,
-    FavoriteGrammar, FavoriteVocabulary, ModelConfig, TimeRange,
-    TranslationRequest, TranslationResponse, WordPack,
+    ArticleSearchHit, ArticleSearchResult, ArticleSegment, ArticleTextWindow, Artifact,
+    ArtifactType, AssistantConversationMessage, Bookmark, ChatRequest, ChatResponse,
+    FavoriteGrammar, FavoriteVocabulary, ModelConfig, TimeRange, TranslationRequest,
+    TranslationResponse, WordPack,
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -241,10 +242,15 @@ pub fn filter_material_summaries(
     material_type: Option<&str>,
     limit: usize,
 ) -> Vec<MaterialSummary> {
-    let normalized_keyword = keyword.map(|value| value.trim().to_lowercase()).filter(|value| !value.is_empty());
-    let normalized_type = material_type.map(|value| value.trim().to_lowercase()).filter(|value| !value.is_empty());
+    let normalized_keyword = keyword
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty());
+    let normalized_type = material_type
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty());
 
-    items.iter()
+    items
+        .iter()
         .filter(|item| {
             normalized_keyword
                 .as_ref()
@@ -2614,6 +2620,45 @@ pub async fn import_srt_file_cmd(
         .map_err(|e| format!("Failed to serialize article: {}", e))?;
     save_article(&app_handle, &article.id, &article_json)?;
     Ok(article)
+}
+
+#[tauri::command]
+pub async fn prepare_ktv_segments_cmd(
+    app_handle: AppHandle,
+    article_id: String,
+    language_hint: Option<String>,
+) -> Result<Article, String> {
+    let article_json = load_article(&app_handle, &article_id)?;
+    let article: Article = serde_json::from_str(&article_json)
+        .map_err(|e| format!("Failed to parse article: {}", e))?;
+
+    let prepared = prepare_ktv_segments(article, language_hint.as_deref())?;
+    let prepared_json = serde_json::to_string(&prepared)
+        .map_err(|e| format!("Failed to serialize article: {}", e))?;
+
+    save_article(&app_handle, &article_id, &prepared_json)?;
+
+    Ok(prepared)
+}
+
+#[tauri::command]
+pub async fn export_ktv_video_cmd(
+    app_handle: AppHandle,
+    article_id: String,
+    output_path: String,
+    config: KtvExportConfig,
+) -> Result<KtvExportResult, String> {
+    let article_json = load_article(&app_handle, &article_id)?;
+    let article: Article = serde_json::from_str(&article_json)
+        .map_err(|e| format!("Failed to parse article: {}", e))?;
+
+    export_ktv_video(
+        &app_handle,
+        &article,
+        &config,
+        std::path::Path::new(&output_path),
+    )
+    .await
 }
 
 // 字幕提取

@@ -11,7 +11,7 @@
 
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { Button } from "../ui/button";
-import { ChevronDown, ChevronUp, Loader2, FileText, Minimize2, Download, X, FileJson, FileType, FolderOpen, Music } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, FileText, Minimize2, Download, X, FileJson, FileType, FolderOpen, Music, Eye, Languages, Split } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -65,6 +65,10 @@ interface VideoSubtitlePlayerProps {
     translationProgress?: { current: number; total: number } | null;
     /** 是否为音频模式 */
     isAudio?: boolean;
+    /** 打开 KTV 导出页面 */
+    onOpenKtvExport?: () => void;
+    /** 切换阅读模式 */
+    onViewModeChange?: (mode: ViewMode) => void;
 }
 
 export function VideoSubtitlePlayer({
@@ -86,6 +90,8 @@ export function VideoSubtitlePlayer({
     onQuickTranslate,
     translationProgress,
     isAudio = false,
+    onOpenKtvExport,
+    onViewModeChange,
 }: VideoSubtitlePlayerProps) {
     const { t } = useTranslation();
     const videoRef = useRef<HTMLVideoElement & HTMLAudioElement>(null);
@@ -379,6 +385,9 @@ export function VideoSubtitlePlayer({
 
     // 排序后的字幕列表
     const sortedSegments = [...segments].sort((a, b) => a.order - b.order);
+    const viewModeLabel = t(`articleReader.viewMode.${viewMode}`) || (
+        viewMode === "original" ? "Original" : viewMode === "bilingual" ? "Bilingual" : "Translation"
+    );
 
     // 无字幕时显示提取按钮
     if (segments.length === 0) {
@@ -650,6 +659,47 @@ export function VideoSubtitlePlayer({
             {/* 操作按钮行 */}
             <div className="mt-4 mb-2 space-y-2">
                 <div className="flex gap-2 flex-wrap">
+                    {onOpenKtvExport && segments.some((segment) => segment.start_time !== undefined && segment.end_time !== undefined) && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={onOpenKtvExport}
+                            className="gap-2 shrink-0"
+                        >
+                            KTV 导出
+                        </Button>
+                    )}
+
+                    {onViewModeChange && (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button
+                                    variant={viewMode !== "original" ? "default" : "secondary"}
+                                    size="sm"
+                                    className="gap-2 shrink-0"
+                                    data-testid="player-view-mode-trigger"
+                                >
+                                    {viewMode === "original" && <Eye size={16} />}
+                                    {viewMode === "bilingual" && <Split size={16} />}
+                                    {viewMode === "translation" && <Languages size={16} />}
+                                    <span>{viewModeLabel}</span>
+                                    <ChevronDown size={14} className="opacity-50" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start">
+                                <DropdownMenuItem onClick={() => onViewModeChange("original")}>
+                                    <span>{t("articleReader.viewMode.original") || "Original"}</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => onViewModeChange("bilingual")}>
+                                    <span>{t("articleReader.viewMode.bilingual") || "Bilingual"}</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => onViewModeChange("translation")}>
+                                    <span>{t("articleReader.viewMode.translation") || "Translation"}</span>
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    )}
+
                     {/* 展开/折叠字幕 */}
                     <Button
                         variant="secondary"

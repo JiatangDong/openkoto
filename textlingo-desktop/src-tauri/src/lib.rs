@@ -2,18 +2,20 @@
 pub mod agent_worker;
 mod ai_service;
 pub mod commands;
-pub mod pdf_sidecar;
+pub mod ffmpeg;
+pub mod ktv_export;
 pub mod moonshot;
+pub mod pdf_sidecar;
 pub mod storage;
-pub mod subtitle_import;
 mod subtitle_extraction;
+pub mod subtitle_import;
 pub mod types;
 mod video_server;
 mod youtube;
 
 // Re-exports
-use ai_service::AIServiceCache;
 use agent_worker::{mark_running_tasks_interrupted_in_dir, AgentWorkerManager};
+use ai_service::AIServiceCache;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -87,6 +89,8 @@ pub fn run() {
             commands::import_local_video_cmd,
             commands::import_article_subtitles_cmd,
             commands::import_srt_file_cmd,
+            commands::prepare_ktv_segments_cmd,
+            commands::export_ktv_video_cmd,
             // 书籍导入
             commands::import_book_cmd,
             // 字幕提取
