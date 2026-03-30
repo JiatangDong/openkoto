@@ -7,6 +7,7 @@
 // 3. 发送至 Gemini API 进行转录
 // 4. 解析转录结果为 ArticleSegment
 
+use crate::ffmpeg::run_ffmpeg;
 use crate::ai_service::AIService;
 use crate::moonshot::{is_moonshot_provider, moonshot_chat_completions_url};
 use crate::types::{
@@ -21,7 +22,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 use tauri::Emitter;
-use tauri_plugin_shell::ShellExt;
 use uuid::Uuid;
 
 // API 端点
@@ -137,18 +137,21 @@ pub async fn extract_subtitles(
 /// 使用 FFmpeg 获取视频的精确时长（通过解析 stderr 输出）
 async fn get_video_duration(app: &AppHandle, video_path: &Path) -> Result<f64, String> {
     let video_path_str = video_path.to_str().ok_or("无效的视频文件路径")?;
-    let shell = app.shell();
 
     // 使用 FFmpeg 获取时长
     // 运行 FFmpeg 但不产生输出，从 stderr 解析时长信息
     // FFmpeg 会在 stderr 中输出类似 "Duration: 00:25:30.50" 的信息
-    let output = shell
-        .sidecar("ffmpeg")
-        .map_err(|e| format!("无法创建 FFmpeg sidecar: {}。请确保 sidecar 配置正确。", e))?
-        .args(["-i", video_path_str, "-f", "null", "-"])
-        .output()
-        .await
-        .map_err(|e| format!("FFmpeg 执行失败: {}。请确保已安装 FFmpeg。", e))?;
+    let output = run_ffmpeg(
+        app,
+        vec![
+            "-i".to_string(),
+            video_path_str.to_string(),
+            "-f".to_string(),
+            "null".to_string(),
+            "-".to_string(),
+        ],
+    )
+    .await?;
 
     // FFmpeg 即使成功也会返回非0状态码（因为我们没有真正输出）
     // 所以我们直接解析 stderr
@@ -242,40 +245,36 @@ async fn extract_audio_segment(
         }
     }
 
-    let shell = app.shell();
-
     // FFmpeg 参数说明:
     // -ss: 起始时间（放在 -i 前面可以快速定位）
     // -t: 提取时长
     // -ar 44100: 保持44.1kHz采样率以保留语音细节
     // -ab 192k: 192kbps比特率兼顾质量和API文件大小限制
-    let output = shell
-        .sidecar("ffmpeg")
-        .map_err(|e| format!("无法创建 FFmpeg sidecar: {}。请确保 sidecar 配置正确。", e))?
-        .args([
-            "-ss",
-            &format!("{:.2}", start_time),
-            "-i",
-            video_path_str,
-            "-t",
-            &format!("{:.2}", duration),
-            "-vn",
-            "-acodec",
-            "libmp3lame",
-            "-ab",
-            "192k",
-            "-ar",
-            "44100",
-            "-ac",
-            "1",
-            "-y",
-            audio_path_str,
-        ])
-        .output()
-        .await
-        .map_err(|e| format!("FFmpeg 执行失败: {}。请确保已安装 FFmpeg。", e))?;
+    let output = run_ffmpeg(
+        app,
+        vec![
+            "-ss".to_string(),
+            format!("{start_time:.2}"),
+            "-i".to_string(),
+            video_path_str.to_string(),
+            "-t".to_string(),
+            format!("{duration:.2}"),
+            "-vn".to_string(),
+            "-acodec".to_string(),
+            "libmp3lame".to_string(),
+            "-ab".to_string(),
+            "192k".to_string(),
+            "-ar".to_string(),
+            "44100".to_string(),
+            "-ac".to_string(),
+            "1".to_string(),
+            "-y".to_string(),
+            audio_path_str.to_string(),
+        ],
+    )
+    .await?;
 
-    if !output.status.success() {
+    if !output.success {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("FFmpeg 音频片段提取失败: {}", stderr));
     }
@@ -672,31 +671,27 @@ async fn extract_audio_from_video(app: &AppHandle, video_path: &Path) -> Result<
     // -ar 44100: 44.1kHz 采样率保留完整频率信息
     // -ac 1: 单声道
     // -y: 覆盖已存在的文件
-    let shell = app.shell();
+    let output = run_ffmpeg(
+        app,
+        vec![
+            "-i".to_string(),
+            video_path_str.to_string(),
+            "-vn".to_string(),
+            "-acodec".to_string(),
+            "libmp3lame".to_string(),
+            "-ab".to_string(),
+            "192k".to_string(),
+            "-ar".to_string(),
+            "44100".to_string(),
+            "-ac".to_string(),
+            "1".to_string(),
+            "-y".to_string(),
+            audio_path_str.to_string(),
+        ],
+    )
+    .await?;
 
-    let output = shell
-        .sidecar("ffmpeg")
-        .map_err(|e| format!("无法创建 FFmpeg sidecar: {}。请确保 sidecar 配置正确。", e))?
-        .args([
-            "-i",
-            video_path_str,
-            "-vn",
-            "-acodec",
-            "libmp3lame",
-            "-ab",
-            "192k",
-            "-ar",
-            "44100",
-            "-ac",
-            "1",
-            "-y",
-            audio_path_str,
-        ])
-        .output()
-        .await
-        .map_err(|e| format!("FFmpeg 执行失败: {}。请确保已安装 FFmpeg。", e))?;
-
-    if !output.status.success() {
+    if !output.success {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("FFmpeg 音频提取失败: {}", stderr));
     }
@@ -846,36 +841,32 @@ async fn compress_video_for_upload(app: &AppHandle, video_path: &Path) -> Result
         let _ = fs::remove_file(&output_path);
     }
 
-    let shell = app.shell();
+    let output = run_ffmpeg(
+        app,
+        vec![
+            "-i".to_string(),
+            video_path.to_str().unwrap().to_string(),
+            "-vf".to_string(),
+            "scale=-2:480".to_string(),
+            "-c:v".to_string(),
+            "libx264".to_string(),
+            "-crf".to_string(),
+            "28".to_string(),
+            "-preset".to_string(),
+            "veryfast".to_string(),
+            "-c:a".to_string(),
+            "aac".to_string(),
+            "-b:a".to_string(),
+            "128k".to_string(),
+            "-ac".to_string(),
+            "1".to_string(),
+            "-y".to_string(),
+            output_path.to_str().unwrap().to_string(),
+        ],
+    )
+    .await?;
 
-    let output = shell
-        .sidecar("ffmpeg")
-        .map_err(|e| format!("无法创建 FFmpeg sidecar: {}", e))?
-        .args([
-            "-i",
-            video_path.to_str().unwrap(),
-            "-vf",
-            "scale=-2:480", // Scale to 480p height, width auto
-            "-c:v",
-            "libx264",
-            "-crf",
-            "28", // Lower quality for smaller size
-            "-preset",
-            "veryfast",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "128k",
-            "-ac",
-            "1", // Mono audio
-            "-y",
-            output_path.to_str().unwrap(),
-        ])
-        .output()
-        .await
-        .map_err(|e| format!("FFmpeg 压缩失败: {}", e))?;
-
-    if !output.status.success() {
+    if !output.success {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!("FFmpeg 压缩错误: {}", stderr));
     }

@@ -51,8 +51,23 @@ vi.mock("./ArticleMindMapPanel", () => ({
 }));
 
 vi.mock("./VideoSubtitlePlayer", () => ({
-  VideoSubtitlePlayer: ({ onImportSubtitles }: { onImportSubtitles?: () => void }) => (
+  VideoSubtitlePlayer: ({
+    onImportSubtitles,
+    onViewModeChange,
+  }: {
+    onImportSubtitles?: () => void;
+    onViewModeChange?: (mode: "original" | "bilingual" | "translation") => void;
+  }) => (
     <div data-testid="video-subtitle-player">
+      {onViewModeChange ? (
+        <button
+          type="button"
+          data-testid="player-view-mode-trigger"
+          onClick={() => onViewModeChange("bilingual")}
+        >
+          player view mode
+        </button>
+      ) : null}
       {onImportSubtitles ? (
         <button type="button" onClick={onImportSubtitles}>
           Import subtitles
@@ -156,5 +171,25 @@ describe("ArticleReader agent mode", () => {
       articleId: "article-1",
       subtitlePath: "/tmp/sample.srt",
     });
+  });
+
+  it("moves the view mode control into the player area for media articles", () => {
+    render(
+      <ArticleReader
+        article={createArticle({
+          media_path: "/tmp/sample.mp4",
+        })}
+      />
+    );
+
+    expect(screen.getByTestId("player-view-mode-trigger")).toBeInTheDocument();
+    expect(screen.queryByTestId("reader-toolbar-view-mode-trigger")).not.toBeInTheDocument();
+  });
+
+  it("keeps the top toolbar view mode control for non-media articles", () => {
+    render(<ArticleReader article={createArticle()} />);
+
+    expect(screen.getByTestId("reader-toolbar-view-mode-trigger")).toBeInTheDocument();
+    expect(screen.queryByTestId("player-view-mode-trigger")).not.toBeInTheDocument();
   });
 });

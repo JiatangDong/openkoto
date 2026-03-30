@@ -24,6 +24,7 @@ import {
 } from "../ui/dropdown-menu";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ui/button";
+import { buildMediaResourceUrl } from "../../lib/media";
 import { formatDate, truncateText } from "../../lib/utils";
 import { Article } from "../../types";
 import { Document, Page } from "react-pdf";
@@ -209,21 +210,11 @@ export function ArticleList({
   };
 
   const getVideoUrl = (mediaPath: string) => {
-    const filename = mediaPath.split(/[/\\]/).pop();
-    if (filename) {
-      return `http://127.0.0.1:19420/video/${encodeURIComponent(filename)}`;
-    }
-    return "";
+    return buildMediaResourceUrl(mediaPath, "video");
   };
 
   const getBookUrl = (bookPath: string) => {
-    // 本地文件服务
-    if (bookPath.startsWith("http")) return bookPath;
-    const filename = bookPath.split(/[/\\]/).pop();
-    if (filename) {
-      return `http://127.0.0.1:19420/book/${encodeURIComponent(filename)}`;
-    }
-    return bookPath;
+    return buildMediaResourceUrl(bookPath, "book");
   };
 
   const getCoverStyle = (type: string) => {

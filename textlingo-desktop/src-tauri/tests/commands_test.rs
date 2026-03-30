@@ -1,11 +1,19 @@
 use openkoto_desktop_lib::{
     commands::{
-        filter_material_summaries, material_summary_from_article, require_active_agent_model_config,
-        MaterialSummary,
+        filter_material_summaries, material_summary_from_article,
+        require_active_agent_model_config, MaterialSummary,
+    },
+    ffmpeg::{
+        resolve_ffmpeg_invocation_for_path, resolve_ffmpeg_program_for_requirement_path,
+        FfmpegInvocation, FfmpegRequirement,
+    },
+    ktv_export::{
+        build_ktv_ffmpeg_args, ensure_ktv_output_created, generate_ktv_ass, prepare_ktv_segments,
+        KtvDisplayMode, KtvExportConfig, KtvPositionPreset,
     },
     pdf_sidecar::{build_pdf_sidecar_command_for_dir, resolve_pdf_sidecar_for_dir},
     subtitle_import::{create_article_from_srt, import_subtitles_into_article, parse_srt_content},
-    types::{AppConfig, Article, ModelConfig},
+    types::{AppConfig, Article, ArticleSegment, ModelConfig},
 };
 
 fn sample_model_config() -> ModelConfig {
@@ -105,7 +113,9 @@ fn build_pdf_sidecar_command_for_dir_uses_dev_sidecar_entrypoint() {
     );
     assert_eq!(
         command.working_dir,
-        root.join("textlingo-desktop/pdf-sidecar").canonicalize().unwrap()
+        root.join("textlingo-desktop/pdf-sidecar")
+            .canonicalize()
+            .unwrap()
     );
 
     std::fs::remove_dir_all(&root).unwrap();
@@ -296,4 +306,399 @@ fn create_article_from_srt_uses_file_stem_as_default_title() {
     assert_eq!(article.segments.len(), 1);
 
     std::fs::remove_dir_all(&temp_dir).unwrap();
+}
+
+#[test]
+fn prepare_ktv_segments_fills_missing_reading_text_for_video_segments() {
+    let article = Article {
+        id: "video-1".to_string(),
+        title: "Video".to_string(),
+        content: "こんにちは".to_string(),
+        source_type: Some("local_video".to_string()),
+        source_url: Some("file:///tmp/video.mp4".to_string()),
+        media_path: Some("/tmp/video.mp4".to_string()),
+        created_at: "2026-03-30T00:00:00Z".to_string(),
+        translated: false,
+        active_mind_map_artifact_id: None,
+        segments: vec![ArticleSegment {
+            id: "segment-1".to_string(),
+            article_id: "video-1".to_string(),
+            order: 0,
+            text: "こんにちは".to_string(),
+            reading_text: None,
+            translation: Some("你好".to_string()),
+            explanation: None,
+            start_time: Some(0.0),
+            end_time: Some(2.0),
+            created_at: "2026-03-30T00:00:00Z".to_string(),
+            is_new_paragraph: true,
+        }],
+        ..sample_article_defaults()
+    };
+
+    let prepared = prepare_ktv_segments(article, Some("ja")).unwrap();
+
+    assert_eq!(
+        prepared.segments[0].reading_text.as_deref(),
+        Some("こんにちは")
+    );
+}
+
+#[test]
+fn generate_ktv_ass_contains_reading_original_and_translation_styles() {
+    let article = Article {
+        id: "video-1".to_string(),
+        title: "Video".to_string(),
+        content: "こんにちは".to_string(),
+        source_type: Some("local_video".to_string()),
+        source_url: Some("file:///tmp/video.mp4".to_string()),
+        media_path: Some("/tmp/video.mp4".to_string()),
+        created_at: "2026-03-30T00:00:00Z".to_string(),
+        translated: false,
+        active_mind_map_artifact_id: None,
+        segments: vec![ArticleSegment {
+            id: "segment-1".to_string(),
+            article_id: "video-1".to_string(),
+            order: 0,
+            text: "こんにちは".to_string(),
+            reading_text: Some("コンニチハ".to_string()),
+            translation: Some("你好".to_string()),
+            explanation: None,
+            start_time: Some(0.0),
+            end_time: Some(2.0),
+            created_at: "2026-03-30T00:00:00Z".to_string(),
+            is_new_paragraph: true,
+        }],
+        ..sample_article_defaults()
+    };
+    let config = sample_ktv_export_config();
+
+    let ass = generate_ktv_ass(&article, &config).unwrap();
+
+    assert!(ass.contains("Style: Original"));
+    assert!(ass.contains("Style: Reading"));
+    assert!(ass.contains("Style: Translation"));
+    assert!(ass.contains("&H64000000"));
+    assert!(ass.contains(",2,4,2,32,32,104,1"));
+    assert!(ass.contains(",2,4,2,32,32,160,1"));
+    assert!(ass.contains(",2,4,2,32,32,48,1"));
+    assert!(ass.contains("こんにちは"));
+    assert!(ass.contains("（コンニチハ）"));
+    assert!(ass.contains("你好"));
+    assert!(ass.contains("{\\fnNoto Sans CJK JP\\fs34\\1c&HDBD5D1&"));
+    assert!(!ass.contains("Dialogue: 0,0:00:00.00,0:00:02.00,Reading"));
+}
+
+#[test]
+fn generate_ktv_ass_uses_vocabulary_readings_when_sentence_reading_matches_original() {
+    let article = Article {
+        id: "video-1".to_string(),
+        title: "Video".to_string(),
+        content: "氷は全部溶けた".to_string(),
+        source_type: Some("local_video".to_string()),
+        source_url: Some("file:///tmp/video.mp4".to_string()),
+        media_path: Some("/tmp/video.mp4".to_string()),
+        created_at: "2026-03-30T00:00:00Z".to_string(),
+        translated: false,
+        active_mind_map_artifact_id: None,
+        segments: vec![ArticleSegment {
+            id: "segment-1".to_string(),
+            article_id: "video-1".to_string(),
+            order: 0,
+            text: "氷は全部溶けた".to_string(),
+            reading_text: Some("氷は全部溶けた".to_string()),
+            translation: Some("冰都融化了".to_string()),
+            explanation: Some(openkoto_desktop_lib::types::SegmentExplanation {
+                translation: "冰都融化了".to_string(),
+                explanation: "Line explanation".to_string(),
+                reading_text: None,
+                vocabulary: vec![
+                    openkoto_desktop_lib::types::VocabularyItem {
+                        word: "氷".to_string(),
+                        meaning: "ice".to_string(),
+                        usage: "".to_string(),
+                        example: None,
+                        reading: Some("こおり".to_string()),
+                    },
+                    openkoto_desktop_lib::types::VocabularyItem {
+                        word: "溶けた".to_string(),
+                        meaning: "melted".to_string(),
+                        usage: "".to_string(),
+                        example: None,
+                        reading: Some("とけた".to_string()),
+                    },
+                ],
+                grammar_points: vec![],
+                cultural_context: None,
+                difficulty_level: None,
+                learning_tips: None,
+            }),
+            start_time: Some(0.0),
+            end_time: Some(2.0),
+            created_at: "2026-03-30T00:00:00Z".to_string(),
+            is_new_paragraph: true,
+        }],
+        ..sample_article_defaults()
+    };
+    let config = sample_ktv_export_config();
+
+    let ass = generate_ktv_ass(&article, &config).unwrap();
+
+    assert!(ass.contains("氷{\\fnNoto Sans CJK JP\\fs34\\1c&HDBD5D1&}（こおり）{\\rOriginal}"));
+    assert!(ass.contains("溶けた{\\fnNoto Sans CJK JP\\fs34\\1c&HDBD5D1&}（とけた）{\\rOriginal}"));
+}
+
+#[test]
+fn generate_ktv_ass_translation_mode_only_contains_translation_dialogue() {
+    let article = Article {
+        id: "video-1".to_string(),
+        title: "Video".to_string(),
+        content: "こんにちは".to_string(),
+        source_type: Some("local_video".to_string()),
+        source_url: Some("file:///tmp/video.mp4".to_string()),
+        media_path: Some("/tmp/video.mp4".to_string()),
+        created_at: "2026-03-30T00:00:00Z".to_string(),
+        translated: false,
+        active_mind_map_artifact_id: None,
+        segments: vec![ArticleSegment {
+            id: "segment-1".to_string(),
+            article_id: "video-1".to_string(),
+            order: 0,
+            text: "こんにちは".to_string(),
+            reading_text: Some("コンニチハ".to_string()),
+            translation: Some("你好".to_string()),
+            explanation: None,
+            start_time: Some(0.0),
+            end_time: Some(2.0),
+            created_at: "2026-03-30T00:00:00Z".to_string(),
+            is_new_paragraph: true,
+        }],
+        ..sample_article_defaults()
+    };
+    let mut config = sample_ktv_export_config();
+    config.display_mode = KtvDisplayMode::Translation;
+    config.show_reading = false;
+
+    let ass = generate_ktv_ass(&article, &config).unwrap();
+
+    assert!(ass.contains("Style: Original"));
+    assert!(ass.contains("Style: Reading"));
+    assert!(ass.contains("Style: Translation"));
+    assert!(ass.contains("Dialogue: 0,0:00:00.00,0:00:02.00,Translation"));
+    assert!(!ass.contains("Dialogue: 0,0:00:00.00,0:00:02.00,Original"));
+    assert!(!ass.contains("Dialogue: 0,0:00:00.00,0:00:02.00,Reading"));
+    assert!(ass.contains("你好"));
+    assert!(!ass.contains("こんにちは"));
+    assert!(!ass.contains("コンニチハ"));
+}
+
+#[test]
+fn generate_ktv_ass_uses_source_video_resolution_when_provided() {
+    let article = Article {
+        id: "video-1".to_string(),
+        title: "Video".to_string(),
+        content: "こんにちは".to_string(),
+        source_type: Some("local_video".to_string()),
+        source_url: Some("file:///tmp/video.mp4".to_string()),
+        media_path: Some("/tmp/video.mp4".to_string()),
+        created_at: "2026-03-30T00:00:00Z".to_string(),
+        translated: false,
+        active_mind_map_artifact_id: None,
+        segments: vec![ArticleSegment {
+            id: "segment-1".to_string(),
+            article_id: "video-1".to_string(),
+            order: 0,
+            text: "こんにちは".to_string(),
+            reading_text: Some("コンニチハ".to_string()),
+            translation: Some("你好".to_string()),
+            explanation: None,
+            start_time: Some(0.0),
+            end_time: Some(2.0),
+            created_at: "2026-03-30T00:00:00Z".to_string(),
+            is_new_paragraph: true,
+        }],
+        ..sample_article_defaults()
+    };
+    let mut config = sample_ktv_export_config();
+    config.video_width = Some(640);
+    config.video_height = Some(360);
+
+    let ass = generate_ktv_ass(&article, &config).unwrap();
+
+    assert!(ass.contains("PlayResX: 640"));
+    assert!(ass.contains("PlayResY: 360"));
+}
+
+#[test]
+fn build_ktv_ffmpeg_args_uses_ass_filter_and_output_path() {
+    let args = build_ktv_ffmpeg_args(
+        std::path::Path::new("/tmp/input.mp4"),
+        std::path::Path::new("/tmp/subtitles.ass"),
+        std::path::Path::new("/tmp/output.mp4"),
+    );
+
+    assert_eq!(args[0], "-y");
+    assert!(args
+        .iter()
+        .any(|arg| arg.contains("ass=filename='/tmp/subtitles.ass'")));
+    assert_eq!(args.last().unwrap(), "/tmp/output.mp4");
+}
+
+#[test]
+fn ensure_ktv_output_created_rejects_missing_output_file() {
+    let output = std::env::temp_dir().join(format!(
+        "openkoto-ktv-missing-{}.mp4",
+        uuid::Uuid::new_v4()
+    ));
+
+    let error = ensure_ktv_output_created(&output).unwrap_err();
+
+    assert!(error.contains("FFmpeg 未生成导出文件"));
+}
+
+#[test]
+fn resolve_ffmpeg_invocation_prefers_system_binary_in_dev_mode() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "openkoto-system-ffmpeg-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let binary_name = if cfg!(target_os = "windows") {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    };
+    let binary_path = temp_dir.join(binary_name);
+
+    if cfg!(target_os = "windows") {
+        std::fs::write(&binary_path, "@echo off\r\nexit /b 0\r\n").unwrap();
+    } else {
+        std::fs::write(&binary_path, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&binary_path).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&binary_path, permissions).unwrap();
+        }
+    }
+
+    let invocation = resolve_ffmpeg_invocation_for_path(true, Some(temp_dir.as_os_str()));
+
+    assert_eq!(invocation, FfmpegInvocation::System);
+
+    std::fs::remove_dir_all(&temp_dir).unwrap();
+}
+
+#[test]
+fn resolve_ffmpeg_invocation_falls_back_to_sidecar_when_missing() {
+    let invocation = resolve_ffmpeg_invocation_for_path(false, None);
+
+    assert_eq!(invocation, FfmpegInvocation::Sidecar);
+}
+
+#[test]
+fn resolve_ffmpeg_program_for_subtitle_burn_prefers_supported_override() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "openkoto-system-ffmpeg-subtitle-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let binary_name = if cfg!(target_os = "windows") {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    };
+    let system_binary_path = temp_dir.join(binary_name);
+    let subtitle_binary_path = temp_dir.join(if cfg!(target_os = "windows") {
+        "ffmpeg-subtitle.exe"
+    } else {
+        "ffmpeg-subtitle"
+    });
+
+    write_fake_ffmpeg_binary(&system_binary_path, false);
+    write_fake_ffmpeg_binary(&subtitle_binary_path, true);
+
+    let previous = std::env::var_os("OPENKOTO_FFMPEG_SUBTITLE");
+    std::env::set_var("OPENKOTO_FFMPEG_SUBTITLE", &subtitle_binary_path);
+
+    let resolved = resolve_ffmpeg_program_for_requirement_path(
+        true,
+        Some(temp_dir.as_os_str()),
+        FfmpegRequirement::SubtitleBurn,
+    );
+
+    match previous {
+        Some(value) => std::env::set_var("OPENKOTO_FFMPEG_SUBTITLE", value),
+        None => std::env::remove_var("OPENKOTO_FFMPEG_SUBTITLE"),
+    }
+
+    assert_eq!(
+        resolved.as_deref(),
+        Some(subtitle_binary_path.to_string_lossy().as_ref())
+    );
+
+    std::fs::remove_dir_all(&temp_dir).unwrap();
+}
+
+fn sample_ktv_export_config() -> KtvExportConfig {
+    KtvExportConfig {
+        display_mode: KtvDisplayMode::Bilingual,
+        show_reading: true,
+        original_font_family: "Noto Sans CJK JP".to_string(),
+        translation_font_family: "Noto Sans CJK SC".to_string(),
+        reading_font_family: "Noto Sans CJK JP".to_string(),
+        font_size: 48,
+        reading_scale: 0.7,
+        line_gap: 8,
+        bilingual_gap: 12,
+        original_color: "#FFFFFF".to_string(),
+        translation_color: "#FACC15".to_string(),
+        reading_color: "#D1D5DB".to_string(),
+        outline_color: "#000000".to_string(),
+        outline_width: 2,
+        shadow_enabled: true,
+        shadow_color: "#000000".to_string(),
+        shadow_offset_x: 0,
+        shadow_offset_y: 2,
+        shadow_blur: 4,
+        position_preset: KtvPositionPreset::Bottom,
+        bottom_margin: 48,
+        horizontal_margin: 32,
+        video_width: None,
+        video_height: None,
+    }
+}
+
+fn write_fake_ffmpeg_binary(path: &std::path::Path, supports_subtitles: bool) {
+    if cfg!(target_os = "windows") {
+        let filters_output = if supports_subtitles {
+            " .. ass               V->V       Render ASS subtitles onto input video using the libass library.\r\n"
+        } else {
+            ""
+        };
+        let script = format!(
+            "@echo off\r\nif \"%~1\"==\"-version\" exit /b 0\r\nif \"%~1\"==\"-hide_banner\" if \"%~2\"==\"-filters\" (\r\n  echo {filters_output}\r\n  exit /b 0\r\n)\r\nexit /b 1\r\n"
+        );
+        std::fs::write(path, script).unwrap();
+    } else {
+        let filters_output = if supports_subtitles {
+            " .. ass               V->V       Render ASS subtitles onto input video using the libass library.\n"
+        } else {
+            ""
+        };
+        let script = format!(
+            "#!/bin/sh\nif [ \"$1\" = \"-version\" ]; then\n  exit 0\nfi\nif [ \"$1\" = \"-hide_banner\" ] && [ \"$2\" = \"-filters\" ]; then\n  printf '%s' \"{filters_output}\"\n  exit 0\nfi\nexit 1\n"
+        );
+        std::fs::write(path, script).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(path).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(path, permissions).unwrap();
+        }
+    }
 }

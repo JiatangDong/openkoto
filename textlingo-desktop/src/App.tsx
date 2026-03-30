@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { ArticleList } from "./components/features/ArticleList";
 import { ArticleReader } from "./components/features/ArticleReader";
 import { BookReader } from "./components/features/BookReader";
+import { KtvExportPage } from "./components/features/KtvExportPage";
 import { NewMaterialDialog } from "./components/features/NewMaterialDialog";
 import { FavoritesPage } from "./components/features/FavoritesPage";
 import { SettingsButton } from "./components/features/SettingsDialog";
@@ -27,6 +28,7 @@ function App() {
   const [editingArticle, setEditingArticle] = useState<Article | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "card">("card");
+  const [activeScreen, setActiveScreen] = useState<"home" | "favorites" | "reader" | "ktv-export">("home");
   const [showOnboarding, setShowOnboarding] = useState(false);
   const onboardingDismissedRef = useRef(false);
 
@@ -91,6 +93,7 @@ function App() {
     const index = articles.findIndex((a) => a.id === article.id);
     setSelectedIndex(index);
     setSelectedArticle(article);
+    setActiveScreen("reader");
   };
 
   const handleNextArticle = () => {
@@ -107,20 +110,24 @@ function App() {
 
   const handleBackToList = () => {
     setSelectedArticle(null);
+    setActiveScreen("home");
   };
 
   const handleGoHome = () => {
     setSelectedArticle(null);
     setShowFavorites(false);
+    setActiveScreen("home");
   };
 
   const handleToggleFavorites = () => {
     setShowFavorites(true);
     setSelectedArticle(null);
+    setActiveScreen("favorites");
   };
 
   const handleBackFromFavorites = () => {
     setShowFavorites(false);
+    setActiveScreen("home");
   };
 
   const handleArticleUpdate = async () => {
@@ -230,7 +237,12 @@ function App() {
         />
         <UpdateChecker />
         {selectedArticle ? (
-          selectedArticle.book_path ? (
+          activeScreen === "ktv-export" ? (
+            <KtvExportPage
+              article={selectedArticle}
+              onBack={() => setActiveScreen("reader")}
+            />
+          ) : selectedArticle.book_path ? (
             <BookReader
               article={selectedArticle}
               onBack={handleBackToList}
@@ -245,9 +257,10 @@ function App() {
               hasNext={selectedIndex < articles.length - 1}
               hasPrev={selectedIndex > 0}
               onUpdate={handleArticleUpdate}
+              onOpenKtvExport={() => setActiveScreen("ktv-export")}
             />
           )
-        ) : showFavorites ? (
+        ) : showFavorites || activeScreen === "favorites" ? (
           <FavoritesPage
             onBack={handleBackFromFavorites}
             onSelectArticle={handleSelectArticle}
