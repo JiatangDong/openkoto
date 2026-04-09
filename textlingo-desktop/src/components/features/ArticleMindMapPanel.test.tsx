@@ -591,6 +591,11 @@ describe("ArticleMindMapPanel", () => {
 
     expect(await screen.findByTestId("mind-elixir-canvas")).toBeInTheDocument();
 
+    // Wait for the MindElixir useEffect to register the operation listener
+    await waitFor(() => {
+      expect(mindElixirListeners.has("operation")).toBe(true);
+    });
+
     mindElixirCurrentData = {
       nodeData: {
         id: "root",
