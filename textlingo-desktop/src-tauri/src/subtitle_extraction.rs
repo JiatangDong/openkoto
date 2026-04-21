@@ -83,7 +83,7 @@ pub async fn extract_subtitles(
     }
 
     if duration > CHUNK_THRESHOLD_SECONDS {
-        println!("[SubtitleExtraction] 视频超过5分钟，启用分片提取模式");
+        println!("[SubtitleExtraction] 视频超过 10 分钟，启用分片提取模式");
         let _ = app.emit(
             &format!("subtitle-extraction-progress://{}", event_id),
             serde_json::json!({ "phase": "chunked", "message": "视频较长，启用分片提取模式..." }),
@@ -210,6 +210,17 @@ struct ChunkTranscriptionResult {
     /// 时间轴偏移量
     #[allow(dead_code)]
     time_offset: f64,
+}
+
+/// 带源分片元数据的字幕：用于重叠区去重时判断"新鲜度"。
+///
+/// `chunk_offset` 是该段所属分片在整段视频里的全局起始秒数。
+/// 对任意一条字幕，`start_time - chunk_offset` 越小，说明它越接近所在分片
+/// 的开头——LLM 在音频播放早期的时间戳通常更准确，漂移最小。
+#[derive(Debug, Clone)]
+struct ChunkedSegment {
+    seg: TranscriptionSegment,
+    chunk_offset: f64,
 }
 
 /// 使用 FFmpeg 从视频中提取指定时间段的音频
@@ -362,9 +373,10 @@ async fn extract_and_transcribe_segment(
 /// 分片提取长视频字幕（顺序线性分片策略）
 ///
 /// # 算法说明
-/// 1. 将音频按固定步长（10分钟）顺序切片，相邻片段有30秒重叠
+/// 1. 将音频按固定步长（5 分钟）顺序切片，相邻片段有 15 秒重叠
 /// 2. 每两个相邻片段并发提取，逐步向前推进
-/// 3. 合并所有片段后，通过模糊匹配去重消除overlap区域的重复字幕
+/// 3. 合并所有片段后，通过模糊匹配去重消除 overlap 区域的重复字幕；
+///    重叠处优先保留"分片开头"那一份，避免 LLM 在长音频尾部累积的时间戳漂移
 async fn extract_subtitles_chunked(
     app: AppHandle,
     video_path: &Path,
@@ -376,9 +388,12 @@ async fn extract_subtitles_chunked(
     total_duration: f64,
     event_id: &str,
 ) -> Result<Vec<ArticleSegment>, String> {
-    const CHUNK_DURATION: f64 = 10.0 * 60.0; // 每片10分钟
-    const OVERLAP: f64 = 30.0; // 30秒重叠
-    let step = CHUNK_DURATION - OVERLAP; // 实际步进 = 9分30秒
+    // 每片 5 分钟：更短的音频上下文显著降低 LLM 在片内累计的时间戳漂移
+    // （10 分钟片尾部观感非常明显）。overlap 相应降到 15 秒，够覆盖一句话跨界，
+    // 又能减少重复段落进入去重阶段的比例。
+    const CHUNK_DURATION: f64 = 5.0 * 60.0; // 每片 5 分钟
+    const OVERLAP: f64 = 15.0; // 15 秒重叠
+    let step = CHUNK_DURATION - OVERLAP; // 实际步进 = 4 分 45 秒
 
     // 计算所有片段的起始时间
     let mut chunk_starts: Vec<f64> = Vec::new();
@@ -395,7 +410,7 @@ async fn extract_subtitles_chunked(
         total_chunks, CHUNK_DURATION, OVERLAP, step
     );
 
-    let mut all_segments: Vec<TranscriptionSegment> = Vec::new();
+    let mut all_segments: Vec<ChunkedSegment> = Vec::new();
 
     // 两两并发提取
     let mut i = 0;
@@ -408,6 +423,8 @@ async fn extract_subtitles_chunked(
             // 并发提取两个片段
             let start2 = chunk_starts[i + 1];
             let dur2 = (total_duration - start2).min(CHUNK_DURATION);
+            let chunk1_offset = start1;
+            let chunk2_offset = start2;
 
             let _ = app.emit(
                 &format!("subtitle-extraction-progress://{}", event_id),
@@ -444,8 +461,14 @@ async fn extract_subtitles_chunked(
                 )
             );
 
-            all_segments.extend(r1?.segments);
-            all_segments.extend(r2?.segments);
+            all_segments.extend(r1?.segments.into_iter().map(|s| ChunkedSegment {
+                seg: s,
+                chunk_offset: chunk1_offset,
+            }));
+            all_segments.extend(r2?.segments.into_iter().map(|s| ChunkedSegment {
+                seg: s,
+                chunk_offset: chunk2_offset,
+            }));
             completed_chunks += 2;
             i += 2;
         } else {
@@ -473,7 +496,10 @@ async fn extract_subtitles_chunked(
             )
             .await?;
 
-            all_segments.extend(r.segments);
+            all_segments.extend(r.segments.into_iter().map(|s| ChunkedSegment {
+                seg: s,
+                chunk_offset: start1,
+            }));
             completed_chunks += 1;
             i += 1;
         }
@@ -501,18 +527,19 @@ async fn extract_subtitles_chunked(
     );
 
     // 过滤掉没有时间戳的字幕
-    all_segments.retain(|s| s.start_time.is_some() && s.end_time.is_some());
+    all_segments.retain(|c| c.seg.start_time.is_some() && c.seg.end_time.is_some());
 
-    // 按时间排序
+    // 按时间排序（保证 dedup 遇到重复时更早出现的版本先进入结果集，并保证
+    // 最终输出按时间有序；dedup 内部会再做一次兜底排序）
     all_segments.sort_by(|a, b| {
-        let a_time = a.start_time.unwrap_or(0.0);
-        let b_time = b.start_time.unwrap_or(0.0);
+        let a_time = a.seg.start_time.unwrap_or(0.0);
+        let b_time = b.seg.start_time.unwrap_or(0.0);
         a_time
             .partial_cmp(&b_time)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    // 去重：移除时间重叠且内容相似的字幕
+    // 去重：移除时间重叠且内容相似的字幕，并在重复时优先保留"更新鲜"的那一份
     let deduped_segments = deduplicate_segments(all_segments);
 
     println!(
@@ -578,65 +605,88 @@ fn text_similarity(a: &str, b: &str) -> f64 {
     lcs_len / max_len
 }
 
-/// 去除重复的字幕片段
+/// 判断候选字幕是否与已保留的某一条"在同一事件"（overlap 去重用）。
 ///
-/// 判断标准（针对分片overlap区域优化）：
-/// 1. 时间接近（起始时间差 < 15秒）
-/// 2. 内容相似度 > 60%（基于 LCS）
-///
-/// 当检测到重复时，保留已有的（更早进入结果集的）版本
-fn deduplicate_segments(segments: Vec<TranscriptionSegment>) -> Vec<TranscriptionSegment> {
-    if segments.is_empty() {
-        return segments;
-    }
+/// 返回命中已有条目的下标；如果没有命中返回 None。
+fn find_duplicate_index(result: &[ChunkedSegment], cand: &ChunkedSegment) -> Option<usize> {
+    let cand_start = cand.seg.start_time.unwrap_or(0.0);
+    let cand_end = cand.seg.end_time.unwrap_or(cand_start);
+    let cand_duration = (cand_end - cand_start).max(0.1);
 
-    let mut result: Vec<TranscriptionSegment> = Vec::new();
+    for (idx, existing) in result.iter().enumerate() {
+        let ex_start = existing.seg.start_time.unwrap_or(0.0);
 
-    for seg in segments {
-        let seg_start = seg.start_time.unwrap_or(0.0);
+        // 快速排除：起始时间差超过15秒不可能是同一句
+        if (cand_start - ex_start).abs() > 15.0 {
+            continue;
+        }
 
-        let is_duplicate = result.iter().any(|existing| {
-            let ex_start = existing.start_time.unwrap_or(0.0);
+        let ex_end = existing.seg.end_time.unwrap_or(ex_start);
+        let overlap_start = cand_start.max(ex_start);
+        let overlap_end = cand_end.min(ex_end);
+        let overlap_duration = (overlap_end - overlap_start).max(0.0);
+        let overlap_ratio = overlap_duration / cand_duration;
 
-            // 快速排除：起始时间差超过15秒不可能是同一句
-            if (seg_start - ex_start).abs() > 15.0 {
-                return false;
-            }
+        // 条件1: 时间重叠 > 30% 且内容相似度 > 60%
+        if overlap_ratio > 0.3
+            && text_similarity(&cand.seg.content, &existing.seg.content) > 0.6
+        {
+            return Some(idx);
+        }
 
-            // 计算时间重叠
-            let seg_end = seg.end_time.unwrap_or(seg_start);
-            let ex_end = existing.end_time.unwrap_or(ex_start);
-            let overlap_start = seg_start.max(ex_start);
-            let overlap_end = seg_end.min(ex_end);
-            let overlap_duration = (overlap_end - overlap_start).max(0.0);
-            let seg_duration = (seg_end - seg_start).max(0.1);
-            let overlap_ratio = overlap_duration / seg_duration;
-
-            // 条件1: 时间重叠 > 30% 且内容相似度 > 60%
-            if overlap_ratio > 0.3 {
-                let sim = text_similarity(&seg.content, &existing.content);
-                if sim > 0.6 {
-                    return true;
-                }
-            }
-
-            // 条件2: 起始时间非常接近（< 5秒）且内容高度相似
-            if (seg_start - ex_start).abs() < 5.0 {
-                let sim = text_similarity(&seg.content, &existing.content);
-                if sim > 0.5 {
-                    return true;
-                }
-            }
-
-            false
-        });
-
-        if !is_duplicate {
-            result.push(seg);
+        // 条件2: 起始时间非常接近（< 5秒）且内容高度相似
+        if (cand_start - ex_start).abs() < 5.0
+            && text_similarity(&cand.seg.content, &existing.seg.content) > 0.5
+        {
+            return Some(idx);
         }
     }
 
-    result
+    None
+}
+
+/// 去除重复的字幕片段。
+///
+/// 判断标准（针对分片 overlap 区域优化）：
+/// 1. 时间接近（起始时间差 < 15秒）
+/// 2. 内容相似度 > 60%（基于 LCS）
+///
+/// 当检测到重复时，**保留"更新鲜"的那一份**——即所在分片越晚开始、且字幕越靠
+/// 近该分片开头的版本。度量方式是 `start_time - chunk_offset`，值越小表明字幕
+/// 来自对应分片的前段，LLM 尚未在长音频中累积时间戳漂移。
+fn deduplicate_segments(segments: Vec<ChunkedSegment>) -> Vec<TranscriptionSegment> {
+    if segments.is_empty() {
+        return Vec::new();
+    }
+
+    let mut result: Vec<ChunkedSegment> = Vec::new();
+
+    for cand in segments {
+        match find_duplicate_index(&result, &cand) {
+            Some(idx) => {
+                let cand_freshness =
+                    cand.seg.start_time.unwrap_or(0.0) - cand.chunk_offset;
+                let existing_freshness =
+                    result[idx].seg.start_time.unwrap_or(0.0) - result[idx].chunk_offset;
+                // 新鲜度小 => 离所在分片起点更近 => 时间轴更可信
+                if cand_freshness < existing_freshness {
+                    result[idx] = cand;
+                }
+            }
+            None => result.push(cand),
+        }
+    }
+
+    // 替换可能打乱按起始时间的顺序，最终再排一次
+    result.sort_by(|a, b| {
+        a.seg
+            .start_time
+            .unwrap_or(0.0)
+            .partial_cmp(&b.seg.start_time.unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    result.into_iter().map(|c| c.seg).collect()
 }
 
 /// 使用 FFmpeg 从视频中提取音频
@@ -807,7 +857,7 @@ async fn extract_subtitles_with_kimi(
                 },
             ]),
         }],
-        temperature: Some(1.0), // Kimi 要求 temperature=1
+        temperature: pick_transcription_temperature(provider, model).map(|v| v as f32),
     };
 
     let response = match ai_service.chat(chat_request).await {
@@ -825,6 +875,25 @@ async fn extract_subtitles_with_kimi(
         serde_json::json!({ "phase": "done", "message": "字幕提取完成！", "count": segments.len() }));
 
     Ok(segments)
+}
+
+/// 根据 provider/model 选择转录请求里该带的 `temperature`。
+///
+/// 返回 `None` 表示不带该字段（留给 API 走默认值）——用于兜底未来某模型拒绝任何
+/// 显式取值的情况。当前所有已知路径都有明确取值：
+///
+/// - Kimi K2.5：模型强制要求 `temperature=1`。
+/// - Google Gemini：允许 0.0，贪心解码对转录时间戳最稳定。
+/// - 其他（openai / openrouter / 302ai / 非-K2.5 kimi 等走 OpenAI 兼容接口）：
+///   沿用历史值 0.1，低随机但保留一点探索以避免极端退化。
+fn pick_transcription_temperature(provider: &str, model: &str) -> Option<f64> {
+    if is_moonshot_provider(provider) && model.contains("k2.5") {
+        return Some(1.0);
+    }
+    match provider {
+        "google" | "google-ai-studio" => Some(0.0),
+        _ => Some(0.1),
+    }
 }
 
 /// 压缩视频以便上传
@@ -912,7 +981,7 @@ Requirements:
 2. Split at sentence-ending punctuation (periods, question marks, exclamation marks) or natural speech pauses.
 3. Each sentence should be roughly 5-30 characters/words. Never exceed 50.
 4. **Timestamp accuracy is critical**: start and end times MUST precisely match when the speech actually begins and ends in the audio. Listen carefully to the exact timing.
-5. Format: MM:SS (e.g., "01:23" for 1 minute 23 seconds). Both start and end are required.
+5. Format: MM:SS.mmm or HH:MM:SS.mmm with millisecond precision (e.g., "01:23.456" means 1 minute 23 seconds and 456 milliseconds). The `.mmm` fractional part is REQUIRED — do NOT round to whole seconds. Both start and end are required.
 6. Keep the original language. Do NOT translate.
 7. Timestamps must be monotonically increasing — each segment's start must be >= the previous segment's end.
 
@@ -920,14 +989,14 @@ Return format:
 {
   "segments": [
     {
-      "start": "00:00",
-      "end": "00:03",
+      "start": "00:00.000",
+      "end": "00:03.420",
       "content": "First sentence of the audio.",
       "speaker": null
     },
     {
-      "start": "00:03",
-      "end": "00:06",
+      "start": "00:03.420",
+      "end": "00:06.180",
       "content": "Second sentence of the audio.",
       "speaker": null
     }
@@ -935,7 +1004,7 @@ Return format:
   "full_text": "Full transcription text..."
 }
 
-IMPORTANT: Each segment = one sentence. Timestamps must be precise to the second.
+IMPORTANT: Each segment = one sentence. Timestamps MUST include milliseconds (the `.mmm` part). Integer-second timestamps like "00:03" are NOT acceptable — use "00:03.000" or the exact sub-second value.
 "#;
 
         let client = Client::new();
@@ -951,6 +1020,12 @@ IMPORTANT: Each segment = one sentence. Timestamps must be precise to the second
                     api_key
                 );
 
+                let mut generation_config = serde_json::json!({
+                    "response_mime_type": "application/json"
+                });
+                if let Some(temp) = pick_transcription_temperature(provider, model) {
+                    generation_config["temperature"] = serde_json::json!(temp);
+                }
                 let request_body = json!({
                     "contents": [{
                         "parts": [
@@ -965,9 +1040,7 @@ IMPORTANT: Each segment = one sentence. Timestamps must be precise to the second
                             }
                         ]
                     }],
-                    "generationConfig": {
-                        "response_mime_type": "application/json"
-                    }
+                    "generationConfig": generation_config
                 });
 
                 client
@@ -1016,7 +1089,7 @@ IMPORTANT: Each segment = one sentence. Timestamps must be precise to the second
                 };
 
                 // 使用 OpenAI 兼容的 input_audio 格式
-                let request_body = json!({
+                let mut request_body = json!({
                     "model": model,
                     "messages": [{
                         "role": "user",
@@ -1033,9 +1106,11 @@ IMPORTANT: Each segment = one sentence. Timestamps must be precise to the second
                                 "text": transcription_prompt
                             }
                         ]
-                    }],
-                    "temperature": 0.1
+                    }]
                 });
+                if let Some(temp) = pick_transcription_temperature(provider, model) {
+                    request_body["temperature"] = serde_json::json!(temp);
+                }
 
                 client
                     .post(&api_url)
@@ -1289,5 +1364,121 @@ mod tests {
         assert_eq!(parse_time_str("00:05"), 5.0);
         assert_eq!(parse_time_str("01:00"), 60.0);
         assert_eq!(parse_time_str("01:02:03"), 3723.0);
+    }
+
+    fn make_seg(content: &str, start: f64, end: f64) -> TranscriptionSegment {
+        TranscriptionSegment {
+            speaker: None,
+            content: content.to_string(),
+            start_time: Some(start),
+            end_time: Some(end),
+        }
+    }
+
+    #[test]
+    fn test_dedup_prefers_fresh_chunk_over_drifted_chunk() {
+        // Same sentence appears at the boundary between two chunks:
+        // - chunk 0 (offset=0.0): speech occurs 9.5 min into this chunk → LLM timing drift ~1s.
+        // - chunk 1 (offset=570.0): same speech is right at the start → fresh, no drift.
+        // Sort-by-start-time puts the drifted one first. Current behavior keeps
+        // whichever comes first; desired behavior keeps the one whose source chunk
+        // started latest (freshest relative to its own chunk origin).
+        let drifted = ChunkedSegment {
+            seg: make_seg("Hello there my dear friend", 569.2, 571.2), // drifted -0.8s
+            chunk_offset: 0.0,
+        };
+        let fresh = ChunkedSegment {
+            seg: make_seg("Hello there my dear friend", 570.0, 572.0), // accurate
+            chunk_offset: 570.0,
+        };
+
+        let kept = deduplicate_segments(vec![drifted, fresh]);
+
+        assert_eq!(kept.len(), 1, "the two should be deduped to one");
+        let s = &kept[0];
+        assert!(
+            (s.start_time.unwrap() - 570.0).abs() < 0.01,
+            "expected fresh chunk's timestamp 570.0s (from chunk whose offset is 570.0), got {:?}",
+            s.start_time
+        );
+    }
+
+    #[test]
+    fn test_dedup_keeps_non_duplicates() {
+        let a = ChunkedSegment {
+            seg: make_seg("first sentence", 0.0, 2.0),
+            chunk_offset: 0.0,
+        };
+        let b = ChunkedSegment {
+            seg: make_seg("completely different", 3.0, 5.0),
+            chunk_offset: 0.0,
+        };
+        let kept = deduplicate_segments(vec![a, b]);
+        assert_eq!(kept.len(), 2);
+    }
+
+    #[test]
+    fn test_pick_temperature_kimi_k25_must_be_one() {
+        // Kimi K2.5 (video understanding mode) only accepts temperature=1.
+        assert_eq!(
+            pick_transcription_temperature("moonshot", "kimi-k2.5-preview"),
+            Some(1.0)
+        );
+        assert_eq!(
+            pick_transcription_temperature("moonshot-cn", "kimi-k2.5"),
+            Some(1.0)
+        );
+        assert_eq!(
+            pick_transcription_temperature("moonshot-global", "kimi-k2.5-latest"),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn test_pick_temperature_google_gemini_is_zero() {
+        // Gemini accepts 0.0 and greedy decoding gives most deterministic timestamps.
+        assert_eq!(
+            pick_transcription_temperature("google", "gemini-2.5-flash"),
+            Some(0.0)
+        );
+        assert_eq!(
+            pick_transcription_temperature("google-ai-studio", "gemini-2.0-flash"),
+            Some(0.0)
+        );
+    }
+
+    #[test]
+    fn test_pick_temperature_non_kimi_moonshot_is_low() {
+        // Non-K2.5 Kimi models go through the OpenAI-compatible path and accept
+        // low-but-nonzero temperatures; don't force 1.0 on them.
+        assert_eq!(
+            pick_transcription_temperature("moonshot", "kimi-latest"),
+            Some(0.1)
+        );
+    }
+
+    #[test]
+    fn test_pick_temperature_default_providers_are_low() {
+        assert_eq!(
+            pick_transcription_temperature("openai", "gpt-4o-audio-preview"),
+            Some(0.1)
+        );
+        assert_eq!(
+            pick_transcription_temperature("openrouter", "openai/gpt-4o"),
+            Some(0.1)
+        );
+        assert_eq!(
+            pick_transcription_temperature("302ai", "any-model"),
+            Some(0.1)
+        );
+    }
+
+    #[test]
+    fn test_parse_time_str_with_milliseconds() {
+        assert!((parse_time_str("00:00.500") - 0.5).abs() < 1e-6);
+        assert!((parse_time_str("00:01.250") - 1.25).abs() < 1e-6);
+        assert!((parse_time_str("01:23.456") - 83.456).abs() < 1e-6);
+        assert!((parse_time_str("00:01:23.456") - 83.456).abs() < 1e-6);
+        assert!((parse_time_str("01:02:03.999") - 3723.999).abs() < 1e-6);
     }
 }
