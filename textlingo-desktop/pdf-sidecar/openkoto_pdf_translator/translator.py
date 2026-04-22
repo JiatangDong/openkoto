@@ -7,19 +7,17 @@ import unicodedata
 from copy import copy
 from string import Template
 from typing import cast
-import deepl
-import ollama
+
 import openai
 import requests
-import xinference_client
-from azure.ai.translation.text import TextTranslationClient
-from azure.core.credentials import AzureKeyCredential
-from tencentcloud.common import credential
-from tencentcloud.tmt.v20180321.models import (
-    TextTranslateRequest,
-    TextTranslateResponse,
-)
-from tencentcloud.tmt.v20180321.tmt_client import TmtClient
+
+# Optional translator backends (listed under pyproject.toml
+# `[project.optional-dependencies.extra-translators]`) are imported lazily
+# inside the translator class that actually needs them. Doing so at module
+# scope used to crash the PyInstaller-built sidecar whenever any of these
+# libraries was absent, even if the user had picked an OpenAI-compatible
+# translator that does not need them (issue #18). The `ArgosTranslator`
+# class below is the existing reference pattern for lazy optional imports.
 
 from .cache import TranslationCache
 from .config import ConfigManager
@@ -247,6 +245,13 @@ class DeepLTranslator(BaseTranslator):
     def __init__(
         self, lang_in, lang_out, model, envs=None, ignore_cache=False, **kwargs
     ):
+        try:
+            import deepl
+        except ImportError as e:
+            raise ImportError(
+                "deepl is required for DeepLTranslator. Install the optional "
+                "extras group: pip install 'openkoto-pdf-translator[extra-translators]'."
+            ) from e
         self.set_envs(envs)
         super().__init__(lang_in, lang_out, model, ignore_cache)
         auth_key = self.envs["DEEPL_AUTH_KEY"]
@@ -311,6 +316,13 @@ class OllamaTranslator(BaseTranslator):
         prompt: Template | None = None,
         ignore_cache=False,
     ):
+        try:
+            import ollama
+        except ImportError as e:
+            raise ImportError(
+                "ollama is required for OllamaTranslator. Install the optional "
+                "extras group: pip install 'openkoto-pdf-translator[extra-translators]'."
+            ) from e
         self.set_envs(envs)
         if not model:
             model = self.envs["OLLAMA_MODEL"]
@@ -357,6 +369,14 @@ class XinferenceTranslator(BaseTranslator):
     def __init__(
         self, lang_in, lang_out, model, envs=None, prompt=None, ignore_cache=False
     ):
+        try:
+            import xinference_client
+        except ImportError as e:
+            raise ImportError(
+                "xinference-client is required for XinferenceTranslator. Install "
+                "the optional extras group: pip install "
+                "'openkoto-pdf-translator[extra-translators]'."
+            ) from e
         self.set_envs(envs)
         if not model:
             model = self.envs["XINFERENCE_MODEL"]
@@ -695,6 +715,15 @@ class AzureTranslator(BaseTranslator):
     def __init__(
         self, lang_in, lang_out, model, envs=None, ignore_cache=False, **kwargs
     ):
+        try:
+            from azure.ai.translation.text import TextTranslationClient
+            from azure.core.credentials import AzureKeyCredential
+        except ImportError as e:
+            raise ImportError(
+                "azure-ai-translation-text is required for AzureTranslator. Install "
+                "the optional extras group: pip install "
+                "'openkoto-pdf-translator[extra-translators]'."
+            ) from e
         self.set_envs(envs)
         super().__init__(lang_in, lang_out, model, ignore_cache)
         endpoint = self.envs["AZURE_ENDPOINT"]
@@ -728,6 +757,16 @@ class TencentTranslator(BaseTranslator):
     def __init__(
         self, lang_in, lang_out, model, envs=None, ignore_cache=False, **kwargs
     ):
+        try:
+            from tencentcloud.common import credential
+            from tencentcloud.tmt.v20180321.models import TextTranslateRequest
+            from tencentcloud.tmt.v20180321.tmt_client import TmtClient
+        except ImportError as e:
+            raise ImportError(
+                "tencentcloud-sdk-python-tmt is required for TencentTranslator. "
+                "Install the optional extras group: pip install "
+                "'openkoto-pdf-translator[extra-translators]'."
+            ) from e
         self.set_envs(envs)
         super().__init__(lang_in, lang_out, model)
         try:
@@ -745,7 +784,7 @@ class TencentTranslator(BaseTranslator):
 
     def do_translate(self, text):
         self.req.SourceText = text
-        resp: TextTranslateResponse = self.client.TextTranslate(self.req)
+        resp = self.client.TextTranslate(self.req)
         return resp.TargetText
 
 
