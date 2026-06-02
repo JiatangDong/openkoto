@@ -32,6 +32,15 @@ class ReleaseWorkflowTests(unittest.TestCase):
             for legacy_arg in LEGACY_MACOS_ARGS:
                 self.assertNotIn(legacy_arg, content, f"{workflow} still contains `{legacy_arg}`")
 
+    def test_release_workflows_execute_pdf_sidecar_verification(self) -> None:
+        for workflow in RELEASE_WORKFLOWS:
+            content = workflow.read_text()
+            self.assertIn(
+                "bash script/verify_pdf_sidecar_binary.sh",
+                content,
+                f"{workflow} must execute the bundled PDF sidecar, not just list it",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

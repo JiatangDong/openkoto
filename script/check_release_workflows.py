@@ -12,6 +12,7 @@ REQUIRED_CI_GATE_SNIPPETS = (
     'name: setup python',
     'name: build bundled PDF sidecar',
     'name: verify bundled PDF sidecar',
+    'bash script/verify_pdf_sidecar_binary.sh',
 )
 
 REQUIRED_PUBLISH_SNIPPETS = (
@@ -21,6 +22,7 @@ REQUIRED_PUBLISH_SNIPPETS = (
     'name: setup python',
     'name: build bundled PDF sidecar',
     'name: verify bundled PDF sidecar',
+    'bash script/verify_pdf_sidecar_binary.sh',
 )
 
 REQUIRED_MACOS_MATRIX_ROWS = (

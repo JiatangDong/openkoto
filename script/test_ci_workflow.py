@@ -15,13 +15,16 @@ class CiWorkflowTests(unittest.TestCase):
         self.assertIn("name: setup python", content)
         self.assertIn("name: build bundled PDF sidecar", content)
         self.assertIn("name: verify bundled PDF sidecar", content)
+        self.assertIn("bash script/verify_pdf_sidecar_binary.sh", content)
 
         rust_tests_index = content.index("name: Rust tests")
         build_index = content.index("name: build bundled PDF sidecar")
         verify_index = content.index("name: verify bundled PDF sidecar")
+        executable_verify_index = content.index("bash script/verify_pdf_sidecar_binary.sh")
 
         self.assertLess(build_index, rust_tests_index)
         self.assertLess(verify_index, rust_tests_index)
+        self.assertLess(executable_verify_index, rust_tests_index)
 
 
 if __name__ == "__main__":

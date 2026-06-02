@@ -72,6 +72,7 @@ jobs:
       - name: verify bundled PDF sidecar
         run: |
           bash script/sync_pdf_sidecar_binaries.sh
+          bash script/verify_pdf_sidecar_binary.sh
           ls -la textlingo-desktop/src-tauri/binaries
         shell: bash
 
@@ -150,6 +151,7 @@ jobs:
       - name: verify bundled PDF sidecar
         run: |
           bash script/sync_pdf_sidecar_binaries.sh
+          bash script/verify_pdf_sidecar_binary.sh
           ls -la textlingo-desktop/src-tauri/binaries
         shell: bash
 
