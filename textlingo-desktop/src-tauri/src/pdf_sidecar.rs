@@ -137,3 +137,20 @@ pub fn build_pdf_sidecar_command_for_dir(
     ]);
     Ok(command)
 }
+
+/// Suppress the console window that would otherwise flash on Windows when the
+/// PDF sidecar (a `console=True` PyInstaller binary) is spawned via
+/// `std::process::Command`. Tauri's shell plugin already does this for its own
+/// sidecars (ffmpeg/yt-dlp), so only this raw spawn needs it. No-op elsewhere.
+pub fn hide_console_window(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = command;
+    }
+}
