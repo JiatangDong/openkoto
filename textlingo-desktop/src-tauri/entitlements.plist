@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      The PDF translator sidecar is a PyInstaller --onefile binary. At runtime it
+      unpacks an embedded Python.framework and many .so/.dylib files into a temp
+      dir and dlopen()s them. Those bundled libraries are signed by python.org /
+      ad-hoc, i.e. with a different Team ID than our Developer ID signature.
+      Under the Hardened Runtime, library validation rejects loading libraries
+      whose Team ID differs from the main executable ("have different Team IDs"),
+      which breaks PDF translation in the packaged/notarized app.
+
+      disable-library-validation lifts that restriction. The other two exceptions
+      cover dyld env vars and unsigned executable memory that the CPython runtime
+      and native deps (onnxruntime/opencv) rely on. All three are notarization-safe.
+    -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+</dict>
+</plist>
