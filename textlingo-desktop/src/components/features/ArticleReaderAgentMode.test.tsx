@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,6 +20,13 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   save: vi.fn(),
   open: (...args: unknown[]) => openMock(...args),
+}));
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, fallbackOrOptions?: string | Record<string, unknown>) =>
+      typeof fallbackOrOptions === "string" ? fallbackOrOptions : key,
+  }),
 }));
 
 vi.mock("docx", () => ({
@@ -191,5 +198,69 @@ describe("ArticleReader agent mode", () => {
 
     expect(screen.getByTestId("reader-toolbar-view-mode-trigger")).toBeInTheDocument();
     expect(screen.queryByTestId("player-view-mode-trigger")).not.toBeInTheDocument();
+  });
+
+  it("uses the configured batch explanation concurrency", async () => {
+    const segments = Array.from({ length: 6 }, (_, index) => ({
+      id: `seg-${index + 1}`,
+      article_id: "article-1",
+      order: index,
+      text: `Segment ${index + 1}`,
+      created_at: "2026-03-08T00:00:00Z",
+      is_new_paragraph: true,
+    }));
+    let activeRequests = 0;
+    let maxActiveRequests = 0;
+    const pendingResolvers: Array<() => void> = [];
+
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "get_config") {
+        return Promise.resolve({
+          target_language: "zh-CN",
+          batch_translation_concurrency: 5,
+        });
+      }
+
+      if (command === "segment_translate_explain_cmd") {
+        activeRequests += 1;
+        maxActiveRequests = Math.max(maxActiveRequests, activeRequests);
+        return new Promise((resolve) => {
+          pendingResolvers.push(() => {
+            activeRequests -= 1;
+            resolve({
+              translation: "Translated",
+              explanation: "Explained",
+              reading_text: "Reading",
+            });
+          });
+        });
+      }
+
+      if (command === "update_article_segment") {
+        return Promise.resolve(undefined);
+      }
+
+      if (command === "load_article") {
+        return Promise.resolve(JSON.stringify(createArticle({ segments })));
+      }
+
+      return Promise.resolve(undefined);
+    });
+
+    render(<ArticleReader article={createArticle({ segments })} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "articleReader.analyzeAll" }));
+    await userEvent.click(screen.getByRole("button", { name: "articleReader.analyze" }));
+
+    await waitFor(() => {
+      expect(pendingResolvers).toHaveLength(5);
+    });
+    expect(maxActiveRequests).toBe(5);
+
+    pendingResolvers.splice(0).forEach((resolve) => resolve());
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("segment_translate_explain_cmd", expect.any(Object));
+    });
   });
 });

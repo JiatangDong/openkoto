@@ -47,6 +47,22 @@ import {
 import { useConfig } from "../../lib/hooks";
 import { buildMediaResourceUrl } from "../../lib/media";
 
+const DEFAULT_BATCH_TRANSLATION_CONCURRENCY = 3;
+const MIN_BATCH_TRANSLATION_CONCURRENCY = 1;
+const MAX_BATCH_TRANSLATION_CONCURRENCY = 10;
+
+function normalizeBatchTranslationConcurrency(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_BATCH_TRANSLATION_CONCURRENCY;
+  }
+
+  return Math.min(
+    MAX_BATCH_TRANSLATION_CONCURRENCY,
+    Math.max(MIN_BATCH_TRANSLATION_CONCURRENCY, Math.trunc(parsed)),
+  );
+}
+
 interface ArticleReaderProps {
   article: Article;
   onBack?: () => void;
@@ -480,6 +496,7 @@ export function ArticleReader({
     try {
       const appConfig = await invoke<AppConfig>("get_config");
       const targetLang = appConfig?.target_language || "zh-CN";
+      const concurrency = normalizeBatchTranslationConcurrency(appConfig?.batch_translation_concurrency);
       const queue = [...segmentsToProcess];
       let completedCount = 0;
 
@@ -525,8 +542,7 @@ export function ArticleReader({
         }
       };
 
-      // Run 3 workers concurrently
-      await Promise.all([worker(), worker(), worker()]);
+      await Promise.all(Array.from({ length: concurrency }, () => worker()));
 
       console.log("[ArticleReader] Batch translation completed, syncing to parent");
       // 批量处理完成后，调用 refreshArticle 确保所有状态同步

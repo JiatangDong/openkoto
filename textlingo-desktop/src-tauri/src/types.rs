@@ -101,6 +101,9 @@ pub struct AppConfig {
     /// Interface language
     #[serde(default = "default_interface_language")]
     pub interface_language: String,
+    /// Concurrent workers used by article batch explanation
+    #[serde(default = "default_batch_translation_concurrency")]
+    pub batch_translation_concurrency: i32,
     /// Backend API URL for enhanced features
     #[serde(default)]
     pub backend_url: Option<String>,
@@ -129,6 +132,7 @@ impl Default for AppConfig {
             model_configs: Vec::new(),
             target_language: "zh-CN".to_string(),
             interface_language: default_interface_language(),
+            batch_translation_concurrency: default_batch_translation_concurrency(),
             backend_url: None,
             auth_token: None,
             srs_daily_new_limit: default_srs_daily_new_limit(),
@@ -156,6 +160,10 @@ impl AppConfig {
 
 fn default_interface_language() -> String {
     "en".to_string()
+}
+
+fn default_batch_translation_concurrency() -> i32 {
+    3
 }
 
 fn default_true() -> bool {

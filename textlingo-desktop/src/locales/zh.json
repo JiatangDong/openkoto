@@ -206,6 +206,8 @@
     "model": "模型",
     "targetLanguage": "翻译语言",
     "interfaceLanguage": "界面语言",
+    "batchTranslationConcurrency": "精讲并行处理数",
+    "batchTranslationConcurrencyHelp": "控制精讲全文时同时处理的段落数量。数值越大越快，但也更容易触发模型限速。",
     "saveSettings": "保存设置",
     "resetConfig": "重置并新建配置",
     "saving": "保存中...",

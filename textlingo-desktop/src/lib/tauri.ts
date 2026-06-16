@@ -39,6 +39,7 @@ export interface AppConfig {
   // Other settings
   target_language: string;
   interface_language: string;
+  batch_translation_concurrency?: number;
   // Backend API URL for services like webpage fetching
   backend_url?: string;
   // Auth token for backend API

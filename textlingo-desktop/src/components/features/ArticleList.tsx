@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   FileText,
   Clock,
@@ -413,7 +414,7 @@ export function ArticleList({
                       title={t("articleList.openSource")}
                       onClick={(e) => {
                         e.stopPropagation();
-                        window.open(article.source_url, "_blank");
+                        if (article.source_url) openUrl(article.source_url);
                       }}
                     >
                       <ExternalLink size={14} />
@@ -568,7 +569,7 @@ export function ArticleList({
                       title={t("articleList.openSource")}
                       onClick={(e) => {
                         e.stopPropagation();
-                        window.open(article.source_url, "_blank");
+                        if (article.source_url) openUrl(article.source_url);
                       }}
                     >
                       <ExternalLink size={14} />

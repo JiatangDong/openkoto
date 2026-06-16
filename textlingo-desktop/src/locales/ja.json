@@ -196,6 +196,8 @@
     "model": "モデル",
     "targetLanguage": "翻訳言語",
     "interfaceLanguage": "インターフェース言語",
+    "batchTranslationConcurrency": "一括解説の並列数",
+    "batchTranslationConcurrencyHelp": "一括解説で同時に処理するセグメント数を制御します。大きいほど速くなりますが、モデルのレート制限に達しやすくなります。",
     "saveSettings": "設定を保存",
     "resetConfig": "設定をリセットして新規作成",
     "saving": "保存中...",

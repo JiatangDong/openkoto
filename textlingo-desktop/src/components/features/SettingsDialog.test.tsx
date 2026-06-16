@@ -135,4 +135,37 @@ describe("SettingsDialog", () => {
 
     expect(screen.queryByText("settings.plugins.title")).not.toBeInTheDocument();
   });
+
+  it("saves the batch explanation concurrency setting", async () => {
+    invokeMock.mockImplementation((command: string) => {
+      if (command === "get_config") {
+        return Promise.resolve({
+          model_configs: [],
+          target_language: "zh-CN",
+          interface_language: "en",
+          batch_translation_concurrency: 3,
+          prompt_features: [],
+        });
+      }
+
+      return Promise.resolve("ok");
+    });
+
+    render(<SettingsDialog isOpen onClose={vi.fn()} onSave={vi.fn()} />);
+
+    const concurrencyInput = await screen.findByLabelText("Batch explanation concurrency");
+    fireEvent.change(concurrencyInput, { target: { value: "6" } });
+    await userEvent.click(screen.getByText("Close"));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        "save_config_cmd",
+        expect.objectContaining({
+          config: expect.objectContaining({
+            batch_translation_concurrency: 6,
+          }),
+        }),
+      );
+    });
+  });
 });

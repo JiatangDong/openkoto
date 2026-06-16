@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTranslation } from "react-i18next";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -55,7 +56,7 @@ export function YouTubeImportForm({ onSave, onCancel }: YouTubeImportFormProps) 
                                         size="sm"
                                         variant="outline"
                                         className="w-full border-red-700 hover:bg-red-900/50 text-red-200"
-                                        onClick={() => window.open(url, "_blank")}
+                                        onClick={() => openUrl(url)}
                                     >
                                         {t("youtubeImport.openInBrowser")}
                                     </Button>

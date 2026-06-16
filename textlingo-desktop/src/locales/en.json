@@ -206,6 +206,8 @@
     "model": "Model",
     "targetLanguage": "Translation Language",
     "interfaceLanguage": "Interface Language",
+    "batchTranslationConcurrency": "Batch explanation concurrency",
+    "batchTranslationConcurrencyHelp": "Controls how many segments are explained at the same time. Higher values are faster but may hit model rate limits.",
     "saveSettings": "Save Settings",
     "resetConfig": "Reset Configuration",
     "saving": "Saving...",

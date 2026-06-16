@@ -38,6 +38,22 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
   "lmstudio": "http://localhost:1234/v1",
 };
 
+const DEFAULT_BATCH_TRANSLATION_CONCURRENCY = 3;
+const MIN_BATCH_TRANSLATION_CONCURRENCY = 1;
+const MAX_BATCH_TRANSLATION_CONCURRENCY = 10;
+
+function normalizeBatchTranslationConcurrency(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_BATCH_TRANSLATION_CONCURRENCY;
+  }
+
+  return Math.min(
+    MAX_BATCH_TRANSLATION_CONCURRENCY,
+    Math.max(MIN_BATCH_TRANSLATION_CONCURRENCY, Math.trunc(parsed)),
+  );
+}
+
 const BUILTIN_PROMPT_FEATURE_DEFAULTS: Record<string, PromptFeature> = {
   "chat.default": {
     id: "chat.default",
@@ -179,6 +195,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
     model_configs: [],
     target_language: "zh-CN",
     interface_language: i18n.language,
+    batch_translation_concurrency: 3,
     prompt_features: [],
   });
 
@@ -225,7 +242,10 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
     try {
       const result = await invoke<AppConfig | null>("get_config");
       if (result) {
-        setConfig(result);
+        setConfig({
+          ...result,
+          batch_translation_concurrency: normalizeBatchTranslationConcurrency(result.batch_translation_concurrency),
+        });
         // Restore interface language from config or use current
         const savedLang = result.interface_language || i18n.language;
         if (savedLang !== i18n.language) {
@@ -1331,6 +1351,36 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
                   </option>
                 ))}
               </Select>
+            </div>
+
+            {/* Batch Explanation Concurrency */}
+            <div>
+              <label
+                htmlFor="batch-translation-concurrency"
+                className="block text-sm font-medium text-foreground mb-2"
+              >
+                {t("settings.batchTranslationConcurrency", "Batch explanation concurrency")}
+              </label>
+              <Input
+                id="batch-translation-concurrency"
+                type="number"
+                min={MIN_BATCH_TRANSLATION_CONCURRENCY}
+                max={MAX_BATCH_TRANSLATION_CONCURRENCY}
+                step={1}
+                value={config.batch_translation_concurrency ?? DEFAULT_BATCH_TRANSLATION_CONCURRENCY}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    batch_translation_concurrency: normalizeBatchTranslationConcurrency(e.target.value),
+                  })
+                }
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t(
+                  "settings.batchTranslationConcurrencyHelp",
+                  "Controls how many segments are explained at the same time. Higher values are faster but may hit model rate limits.",
+                )}
+              </p>
             </div>
           </div>
         </div>
