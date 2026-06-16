@@ -79,7 +79,7 @@ download_ffmpeg_mac() {
 download_ffmpeg_linux() {
     echo "Downloading FFmpeg for Linux..."
     
-    if curl -L --fail --max-time 180 -o ffmpeg_linux.tar.xz \
+    if curl -L --fail --retry 3 --retry-delay 5 --max-time 180 -o ffmpeg_linux.tar.xz \
         "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz" 2>/dev/null; then
         tar -xf ffmpeg_linux.tar.xz --wildcards '*/ffmpeg' --strip-components=1 2>/dev/null || \
             tar -xf ffmpeg_linux.tar.xz 2>/dev/null
@@ -94,6 +94,28 @@ download_ffmpeg_linux() {
         rm -f ffmpeg_linux.tar.xz
         rm -rf ffmpeg-*-static 2>/dev/null
         
+        if [ -f "$TARGET_DIR/ffmpeg-x86_64-unknown-linux-gnu" ]; then
+            chmod +x "$TARGET_DIR/ffmpeg-x86_64-unknown-linux-gnu"
+            echo "FFmpeg for Linux downloaded successfully!"
+            return 0
+        fi
+    fi
+
+    echo "Trying BtbN builds for Linux..."
+    if curl -L --fail --retry 3 --retry-delay 5 --max-time 180 -o ffmpeg_linux.tar.xz \
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz" 2>/dev/null; then
+        tar -xf ffmpeg_linux.tar.xz --wildcards '*/bin/ffmpeg' --strip-components=2 2>/dev/null || \
+            tar -xf ffmpeg_linux.tar.xz 2>/dev/null
+
+        if [ -f "ffmpeg" ]; then
+            mv ffmpeg "$TARGET_DIR/ffmpeg-x86_64-unknown-linux-gnu"
+        else
+            find . -path "*/bin/ffmpeg" -type f -executable -exec mv {} "$TARGET_DIR/ffmpeg-x86_64-unknown-linux-gnu" \; 2>/dev/null
+        fi
+
+        rm -f ffmpeg_linux.tar.xz
+        rm -rf ffmpeg-master-latest-linux64-gpl 2>/dev/null
+
         if [ -f "$TARGET_DIR/ffmpeg-x86_64-unknown-linux-gnu" ]; then
             chmod +x "$TARGET_DIR/ffmpeg-x86_64-unknown-linux-gnu"
             echo "FFmpeg for Linux downloaded successfully!"
@@ -142,13 +164,13 @@ download_ffmpeg_windows() {
 # 根据平台执行下载
 case "$OS_TYPE" in
     Darwin)
-        download_ffmpeg_mac
+        download_ffmpeg_mac || exit 1
         ;;
     Linux)
-        download_ffmpeg_linux
+        download_ffmpeg_linux || exit 1
         ;;
     MINGW*|MSYS*|CYGWIN*)
-        download_ffmpeg_windows
+        download_ffmpeg_windows || exit 1
         ;;
     *)
         echo "Unknown OS: $OS_TYPE"
