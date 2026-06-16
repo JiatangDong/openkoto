@@ -546,7 +546,7 @@ pub fn worker_event_log_entry(event: &WorkerEvent) -> Option<(WorkerLogLevel, St
     }
 }
 
-fn default_base_url(provider: &str) -> Option<&'static str> {
+pub fn default_base_url(provider: &str) -> Option<&'static str> {
     match provider {
         "openai" => Some(OPENAI_BASE_URL),
         "openrouter" => Some(OPENROUTER_BASE_URL),

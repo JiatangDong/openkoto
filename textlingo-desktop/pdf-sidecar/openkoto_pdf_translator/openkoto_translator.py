@@ -26,6 +26,11 @@ OPENKOTO_PROVIDER_URLS = {
     "google-ai-studio": "https://generativelanguage.googleapis.com/v1beta/openai",
     "ollama": "http://localhost:11434/v1",
     "lmstudio": "http://localhost:1234/v1",
+    # Moonshot / Kimi (OpenAI-compatible). The desktop app derives these URLs at
+    # runtime, so the stored config often has no explicit base_url.
+    "moonshot": "https://api.moonshot.cn/v1",
+    "moonshot-cn": "https://api.moonshot.cn/v1",
+    "moonshot-global": "https://api.moonshot.ai/v1",
 }
 
 # Default models per provider
@@ -107,6 +112,11 @@ class OpenKotoTranslator(OpenAITranslator):
             self.add_cache_impact_parameters("temperature", self.options["temperature"])
             self.add_cache_impact_parameters("prompt", self.prompt("", self.prompttext))
         else:
+            if not base_url:
+                raise ValueError(
+                    f"Base URL is required for provider '{provider}'. "
+                    "Set via OPENKOTO_BASE_URL env var or config file."
+                )
             super().__init__(
                 lang_in=lang_in,
                 lang_out=lang_out,

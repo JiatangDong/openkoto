@@ -1,5 +1,5 @@
 use crate::agent_worker::{
-    resolve_runtime_provider_config, AgentWorkerManager, AgentWorkerStatusSnapshot,
+    default_base_url, resolve_runtime_provider_config, AgentWorkerManager, AgentWorkerStatusSnapshot,
 };
 use crate::ai_service::{get_ai_service, get_or_create_ai_service, AIServiceCache};
 use crate::ktv_export::{export_ktv_video, prepare_ktv_segments, KtvExportConfig, KtvExportResult};
@@ -3006,8 +3006,20 @@ pub async fn translate_pdf_document(
         ("OPENKOTO_MODEL", model.clone()),
     ];
 
-    if let Some(ref url) = base_url {
-        envs.push(("OPENKOTO_BASE_URL", url.clone()));
+    // Resolve the base URL with the same provider defaults used by the other AI
+    // features, so providers whose URL is derived rather than stored (e.g.
+    // Moonshot/Kimi) still work when the active model config has no explicit
+    // base_url. Without this the sidecar receives no OPENKOTO_BASE_URL and dies
+    // with `KeyError: 'OPENAI_BASE_URL'`.
+    let resolved_base_url = base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| default_base_url(&provider).map(ToOwned::to_owned));
+
+    if let Some(url) = resolved_base_url {
+        envs.push(("OPENKOTO_BASE_URL", url));
     }
 
     let sidecar = pdf_sidecar::resolve_pdf_sidecar(&app_handle)
