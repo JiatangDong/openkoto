@@ -3045,11 +3045,13 @@ pub async fn translate_pdf_document(
 
     // 在插件目录下执行，以确保 Python 模块导入正确 (如果是 Dev 模式)
     // 或者对于 Prod 模式，通常也不影响
-    let result = Command::new(&cmd)
+    let mut command = Command::new(&cmd);
+    command
         .args(&args)
         .envs(envs.iter().map(|(k, v)| (*k, v.as_str())))
-        .current_dir(&plugin_dir) // 关键：设置工作目录为插件目录
-        .output();
+        .current_dir(&plugin_dir); // 关键：设置工作目录为插件目录
+    pdf_sidecar::hide_console_window(&mut command); // Windows: 避免弹出黑色 cmd 窗口
+    let result = command.output();
 
     match result {
         Ok(output) => {
