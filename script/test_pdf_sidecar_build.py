@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_SCRIPT = ROOT / "textlingo-desktop" / "pdf-sidecar" / "build.py"
 PYINSTALLER_ENTRY = ROOT / "textlingo-desktop" / "pdf-sidecar" / "pyinstaller_entry.py"
+PYPROJECT = ROOT / "textlingo-desktop" / "pdf-sidecar" / "pyproject.toml"
 
 
 class PdfSidecarBuildScriptTests(unittest.TestCase):
@@ -125,6 +127,17 @@ class PdfSidecarBuildScriptTests(unittest.TestCase):
             freeze_index,
             pdf2zh_import_index,
             "freeze_support must run before importing pdf2zh so frozen multiprocessing children do not re-enter the CLI",
+        )
+
+    def test_sidecar_pins_cryptography_below_macos_openssl_abi_break(self) -> None:
+        pyproject = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+        dependencies = pyproject["project"]["dependencies"]
+
+        self.assertIn(
+            "cryptography<44",
+            dependencies,
+            "macOS x64 PyInstaller bundles can load an older libssl.3.dylib; newer "
+            "cryptography wheels may require OpenSSL symbols that are not present there.",
         )
 
 
