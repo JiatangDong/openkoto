@@ -439,12 +439,15 @@ class OpenAITranslator(BaseTranslator):
     ):
         self.set_envs(envs)
         if not model:
-            model = self.envs["OPENAI_MODEL"]
+            model = self.envs.get("OPENAI_MODEL", "gpt-4o-mini")
         super().__init__(lang_in, lang_out, model, ignore_cache)
         self.options = {"temperature": 0}  # 随机采样可能会打断公式标记
+        # Use .get() so a subclass whose envs dict lacks the OPENAI_* keys (e.g.
+        # OpenKotoTranslator) does not crash with a cryptic KeyError; callers are
+        # expected to pass base_url/api_key explicitly in that case.
         self.client = openai.OpenAI(
-            base_url=base_url or self.envs["OPENAI_BASE_URL"],
-            api_key=api_key or self.envs["OPENAI_API_KEY"],
+            base_url=base_url or self.envs.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            api_key=api_key or self.envs.get("OPENAI_API_KEY"),
         )
         self.prompttext = prompt
         self.add_cache_impact_parameters("temperature", self.options["temperature"])
