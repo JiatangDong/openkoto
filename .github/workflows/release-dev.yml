@@ -202,3 +202,29 @@ jobs:
           prerelease: true   # 关键：标记为预发布，不会触发用户更新弹窗
           projectPath: "./textlingo-desktop"
           args: ${{ matrix.args }}
+
+      - name: assert PDF sidecar entitlements (macos only)
+        if: startsWith(matrix.platform, 'macos-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP=$(find textlingo-desktop/src-tauri/target -type d -name "*.app" -path "*/release/bundle/macos/*" | head -1)
+          if [ -z "$APP" ]; then echo "::error::No .app bundle found"; exit 1; fi
+          echo "App bundle: $APP"
+          SIDECAR="$APP/Contents/MacOS/openkoto-pdf-translator"
+          if [ ! -f "$SIDECAR" ]; then
+            echo "::error::PDF sidecar not found at $SIDECAR"
+            ls -la "$APP/Contents/MacOS" || true
+            exit 1
+          fi
+          echo "--- signature ---"
+          codesign -dvvv "$SIDECAR" 2>&1 | grep -iE "TeamIdentifier|Authority=|Signature" || true
+          echo "--- entitlements ---"
+          ENTS=$(codesign -d --entitlements - --xml "$SIDECAR" 2>/dev/null || codesign -d --entitlements - "$SIDECAR" 2>/dev/null || true)
+          echo "$ENTS"
+          if echo "$ENTS" | grep -q "disable-library-validation"; then
+            echo "OK: disable-library-validation present on PDF sidecar"
+          else
+            echo "::error::disable-library-validation entitlement missing on PDF sidecar — PDF translation will fail at runtime"
+            exit 1
+          fi
