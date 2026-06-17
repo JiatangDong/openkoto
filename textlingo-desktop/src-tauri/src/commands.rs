@@ -3023,6 +3023,22 @@ pub async fn translate_pdf_document(
         envs.push(("OPENKOTO_BASE_URL", url));
     }
 
+    // Point the sidecar at bundled offline assets (DocLayout model + CJK fonts)
+    // so the first translation doesn't block on a network download. Absent in
+    // dev builds, in which case the sidecar falls back to on-demand download.
+    if let Ok(resource_dir) = app_handle.path().resource_dir() {
+        for candidate in ["resources/pdf-assets", "pdf-assets"] {
+            let dir = resource_dir.join(candidate);
+            if dir.join("models").is_dir() || dir.join("fonts").is_dir() {
+                envs.push((
+                    "OPENKOTO_OFFLINE_ASSETS_DIR",
+                    dir.to_string_lossy().to_string(),
+                ));
+                break;
+            }
+        }
+    }
+
     let sidecar = pdf_sidecar::resolve_pdf_sidecar(&app_handle)
         .map_err(|e| format!("PDF sidecar error: {e}"))?;
     let cmd = sidecar.program;

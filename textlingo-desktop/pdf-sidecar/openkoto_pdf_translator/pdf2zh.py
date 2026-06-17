@@ -58,6 +58,43 @@ def _emit_openkoto_progress(progress) -> None:
         pass
 
 
+def _seed_offline_assets() -> None:
+    """Copy bundled DocLayout model / fonts into babeldoc's cache so the first
+    translation does not need to download them.
+
+    The desktop app sets OPENKOTO_OFFLINE_ASSETS_DIR to a resource folder laid
+    out as ``<dir>/models/*.onnx`` and ``<dir>/fonts/*.ttf``. Best-effort: any
+    failure just falls back to babeldoc's normal on-demand download.
+    """
+    src_dir = os.environ.get("OPENKOTO_OFFLINE_ASSETS_DIR")
+    if not src_dir or not os.path.isdir(src_dir):
+        return
+    try:
+        import shutil
+        from babeldoc.const import get_cache_file_path
+
+        for sub_folder in ("models", "fonts"):
+            type_dir = os.path.join(src_dir, sub_folder)
+            if not os.path.isdir(type_dir):
+                continue
+            for name in os.listdir(type_dir):
+                src = os.path.join(type_dir, name)
+                if not os.path.isfile(src):
+                    continue
+                # get_cache_file_path creates the destination sub-folder for us.
+                dst = str(get_cache_file_path(name, sub_folder))
+                if os.path.exists(dst):
+                    continue
+                shutil.copy2(src, dst)
+                print(
+                    f"[PDF] seeded offline asset: {sub_folder}/{name}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+    except Exception as e:
+        print(f"[PDF] offline asset seeding skipped: {e}", file=sys.stderr, flush=True)
+
+
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, add_help=True)
     parser.add_argument(
@@ -298,6 +335,10 @@ def main(args: Optional[List[str]] = None) -> int:
 
     if parsed_args.debug:
         log.setLevel(logging.DEBUG)
+
+    # Restore bundled offline assets (if shipped) before any model/font load so
+    # the first translation does not block on a network download.
+    _seed_offline_assets()
 
     if parsed_args.onnx:
         ModelInstance.value = OnnxModel(parsed_args.onnx)
