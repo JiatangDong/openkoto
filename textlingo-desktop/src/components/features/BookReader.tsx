@@ -6,6 +6,7 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "../ui/button";
 import { ChevronLeft, BookOpen, PanelRightClose, PanelRightOpen, Languages, Loader2, Download, FileText, Split, File, Columns } from "lucide-react";
@@ -57,6 +58,8 @@ export function BookReader({ article, onBack }: BookReaderProps) {
 
     // PDF翻译状态
     const [isTranslating, setIsTranslating] = useState(false);
+    // 翻译进度百分比（null 表示尚未收到进度）
+    const [translateProgress, setTranslateProgress] = useState<number | null>(null);
 
     // 判断书籍类型
     const isEpub = article.book_type === "epub";
@@ -186,7 +189,19 @@ export function BookReader({ article, onBack }: BookReaderProps) {
     const handlePdfTranslate = async () => {
         if (!article.book_path || isTranslating) return;
 
+        // 监听 Rust 转发的逐页翻译进度
+        const unlistenProgress = await listen<{ current?: number; total?: number; percent?: number }>(
+            "pdf-translation-progress",
+            (event) => {
+                const percent = event.payload?.percent;
+                if (typeof percent === "number") {
+                    setTranslateProgress(Math.max(0, Math.min(100, percent)));
+                }
+            }
+        );
+
         try {
+            setTranslateProgress(0);
             setIsTranslating(true);
 
             // 获取配置
@@ -244,7 +259,9 @@ export function BookReader({ article, onBack }: BookReaderProps) {
             console.error("[PDF Translate] Error:", error);
             alert(t("pdfTranslate.error", "翻译失败: {{error}}", { error: String(error) }));
         } finally {
+            unlistenProgress();
             setIsTranslating(false);
+            setTranslateProgress(null);
         }
     };
 
@@ -342,7 +359,11 @@ export function BookReader({ article, onBack }: BookReaderProps) {
                                         <Languages size={16} />
                                     )}
                                     <span className="hidden sm:inline">
-                                        {isTranslating ? t("pdfTranslate.translating", "翻译中...") : t("pdfTranslate.button", "翻译全文")}
+                                        {isTranslating
+                                            ? (translateProgress !== null
+                                                ? t("pdfTranslate.translatingPercent", "翻译中 {{percent}}%", { percent: translateProgress })
+                                                : t("pdfTranslate.translating", "翻译中..."))
+                                            : t("pdfTranslate.button", "翻译全文")}
                                     </span>
                                 </Button>
 

@@ -2979,7 +2979,8 @@ pub async fn translate_pdf_document(
     base_url: Option<String>,
 ) -> Result<serde_json::Value, String> {
     use crate::pdf_sidecar;
-    use std::process::Command;
+    use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
 
     println!(
         "[PDF Translate] Starting translation: {} -> {}",
@@ -3049,36 +3050,88 @@ pub async fn translate_pdf_document(
     command
         .args(&args)
         .envs(envs.iter().map(|(k, v)| (*k, v.as_str())))
-        .current_dir(&plugin_dir); // 关键：设置工作目录为插件目录
+        .current_dir(&plugin_dir) // 关键：设置工作目录为插件目录
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     pdf_sidecar::hide_console_window(&mut command); // Windows: 避免弹出黑色 cmd 窗口
-    let result = command.output();
 
-    match result {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
+    // Stream the sidecar output instead of blocking on .output(): this lets us
+    // forward per-page progress to the UI and log lines to the console live,
+    // so a long translation no longer looks frozen.
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Failed to execute PDF sidecar '{}': {}", cmd, e))?;
 
-            println!("[PDF Translate] stdout: {}", stdout);
-            if !stderr.is_empty() {
-                println!("[PDF Translate] stderr: {}", stderr);
-            }
+    let child_stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "PDF sidecar stdout unavailable".to_string())?;
+    let child_stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "PDF sidecar stderr unavailable".to_string())?;
 
-            if output.status.success() {
-                // 构建输出文件路径
-                let mono_path = format!("{}/{}-mono.pdf", output_dir, filename_stem);
-                let dual_path = format!("{}/{}-dual.pdf", output_dir, filename_stem);
-
-                Ok(serde_json::json!({
-                    "success": true,
-                    "mono_pdf": mono_path,
-                    "dual_pdf": dual_path,
-                    "original_pdf": pdf_path,
-                }))
+    // stdout: parse progress markers -> emit events + console log; pass the rest through.
+    let app_for_stdout = app_handle.clone();
+    let stdout_handle = std::thread::spawn(move || {
+        let reader = BufReader::new(child_stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            if let Some(rest) = line.strip_prefix("OPENKOTO_PROGRESS ") {
+                match serde_json::from_str::<serde_json::Value>(rest) {
+                    Ok(payload) => {
+                        let current = payload.get("current").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let total = payload.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
+                        let percent = payload.get("percent").and_then(|v| v.as_i64()).unwrap_or(0);
+                        println!(
+                            "[PDF Translate] progress {}/{} ({}%)",
+                            current, total, percent
+                        );
+                        let _ = app_for_stdout.emit("pdf-translation-progress", payload);
+                    }
+                    Err(_) => println!("[PDF Sidecar] {}", line),
+                }
             } else {
-                Err(format!("PDF translation failed: {}", stderr))
+                println!("[PDF Sidecar] {}", line);
             }
         }
-        Err(e) => Err(format!("Failed to execute PDF sidecar '{}': {}", cmd, e)),
+    });
+
+    // stderr: log live and accumulate so a failure still surfaces a useful message.
+    let stderr_handle = std::thread::spawn(move || {
+        let reader = BufReader::new(child_stderr);
+        let mut collected = String::new();
+        for line in reader.lines().map_while(Result::ok) {
+            eprintln!("[PDF Sidecar:err] {}", line);
+            collected.push_str(&line);
+            collected.push('\n');
+        }
+        collected
+    });
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("Failed to wait for PDF sidecar: {}", e))?;
+    let _ = stdout_handle.join();
+    let stderr_output = stderr_handle.join().unwrap_or_default();
+
+    if status.success() {
+        // Settle the UI at 100% once the files are written.
+        let _ = app_handle.emit(
+            "pdf-translation-progress",
+            serde_json::json!({"type": "progress", "current": 0, "total": 0, "percent": 100}),
+        );
+
+        let mono_path = format!("{}/{}-mono.pdf", output_dir, filename_stem);
+        let dual_path = format!("{}/{}-dual.pdf", output_dir, filename_stem);
+
+        Ok(serde_json::json!({
+            "success": true,
+            "mono_pdf": mono_path,
+            "dual_pdf": dual_path,
+            "original_pdf": pdf_path,
+        }))
+    } else {
+        Err(format!("PDF translation failed: {}", stderr_output))
     }
 }
 
