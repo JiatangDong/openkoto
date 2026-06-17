@@ -179,6 +179,10 @@ jobs:
           ls -la textlingo-desktop/src-tauri/binaries
         shell: bash
 
+      - name: stage PDF offline assets
+        run: python script/build_pdf_offline_assets.py
+        shell: bash
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
