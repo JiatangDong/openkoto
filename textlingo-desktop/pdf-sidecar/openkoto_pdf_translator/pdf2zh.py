@@ -6,6 +6,7 @@ output it to plain text, html, xml or tags.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from string import Template
@@ -23,6 +24,38 @@ from babeldoc.high_level import init as yadt_init
 from babeldoc.main import create_progress_handler
 
 logger = logging.getLogger(__name__)
+
+# Marker prefix the desktop app (Rust side) parses out of stdout to drive the
+# progress UI. Keep it in sync with `translate_pdf_document` in commands.rs.
+OPENKOTO_PROGRESS_PREFIX = "OPENKOTO_PROGRESS "
+
+
+def _emit_openkoto_progress(progress) -> None:
+    """Emit a machine-readable per-page progress line plus a human log line.
+
+    `progress` is the tqdm object passed by high_level.translate_patch, so
+    `progress.n` is the number of pages processed and `progress.total` the page
+    count. Stdout carries the structured marker; stderr carries a readable log.
+    """
+    try:
+        current = int(getattr(progress, "n", 0) or 0)
+        total = int(getattr(progress, "total", 0) or 0)
+        percent = int(current * 100 / total) if total else 0
+        payload = {
+            "type": "progress",
+            "current": current,
+            "total": total,
+            "percent": percent,
+        }
+        print(OPENKOTO_PROGRESS_PREFIX + json.dumps(payload), flush=True)
+        print(
+            f"[PDF] translating page {current}/{total} ({percent}%)",
+            file=sys.stderr,
+            flush=True,
+        )
+    except Exception:
+        # Progress reporting must never break a translation.
+        pass
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -322,10 +355,10 @@ def main(args: Optional[List[str]] = None) -> int:
     if parsed_args.dir:
         untranlate_file = find_all_files_in_directory(parsed_args.files[0])
         parsed_args.files = untranlate_file
-        translate(model=ModelInstance.value, **vars(parsed_args))
+        translate(model=ModelInstance.value, callback=_emit_openkoto_progress, **vars(parsed_args))
         return 0
 
-    translate(model=ModelInstance.value, **vars(parsed_args))
+    translate(model=ModelInstance.value, callback=_emit_openkoto_progress, **vars(parsed_args))
     return 0
 
 
