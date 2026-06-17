@@ -3000,6 +3000,10 @@ pub async fn translate_pdf_document(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "output".to_string());
 
+    // The sidecar writes <stem>-mono.pdf / -dual.pdf into output_dir but does not
+    // create it; make sure it exists so writing the result never fails.
+    let _ = std::fs::create_dir_all(&output_dir);
+
     // 构建环境变量
     let mut envs: Vec<(&str, String)> = vec![
         ("OPENKOTO_PROVIDER", provider.clone()),

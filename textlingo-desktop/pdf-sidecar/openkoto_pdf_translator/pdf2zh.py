@@ -83,7 +83,11 @@ def _seed_offline_assets() -> None:
                     continue
                 # get_cache_file_path creates the destination sub-folder for us.
                 dst = str(get_cache_file_path(name, sub_folder))
-                if os.path.exists(dst):
+                # Skip only if a *complete* copy already exists. A size mismatch
+                # means a previous run left a partial/corrupt download (the exact
+                # state that makes the first translation hang), so overwrite it
+                # with the known-good bundled asset instead of skipping.
+                if os.path.exists(dst) and os.path.getsize(dst) == os.path.getsize(src):
                     continue
                 shutil.copy2(src, dst)
                 print(
