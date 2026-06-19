@@ -6,9 +6,10 @@ import { Dialog } from "../ui/dialog";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select } from "../ui/select";
-import { Settings, Plus, Trash2, Edit2, Check, RefreshCw, Loader2, HelpCircle, Boxes, MessageSquare, Palette, Languages, Settings2 } from "lucide-react";
+import { Settings, Plus, Trash2, Edit2, Check, RefreshCw, Loader2, HelpCircle, Boxes, MessageSquare, Palette, Languages, Settings2, ScrollText } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useTheme } from "../theme-provider";
+import { LogsPanel } from "./LogsPanel";
 import type { AppConfig, ModelConfig, PromptFeature } from "../../lib/tauri";
 import {
   getKimiModelsUrl,
@@ -113,7 +114,7 @@ const BUILTIN_PROMPT_FEATURE_DEFAULTS: Record<string, PromptFeature> = {
 
 const PROMPT_FEATURE_ICON_OPTIONS = ["sparkles", "translate", "explain", "grammar", "book-open"];
 
-type SettingsSectionKey = "models" | "chat" | "appearance" | "language" | "advanced";
+type SettingsSectionKey = "models" | "chat" | "appearance" | "language" | "advanced" | "logs";
 
 const SETTINGS_SECTIONS: { key: SettingsSectionKey; icon: LucideIcon; labelKey: string }[] = [
   { key: "models", icon: Boxes, labelKey: "settings.nav.models" },
@@ -121,6 +122,7 @@ const SETTINGS_SECTIONS: { key: SettingsSectionKey; icon: LucideIcon; labelKey: 
   { key: "appearance", icon: Palette, labelKey: "settings.nav.appearance" },
   { key: "language", icon: Languages, labelKey: "settings.nav.language" },
   { key: "advanced", icon: Settings2, labelKey: "settings.nav.advanced" },
+  { key: "logs", icon: ScrollText, labelKey: "settings.nav.logs" },
 ];
 
 // Default preset models
@@ -1459,6 +1461,13 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
                 )}
               </p>
             </div>
+          </div>
+          )}
+
+          {/* Runtime Logs Section */}
+          {activeSection === "logs" && (
+          <div className="h-full">
+            <LogsPanel />
           </div>
           )}
         </div>
