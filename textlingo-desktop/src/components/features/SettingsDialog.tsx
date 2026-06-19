@@ -2,11 +2,12 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTranslation } from "react-i18next";
-import { Dialog, DialogContent, DialogFooter } from "../ui/dialog";
+import { Dialog } from "../ui/dialog";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select } from "../ui/select";
-import { Settings, Plus, Trash2, Edit2, Check, RefreshCw, Loader2, HelpCircle } from "lucide-react";
+import { Settings, Plus, Trash2, Edit2, Check, RefreshCw, Loader2, HelpCircle, Boxes, MessageSquare, Palette, Languages, Settings2 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useTheme } from "../theme-provider";
 import type { AppConfig, ModelConfig, PromptFeature } from "../../lib/tauri";
 import {
@@ -112,6 +113,16 @@ const BUILTIN_PROMPT_FEATURE_DEFAULTS: Record<string, PromptFeature> = {
 
 const PROMPT_FEATURE_ICON_OPTIONS = ["sparkles", "translate", "explain", "grammar", "book-open"];
 
+type SettingsSectionKey = "models" | "chat" | "appearance" | "language" | "advanced";
+
+const SETTINGS_SECTIONS: { key: SettingsSectionKey; icon: LucideIcon; labelKey: string }[] = [
+  { key: "models", icon: Boxes, labelKey: "settings.nav.models" },
+  { key: "chat", icon: MessageSquare, labelKey: "settings.nav.chat" },
+  { key: "appearance", icon: Palette, labelKey: "settings.nav.appearance" },
+  { key: "language", icon: Languages, labelKey: "settings.nav.language" },
+  { key: "advanced", icon: Settings2, labelKey: "settings.nav.advanced" },
+];
+
 // Default preset models
 const DEFAULT_MODELS = {
   openai: [
@@ -203,6 +214,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isCorrupted, setIsCorrupted] = useState(false);
+  const [activeSection, setActiveSection] = useState<SettingsSectionKey>("models");
 
   // Model config form state
   const [editingConfig, setEditingConfig] = useState<Partial<ModelConfig> | null>(null);
@@ -732,38 +744,89 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
     { value: "ar", label: t("settings.languages.ar") },
   ];
 
+  const handleSaveAndClose = async () => {
+    // Save config before closing
+    setIsSaving(true);
+    try {
+      await invoke("save_config_cmd", { config });
+      onSave?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSaving(false);
+    }
+    onClose();
+  };
+
+  const fullScreenClassName =
+    "max-w-none w-screen h-screen rounded-none m-0 p-0 border-0 flex flex-col overflow-hidden";
+
   if (isLoading) {
     return (
-      <Dialog isOpen={isOpen} onClose={onClose}>
-        <DialogContent className="flex items-center justify-center py-12">
+      <Dialog isOpen={isOpen} onClose={onClose} className={fullScreenClassName}>
+        <div className="flex-1 flex items-center justify-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
-        </DialogContent>
+        </div>
       </Dialog>
     );
   }
 
   return (
-    <Dialog isOpen={isOpen} onClose={onClose} title={t("settings.title")}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-        {error && (
-          <div className="mb-4 p-3 bg-destructive/10 border border-destructive/50 rounded-lg text-destructive text-sm flex flex-col gap-2">
-            <div>{error}</div>
-            {isCorrupted && (
-              <Button
-                type="button"
-                variant="danger"
-                size="sm"
-                onClick={handleResetConfig}
-                className="w-fit"
-              >
-                {t("settings.resetConfig")}
-              </Button>
-            )}
-          </div>
-        )}
+    <Dialog isOpen={isOpen} onClose={onClose} className={fullScreenClassName}>
+      {/* Header */}
+      <header className="flex items-center justify-between h-14 px-6 border-b border-border shrink-0">
+        <h2 className="text-lg font-semibold text-popover-foreground">{t("settings.title")}</h2>
+        <Button onClick={handleSaveAndClose} disabled={isSaving} size="sm" className="mr-8">
+          {isSaving ? t("settings.saving", "Saving...") : t("settings.close", "Close")}
+        </Button>
+      </header>
 
-        <div className="space-y-6">
+      {/* Body: sidebar + content */}
+      <div className="flex flex-1 min-h-0">
+        {/* Sidebar */}
+        <nav className="w-56 shrink-0 border-r border-border overflow-y-auto p-3 space-y-1 bg-card/40">
+          {SETTINGS_SECTIONS.map((section) => {
+            const Icon = section.icon;
+            const isActive = activeSection === section.key;
+            return (
+              <button
+                key={section.key}
+                type="button"
+                onClick={() => setActiveSection(section.key)}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors text-left ${
+                  isActive
+                    ? "bg-primary/10 text-primary font-medium"
+                    : "text-foreground hover:bg-muted"
+                }`}
+              >
+                <Icon size={16} />
+                {t(section.labelKey)}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {error && (
+            <div className="mb-4 p-3 bg-destructive/10 border border-destructive/50 rounded-lg text-destructive text-sm flex flex-col gap-2">
+              <div>{error}</div>
+              {isCorrupted && (
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  onClick={handleResetConfig}
+                  className="w-fit"
+                >
+                  {t("settings.resetConfig")}
+                </Button>
+              )}
+            </div>
+          )}
+
           {/* Model Configurations Section */}
+          {activeSection === "models" && (
           <div>
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
@@ -1049,8 +1112,11 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
               </div>
             )}
           </div>
+          )}
 
-          <div className="border-t border-border pt-4 space-y-4">
+          {/* AI Chat Features Section */}
+          {activeSection === "chat" && (
+          <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium text-foreground">
                 {t("settings.promptFeatures.title", "AI Chat Features")}
@@ -1282,9 +1348,11 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
               </div>
             )}
           </div>
+          )}
 
-          {/* Other Settings */}
-          <div className="border-t border-border pt-4 space-y-4">
+          {/* Appearance Section */}
+          {activeSection === "appearance" && (
+          <div className="space-y-4">
 
             {/* Theme Name */}
             <div>
@@ -1315,9 +1383,12 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
                 <option value="system">{t("settings.theme.system")}</option>
               </Select>
             </div>
+          </div>
+          )}
 
-
-
+          {/* Language Section */}
+          {activeSection === "language" && (
+          <div className="space-y-4">
 
             {/* Interface Language */}
             <div>
@@ -1352,6 +1423,12 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
                 ))}
               </Select>
             </div>
+          </div>
+          )}
+
+          {/* Advanced Section */}
+          {activeSection === "advanced" && (
+          <div className="space-y-4">
 
             {/* Batch Explanation Concurrency */}
             <div>
@@ -1383,27 +1460,10 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
               </p>
             </div>
           </div>
+          )}
         </div>
-      </DialogContent>
-
-      <DialogFooter>
-        <Button variant="secondary" onClick={async () => {
-          // Save backend config before closing
-          setIsSaving(true);
-          try {
-            await invoke("save_config_cmd", { config });
-            onSave?.();
-          } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
-          } finally {
-            setIsSaving(false);
-          }
-          onClose();
-        }} disabled={isSaving}>
-          {isSaving ? t("settings.saving", "Saving...") : t("settings.close", "Close")}
-        </Button>
-      </DialogFooter>
-    </Dialog >
+      </div>
+    </Dialog>
   );
 }
 

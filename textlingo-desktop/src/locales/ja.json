@@ -190,6 +190,13 @@
   },
   "settings": {
     "title": "設定",
+    "nav": {
+      "models": "モデル設定",
+      "chat": "AIチャット機能",
+      "appearance": "外観テーマ",
+      "language": "言語",
+      "advanced": "詳細設定"
+    },
     "apiProvider": "APIプロバイダー",
     "apiKey": "APIキー",
     "apiKeyPlaceholder": "APIキーを入力...",

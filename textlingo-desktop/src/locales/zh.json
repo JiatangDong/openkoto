@@ -200,6 +200,13 @@
   },
   "settings": {
     "title": "设置",
+    "nav": {
+      "models": "模型配置",
+      "chat": "AI 对话功能",
+      "appearance": "外观主题",
+      "language": "语言",
+      "advanced": "高级"
+    },
     "apiProvider": "API 提供商",
     "apiKey": "API 密钥",
     "apiKeyPlaceholder": "输入您的 API 密钥...",

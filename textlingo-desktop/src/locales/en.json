@@ -200,6 +200,13 @@
   },
   "settings": {
     "title": "Settings",
+    "nav": {
+      "models": "Models",
+      "chat": "AI Chat Features",
+      "appearance": "Appearance",
+      "language": "Language",
+      "advanced": "Advanced"
+    },
     "apiProvider": "API Provider",
     "apiKey": "API Key",
     "apiKeyPlaceholder": "Enter your API key...",
