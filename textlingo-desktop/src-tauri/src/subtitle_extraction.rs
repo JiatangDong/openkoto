@@ -51,6 +51,7 @@ pub async fn extract_subtitles(
     api_key: &str,
     model: &str,
     base_url: Option<&str>,
+    use_asr: bool,
     event_id: &str,
 ) -> Result<Vec<ArticleSegment>, String> {
     println!("[SubtitleExtraction] 开始提取字幕: {:?}", video_path);
@@ -68,6 +69,15 @@ pub async fn extract_subtitles(
         duration,
         duration / 60.0
     );
+
+    // 字幕转写(ASR / Whisper)路径 —— 优先于旧的 LLM 听写
+    if use_asr {
+        println!("[SubtitleExtraction] 使用 ASR(Whisper)转写路径");
+        return extract_subtitles_with_whisper(
+            app, video_path, video_id, provider, api_key, model, base_url, duration, event_id,
+        )
+        .await;
+    }
 
     // 分片提取阈值：10分钟
     const CHUNK_THRESHOLD_SECONDS: f64 = 10.0 * 60.0;
@@ -752,6 +762,267 @@ async fn extract_audio_from_video(app: &AppHandle, video_path: &Path) -> Result<
     }
 
     Ok(audio_path)
+}
+
+// ============================================================================
+// ASR (Whisper) 转写路径 —— 走 OpenAI 兼容 /audio/transcriptions
+// 用真正的语音识别替代「LLM 听写」，时间戳更准、长音频更稳。
+// ============================================================================
+
+/// Whisper /audio/transcriptions 单文件上限（OpenAI/302 为 25MB，留点余量）
+const MAX_ASR_BYTES: u64 = 24 * 1024 * 1024;
+
+/// 解析 ASR provider 的 /audio/transcriptions 端点
+fn asr_transcriptions_url(provider: &str, base_url: Option<&str>) -> String {
+    if let Some(b) = base_url {
+        let b = b.trim().trim_end_matches('/');
+        if !b.is_empty() {
+            if b.ends_with("/audio/transcriptions") {
+                return b.to_string();
+            }
+            return format!("{}/audio/transcriptions", b);
+        }
+    }
+    let base = match provider {
+        "openai" => "https://api.openai.com/v1",
+        "groq" => "https://api.groq.com/openai/v1",
+        "siliconflow" => "https://api.siliconflow.cn/v1",
+        _ => "https://api.302.ai/v1", // 302ai 及兜底
+    };
+    format!("{}/audio/transcriptions", base)
+}
+
+/// 从视频抽取「为 ASR 优化」的音频：单声道 16kHz 32kbps mp3。
+/// 32kbps 下 25MB ≈ 100 分钟，绝大多数视频可一次过。
+/// `start`/`dur` 为 None 时抽完整音频；否则抽 [start, start+dur] 片段。
+async fn extract_audio_for_asr(
+    app: &AppHandle,
+    video_path: &Path,
+    suffix: &str,
+    start: Option<f64>,
+    dur: Option<f64>,
+) -> Result<PathBuf, String> {
+    let video_dir = video_path.parent().ok_or("无法获取视频目录")?;
+    let video_stem = video_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or("无法获取视频文件名")?;
+    let audio_path = video_dir.join(format!("{}_asr_{}.mp3", video_stem, suffix));
+    let audio_path_str = audio_path.to_str().ok_or("无效的音频文件路径")?;
+    let video_path_str = video_path.to_str().ok_or("无效的视频文件路径")?;
+
+    if audio_path.exists() {
+        let _ = fs::remove_file(&audio_path);
+    }
+
+    let mut args: Vec<String> = Vec::new();
+    if let Some(s) = start {
+        args.push("-ss".to_string());
+        args.push(format!("{:.2}", s));
+    }
+    args.push("-i".to_string());
+    args.push(video_path_str.to_string());
+    if let Some(d) = dur {
+        args.push("-t".to_string());
+        args.push(format!("{:.2}", d));
+    }
+    args.extend(
+        [
+            "-vn",
+            "-acodec",
+            "libmp3lame",
+            "-ab",
+            "32k",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            "-y",
+            audio_path_str,
+        ]
+        .iter()
+        .map(|s| s.to_string()),
+    );
+
+    let output = run_ffmpeg(app, args).await?;
+    if !output.success {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("FFmpeg 音频提取失败: {}", stderr));
+    }
+    if !audio_path.exists() {
+        return Err("音频文件未生成".to_string());
+    }
+    Ok(audio_path)
+}
+
+/// 调用 Whisper /audio/transcriptions（OpenAI 兼容，multipart）转写单个音频文件。
+/// 返回带 segment 时间戳的结果。`time_offset` 会加到每段时间戳上（用于分片拼接）。
+async fn transcribe_audio_with_whisper(
+    audio_path: &Path,
+    endpoint: &str,
+    api_key: &str,
+    model: &str,
+    time_offset: f64,
+) -> Result<TranscriptionResult, String> {
+    let bytes = fs::read(audio_path).map_err(|e| format!("读取音频失败: {}", e))?;
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name("audio.mp3")
+        .mime_str("audio/mpeg")
+        .map_err(|e| format!("构造 multipart 失败: {}", e))?;
+    let form = reqwest::multipart::Form::new()
+        .part("file", part)
+        .text("model", model.to_string())
+        .text("response_format", "verbose_json")
+        .text("timestamp_granularities[]", "segment");
+
+    let client = Client::new();
+    let response = client
+        .post(endpoint)
+        .bearer_auth(api_key)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("请求转写接口失败: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("转写接口错误 ({}): {}", status, error_text));
+    }
+
+    let v: Value = response
+        .json()
+        .await
+        .map_err(|e| format!("解析转写响应失败: {}", e))?;
+
+    let mut segments: Vec<TranscriptionSegment> = Vec::new();
+    if let Some(arr) = v["segments"].as_array() {
+        for s in arr {
+            let text = s["text"].as_str().unwrap_or("").trim().to_string();
+            if text.is_empty() {
+                continue;
+            }
+            let start = s["start"].as_f64();
+            let end = s["end"].as_f64();
+            segments.push(TranscriptionSegment {
+                speaker: None,
+                content: text,
+                start_time: start.map(|t| t + time_offset),
+                end_time: end.map(|t| t + time_offset),
+            });
+        }
+    }
+
+    // 没有 segments（例如 SiliconFlow 的 SenseVoice 只回纯文本）→ 报清晰错误
+    if segments.is_empty() {
+        let plain = v["text"].as_str().unwrap_or("").trim();
+        if plain.is_empty() {
+            return Err("转写返回为空".to_string());
+        }
+        return Err(
+            "该转写模型未返回时间戳（segments），无法生成字幕。请改用支持时间戳的模型（如 302ai whisper-1）。"
+                .to_string(),
+        );
+    }
+
+    let full_text = v["text"].as_str().unwrap_or("").trim().to_string();
+    Ok(TranscriptionResult {
+        segments,
+        full_text,
+    })
+}
+
+/// ASR 字幕提取主流程：压音频 → (必要时分片) → Whisper 转写 → 拼接。
+async fn extract_subtitles_with_whisper(
+    app: AppHandle,
+    video_path: &Path,
+    video_id: &str,
+    provider: &str,
+    api_key: &str,
+    model: &str,
+    base_url: Option<&str>,
+    duration: f64,
+    event_id: &str,
+) -> Result<Vec<ArticleSegment>, String> {
+    let endpoint = asr_transcriptions_url(provider, base_url);
+    println!(
+        "[SubtitleExtraction][ASR] provider={} model={} endpoint={}",
+        provider, model, endpoint
+    );
+
+    let _ = app.emit(
+        &format!("subtitle-extraction-progress://{}", event_id),
+        serde_json::json!({ "phase": "audio", "message": "提取音频中..." }),
+    );
+
+    // 先压完整音频，看是否超过单文件上限
+    let full_audio = extract_audio_for_asr(&app, video_path, "full", None, None).await?;
+    let size = fs::metadata(&full_audio).map(|m| m.len()).unwrap_or(0);
+
+    let mut all_segments: Vec<TranscriptionSegment> = Vec::new();
+
+    if size <= MAX_ASR_BYTES || duration <= 0.0 {
+        // 一次过
+        let _ = app.emit(
+            &format!("subtitle-extraction-progress://{}", event_id),
+            serde_json::json!({ "phase": "transcribe", "message": "转录音频中..." }),
+        );
+        let result = transcribe_audio_with_whisper(&full_audio, &endpoint, api_key, model, 0.0).await?;
+        all_segments = result.segments;
+        let _ = fs::remove_file(&full_audio);
+    } else {
+        // 超过上限：按文件大小估算需要的分片数（无 overlap，Whisper 段本身干净）
+        let _ = fs::remove_file(&full_audio);
+        let parts = ((size as f64) / (MAX_ASR_BYTES as f64)).ceil() as usize;
+        let parts = parts.max(2);
+        let chunk_dur = duration / parts as f64;
+        println!(
+            "[SubtitleExtraction][ASR] 音频 {:.1}MB 超限，分 {} 段（每段 ~{:.1} 分钟）",
+            size as f64 / 1024.0 / 1024.0,
+            parts,
+            chunk_dur / 60.0
+        );
+        for i in 0..parts {
+            let start = i as f64 * chunk_dur;
+            let _ = app.emit(
+                &format!("subtitle-extraction-progress://{}", event_id),
+                serde_json::json!({
+                    "phase": "chunk",
+                    "message": format!("转录片段 {}/{}", i + 1, parts),
+                    "current": i + 1,
+                    "total": parts,
+                }),
+            );
+            let seg_audio =
+                extract_audio_for_asr(&app, video_path, &i.to_string(), Some(start), Some(chunk_dur))
+                    .await?;
+            let result =
+                transcribe_audio_with_whisper(&seg_audio, &endpoint, api_key, model, start).await?;
+            all_segments.extend(result.segments);
+            let _ = fs::remove_file(&seg_audio);
+        }
+    }
+
+    let transcription = TranscriptionResult {
+        full_text: all_segments
+            .iter()
+            .map(|s| s.content.as_str())
+            .collect::<Vec<_>>()
+            .join(" "),
+        segments: all_segments,
+    };
+    let segments = transcription_to_segments(&transcription, video_id);
+    println!(
+        "[SubtitleExtraction][ASR] 转写完成，共 {} 个片段",
+        segments.len()
+    );
+
+    let _ = app.emit(
+        &format!("subtitle-extraction-progress://{}", event_id),
+        serde_json::json!({ "phase": "done", "message": "字幕提取完成！", "count": segments.len() }),
+    );
+
+    Ok(segments)
 }
 
 /// 使用 Kimi K2.5 模型提取字幕 (视频理解 - 使用 Base64 内嵌视频)

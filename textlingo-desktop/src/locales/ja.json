@@ -196,7 +196,19 @@
       "appearance": "外観テーマ",
       "language": "言語",
       "advanced": "詳細設定",
+      "transcription": "字幕の文字起こし",
       "logs": "実行ログ"
+    },
+    "transcription": {
+      "title": "字幕の文字起こし",
+      "desc": "動画/音声から字幕を抽出する音声認識(ASR)モデル。チャット/翻訳モデルとは別物です。推奨：302ai の whisper-1。未設定時は Gemini/Kimi にフォールバックします。",
+      "add": "文字起こしモデルを追加",
+      "empty": "文字起こしモデルがまだありません。右上の「追加」をクリック。",
+      "noTimestampTag": "（タイムスタンプなし、字幕に不向き）",
+      "siliconflowWarn": "SiliconFlow/SenseVoice はタイムスタンプを返さず字幕を生成できません。whisper-1 をご利用ください。",
+      "errNoName": "設定名を入力してください",
+      "errNoModel": "文字起こしモデルを入力してください",
+      "errNoKey": "API キーを入力してください"
     },
     "logs": {
       "title": "ログ",
@@ -553,8 +565,8 @@
     "success": "字幕の抽出に成功しました！",
     "successMessage": "{{count}}個の字幕セグメントを抽出しました！",
     "error": "字幕の抽出に失敗しました",
-    "geminiRequired": "字幕抽出にはクラウドの Gemini または Kimi K2.5/K2.6 モデルが必要です。Gemini 3.0 Flash（高速）を推奨します。Pro は高精度ですが転写が遅くなります。",
-    "localNotSupported": "字幕抽出は Ollama / LM Studio のローカルモデルには未対応です。Gemini または Kimi K2.5/K2.6 に切り替えてください。",
+    "geminiRequired": "設定 → 字幕の文字起こし で文字起こしモデル（推奨：302ai の whisper-1）を追加するか、アクティブモデルを Gemini / Kimi K2.5/K2.6 に切り替えてください。",
+    "localNotSupported": "設定 → 字幕の文字起こし で文字起こしモデル（推奨：whisper-1）を設定するか、Gemini / Kimi に切り替えてください。フォールバック経路は Ollama / LM Studio のローカルモデルに未対応です。",
     "reExtract": "再抽出",
     "progress": {
       "start": "字幕抽出を開始...",

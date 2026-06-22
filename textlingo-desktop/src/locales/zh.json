@@ -206,7 +206,19 @@
       "appearance": "外观主题",
       "language": "语言",
       "advanced": "高级",
+      "transcription": "字幕转写",
       "logs": "运行日志"
+    },
+    "transcription": {
+      "title": "字幕转写",
+      "desc": "用于从视频/音频提取字幕的语音识别(ASR)模型，独立于对话/翻译模型。推荐 302ai 的 whisper-1。未配置时会回退到 Gemini/Kimi。",
+      "add": "添加转写模型",
+      "empty": "还没有转写模型。点击右上角“添加”。",
+      "noTimestampTag": "（无时间戳，不适合字幕）",
+      "siliconflowWarn": "SiliconFlow/SenseVoice 不返回时间戳，无法生成字幕，请改用 whisper-1。",
+      "errNoName": "请填写配置名称",
+      "errNoModel": "请填写转写模型",
+      "errNoKey": "请填写 API Key"
     },
     "logs": {
       "title": "全局日志",
@@ -563,8 +575,8 @@
     "success": "字幕提取成功！",
     "successMessage": "成功提取 {{count}} 个字幕片段！",
     "error": "字幕提取失败",
-    "geminiRequired": "字幕提取需要使用 Gemini 或 Kimi K2.5/K2.6 云端模型。推荐使用 Gemini 3.0 Flash，速度较快，Pro 模型更精准但转录更慢。",
-    "localNotSupported": "字幕提取暂不支持 Ollama / LM Studio 本地模型，请切换到 Gemini 或 Kimi K2.5/K2.6。",
+    "geminiRequired": "请在 设置 → 字幕转写 添加一个转写模型（推荐 302ai 的 whisper-1），或把激活模型切换为 Gemini / Kimi K2.5/K2.6。",
+    "localNotSupported": "请在 设置 → 字幕转写 配置转写模型（推荐 whisper-1），或切换到 Gemini / Kimi。回退路径不支持 Ollama / LM Studio 本地模型。",
     "reExtract": "重新提取",
     "progress": {
       "start": "开始提取字幕...",

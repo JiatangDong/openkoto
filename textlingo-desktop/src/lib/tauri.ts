@@ -49,6 +49,9 @@ export interface AppConfig {
   srs_daily_review_limit?: number;
   // User-configurable prompt features for AI chat
   prompt_features?: PromptFeature[];
+  // Subtitle transcription (ASR) provider configs — separate from model_configs
+  asr_configs?: ModelConfig[];
+  active_asr_model_id?: string;
 }
 
 import { AgentTask, AgentWorkerStatusSnapshot, Artifact, Article, MindMapResult } from "../types";

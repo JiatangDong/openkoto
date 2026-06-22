@@ -122,6 +122,14 @@ pub struct AppConfig {
         deserialize_with = "deserialize_prompt_features"
     )]
     pub prompt_features: Vec<PromptFeature>,
+    /// Saved subtitle transcription (ASR) provider configs. Separate from
+    /// `model_configs` because ASR (speech-to-text) is a different capability
+    /// than chat/translation models.
+    #[serde(default)]
+    pub asr_configs: Vec<ModelConfig>,
+    /// Active ASR config ID (defaults to first asr_config if not set).
+    #[serde(default)]
+    pub active_asr_model_id: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -138,6 +146,8 @@ impl Default for AppConfig {
             srs_daily_new_limit: default_srs_daily_new_limit(),
             srs_daily_review_limit: default_srs_daily_review_limit(),
             prompt_features: default_prompt_features(),
+            asr_configs: Vec::new(),
+            active_asr_model_id: None,
         }
     }
 }
@@ -155,6 +165,15 @@ impl AppConfig {
     /// Get a model config by ID
     pub fn get_config(&self, id: &str) -> Option<&ModelConfig> {
         self.model_configs.iter().find(|c| c.id == id)
+    }
+
+    /// Get the active ASR (subtitle transcription) config, or the first one, or None.
+    pub fn get_active_asr_config(&self) -> Option<&ModelConfig> {
+        if let Some(id) = &self.active_asr_model_id {
+            self.asr_configs.iter().find(|c| &c.id == id)
+        } else {
+            self.asr_configs.first()
+        }
     }
 }
 

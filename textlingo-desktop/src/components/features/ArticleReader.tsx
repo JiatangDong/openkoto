@@ -307,32 +307,42 @@ export function ArticleReader({
 
     try {
       const latestConfig = await invoke<AppConfig | null>("get_config");
-      const modelConfigs = latestConfig?.model_configs || [];
-      const activeConfig = latestConfig?.active_model_id
-        ? modelConfigs.find(c => c.id === latestConfig.active_model_id)
-        : modelConfigs[0];
 
-      if (!activeConfig) {
-        throw new Error(t("subtitleExtraction.geminiRequired"));
-      }
+      // 优先用专门的「字幕转写」(ASR) 配置；有激活的 ASR 配置就直接放行。
+      const asrConfigs = latestConfig?.asr_configs || [];
+      const activeAsr = latestConfig?.active_asr_model_id
+        ? asrConfigs.find(c => c.id === latestConfig.active_asr_model_id)
+        : asrConfigs[0];
 
-      const provider = activeConfig.api_provider;
-      const model = activeConfig.model || "";
+      if (!activeAsr) {
+        // 回退路径:必须是 Gemini / Kimi 多模态听写模型
+        const modelConfigs = latestConfig?.model_configs || [];
+        const activeConfig = latestConfig?.active_model_id
+          ? modelConfigs.find(c => c.id === latestConfig.active_model_id)
+          : modelConfigs[0];
 
-      if (provider === "ollama" || provider === "lmstudio") {
-        throw new Error(t("subtitleExtraction.localNotSupported"));
-      }
+        if (!activeConfig) {
+          throw new Error(t("subtitleExtraction.geminiRequired"));
+        }
 
-      const isSupported =
-        model.includes("gemini")
-        || model.startsWith("google/gemini")
-        || provider === "google"
-        || provider === "google-ai-studio"
-        || (isKimiProvider(provider) && model.includes("kimi"))
-        || model.includes("kimi");
+        const provider = activeConfig.api_provider;
+        const model = activeConfig.model || "";
 
-      if (!isSupported) {
-        throw new Error(t("subtitleExtraction.geminiRequired"));
+        if (provider === "ollama" || provider === "lmstudio") {
+          throw new Error(t("subtitleExtraction.localNotSupported"));
+        }
+
+        const isSupported =
+          model.includes("gemini")
+          || model.startsWith("google/gemini")
+          || provider === "google"
+          || provider === "google-ai-studio"
+          || (isKimiProvider(provider) && model.includes("kimi"))
+          || model.includes("kimi");
+
+        if (!isSupported) {
+          throw new Error(t("subtitleExtraction.geminiRequired"));
+        }
       }
 
       setIsExtractingSubtitles(true);

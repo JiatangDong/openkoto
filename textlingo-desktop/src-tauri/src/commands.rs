@@ -2690,47 +2690,62 @@ pub async fn extract_subtitles_cmd(
     // 3. 获取 API 配置
     let config = load_config(&app_handle)?.ok_or("未配置 API，请先在设置中配置 AI 模型")?;
 
-    let active_config = config
-        .get_active_config()
-        .ok_or("未设置活动模型配置，请先在设置中配置 AI 模型")?;
+    // 优先使用专门的「字幕转写」(ASR / Whisper) 配置；没有则回退到激活的对话模型 + 旧的 LLM 听写路径。
+    let (provider, api_key, model, base_url, use_asr): (String, String, String, Option<String>, bool) =
+        if let Some(asr) = config.get_active_asr_config() {
+            (
+                asr.api_provider.clone(),
+                asr.api_key.clone(),
+                asr.model.clone(),
+                asr.base_url.clone(),
+                true,
+            )
+        } else {
+            let active_config = config.get_active_config().ok_or(
+                "未配置字幕转写模型。请在 设置 → 字幕转写 添加一个转写模型（推荐 302ai whisper-1），或切换到 Gemini/Kimi 模型。",
+            )?;
+            let provider = active_config.api_provider.clone();
+            let model = active_config.model.clone();
 
-    // 检查是否是 Gemini 模型
-    let model = &active_config.model;
-    let provider = &active_config.api_provider;
-    let api_key = &active_config.api_key;
-    let base_url = active_config.base_url.as_deref();
-
-    // 本地 provider 当前不支持字幕提取（该流程依赖云端多模态转录能力）
-    if provider == "ollama" || provider == "lmstudio" {
-        return Err(
-            "字幕提取暂不支持 Ollama / LM Studio 本地模型。请切换到 Gemini 或 Kimi K2.5。"
-                .to_string(),
-        );
-    }
-
-    // 允许的 Gemini 或 Kimi K2.5 模型
-    let is_supported = model.contains("gemini")
-        || model.starts_with("google/gemini")
-        || provider == "google"
-        || provider == "google-ai-studio"
-        || (is_moonshot_provider(provider) && model.contains("kimi"))
-        || model.contains("kimi");
-
-    if !is_supported {
-        return Err(
-            "字幕提取需要使用 Gemini 或 Kimi K2.5 云端模型。请在设置中切换模型。".to_string(),
-        );
-    }
+            // 旧路径：本地 provider 不支持
+            if provider == "ollama" || provider == "lmstudio" {
+                return Err(
+                    "字幕提取暂不支持 Ollama / LM Studio 本地模型。请在 设置 → 字幕转写 配置转写模型，或切换到 Gemini/Kimi。"
+                        .to_string(),
+                );
+            }
+            // 旧路径：仅允许 Gemini / Kimi 多模态听写
+            let is_supported = model.contains("gemini")
+                || model.starts_with("google/gemini")
+                || provider == "google"
+                || provider == "google-ai-studio"
+                || (is_moonshot_provider(&provider) && model.contains("kimi"))
+                || model.contains("kimi");
+            if !is_supported {
+                return Err(
+                    "未配置字幕转写模型。请在 设置 → 字幕转写 添加一个转写模型（推荐 302ai whisper-1），或切换到 Gemini/Kimi 模型。"
+                        .to_string(),
+                );
+            }
+            (
+                provider,
+                active_config.api_key.clone(),
+                model,
+                active_config.base_url.clone(),
+                false,
+            )
+        };
 
     // 4. 调用字幕提取模块 (使用 article_id 作为 event_id)
     let segments = crate::subtitle_extraction::extract_subtitles(
         app_handle.clone(),
         video_path,
         &article_id,
-        provider,
-        api_key,
-        model,
-        base_url,
+        &provider,
+        &api_key,
+        &model,
+        base_url.as_deref(),
+        use_asr,
         &article_id, // event_id 用于进度事件
     )
     .await?;

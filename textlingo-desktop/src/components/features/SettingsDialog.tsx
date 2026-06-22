@@ -6,7 +6,7 @@ import { Dialog } from "../ui/dialog";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select } from "../ui/select";
-import { Settings, Plus, Trash2, Edit2, Check, RefreshCw, Loader2, HelpCircle, Boxes, MessageSquare, Palette, Languages, Settings2, ScrollText } from "lucide-react";
+import { Settings, Plus, Trash2, Edit2, Check, RefreshCw, Loader2, HelpCircle, Boxes, MessageSquare, Palette, Languages, Settings2, ScrollText, AudioLines } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useTheme } from "../theme-provider";
 import { LogsPanel } from "./LogsPanel";
@@ -114,16 +114,33 @@ const BUILTIN_PROMPT_FEATURE_DEFAULTS: Record<string, PromptFeature> = {
 
 const PROMPT_FEATURE_ICON_OPTIONS = ["sparkles", "translate", "explain", "grammar", "book-open"];
 
-type SettingsSectionKey = "models" | "chat" | "appearance" | "language" | "advanced" | "logs";
+type SettingsSectionKey = "models" | "chat" | "appearance" | "language" | "advanced" | "transcription" | "logs";
 
 const SETTINGS_SECTIONS: { key: SettingsSectionKey; icon: LucideIcon; labelKey: string }[] = [
   { key: "models", icon: Boxes, labelKey: "settings.nav.models" },
   { key: "chat", icon: MessageSquare, labelKey: "settings.nav.chat" },
+  { key: "transcription", icon: AudioLines, labelKey: "settings.nav.transcription" },
   { key: "appearance", icon: Palette, labelKey: "settings.nav.appearance" },
   { key: "language", icon: Languages, labelKey: "settings.nav.language" },
   { key: "advanced", icon: Settings2, labelKey: "settings.nav.advanced" },
   { key: "logs", icon: ScrollText, labelKey: "settings.nav.logs" },
 ];
+
+// 字幕转写(ASR)provider —— 走 OpenAI 兼容 /audio/transcriptions
+const ASR_PROVIDERS = ["302ai", "openai", "groq", "openai-compatible", "siliconflow"] as const;
+const ASR_DEFAULT_MODELS: Record<string, string> = {
+  "302ai": "whisper-1",
+  "openai": "whisper-1",
+  "groq": "whisper-large-v3-turbo",
+  "openai-compatible": "whisper-1",
+  "siliconflow": "FunAudioLLM/SenseVoiceSmall",
+};
+const ASR_DEFAULT_BASE_URLS: Record<string, string> = {
+  "302ai": "https://api.302.ai/v1",
+  "openai": "https://api.openai.com/v1",
+  "groq": "https://api.groq.com/openai/v1",
+  "siliconflow": "https://api.siliconflow.cn/v1",
+};
 
 // Default preset models
 const DEFAULT_MODELS = {
@@ -220,6 +237,9 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
   const [error, setError] = useState<string | null>(null);
   const [isCorrupted, setIsCorrupted] = useState(false);
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>("models");
+
+  // ASR (subtitle transcription) config form state
+  const [editingAsr, setEditingAsr] = useState<Partial<ModelConfig> | null>(null);
 
   // Model config form state
   const [editingConfig, setEditingConfig] = useState<Partial<ModelConfig> | null>(null);
@@ -482,7 +502,84 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
     }
   };
 
-  /* Removed unused handleProviderChange */
+  // ===== ASR (subtitle transcription) config handlers =====
+  // 这些只改本地 config.asr_configs / active_asr_model_id，关闭时由 save_config_cmd 整体落盘。
+  const startNewAsr = () => {
+    setEditingAsr({
+      id: "",
+      name: "",
+      api_key: "",
+      api_provider: "302ai",
+      model: ASR_DEFAULT_MODELS["302ai"],
+      base_url: ASR_DEFAULT_BASE_URLS["302ai"],
+      is_default: false,
+    });
+  };
+
+  const startEditAsr = (cfg: ModelConfig) => {
+    setEditingAsr({ ...cfg });
+  };
+
+  const handleAsrProviderChange = (provider: string) => {
+    setEditingAsr((cur) => ({
+      ...cur,
+      api_provider: provider,
+      model: ASR_DEFAULT_MODELS[provider] ?? cur?.model ?? "",
+      base_url: ASR_DEFAULT_BASE_URLS[provider] ?? "",
+    }));
+  };
+
+  const saveAsr = () => {
+    if (!editingAsr) return;
+    const provider = editingAsr.api_provider || "302ai";
+    const name = (editingAsr.name || "").trim();
+    const model = (editingAsr.model || "").trim();
+    const apiKey = (editingAsr.api_key || "").trim();
+    if (!name) { setError(t("settings.transcription.errNoName", "请填写配置名称")); return; }
+    if (!model) { setError(t("settings.transcription.errNoModel", "请填写转写模型")); return; }
+    if (!apiKey && provider !== "openai-compatible") {
+      setError(t("settings.transcription.errNoKey", "请填写 API Key"));
+      return;
+    }
+    setError(null);
+
+    const id = editingAsr.id || crypto.randomUUID();
+    const toSave: ModelConfig = {
+      id,
+      name,
+      api_key: apiKey,
+      api_provider: provider,
+      model,
+      is_default: false,
+      base_url: (editingAsr.base_url || "").trim() || undefined,
+    };
+    const list = config.asr_configs ?? [];
+    const exists = list.some((c) => c.id === id);
+    const newList = exists ? list.map((c) => (c.id === id ? toSave : c)) : [...list, toSave];
+    setConfig({
+      ...config,
+      asr_configs: newList,
+      // 第一个配置自动设为激活
+      active_asr_model_id: config.active_asr_model_id ?? id,
+    });
+    setEditingAsr(null);
+  };
+
+  const deleteAsr = (configId: string) => {
+    const newList = (config.asr_configs ?? []).filter((c) => c.id !== configId);
+    setConfig({
+      ...config,
+      asr_configs: newList,
+      active_asr_model_id:
+        config.active_asr_model_id === configId
+          ? newList[0]?.id
+          : config.active_asr_model_id,
+    });
+  };
+
+  const setActiveAsr = (configId: string) => {
+    setConfig({ ...config, active_asr_model_id: configId });
+  };
 
   const handleInterfaceLanguageChange = async (lng: string) => {
     setConfig({ ...config, interface_language: lng });
@@ -1350,6 +1447,176 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
                   />
                   {t("settings.promptFeatures.showInQuickActions", "Show in quick actions")}
                 </label>
+              </div>
+            )}
+          </div>
+          )}
+
+          {/* Transcription (ASR) Section */}
+          {activeSection === "transcription" && (
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-lg font-medium text-foreground">
+                {t("settings.transcription.title", "字幕转写")}
+              </h3>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={startNewAsr}
+                disabled={!!editingAsr}
+                className="gap-1"
+              >
+                <Plus size={14} />
+                {t("settings.transcription.add", "添加转写模型")}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground mb-4">
+              {t(
+                "settings.transcription.desc",
+                "用于从视频/音频提取字幕的语音识别(ASR)模型，独立于对话/翻译模型。推荐 302ai 的 whisper-1。未配置时会回退到 Gemini/Kimi。",
+              )}
+            </p>
+
+            {/* ASR config list */}
+            <div className="space-y-2 mb-4">
+              {(config.asr_configs ?? []).length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground border border-dashed border-border rounded-lg">
+                  {t("settings.transcription.empty", "还没有转写模型。点击右上角添加。")}
+                </div>
+              ) : (
+                (config.asr_configs ?? []).map((asr) => (
+                  <div
+                    key={asr.id}
+                    className={`p-3 rounded-lg border flex items-center justify-between gap-3 ${config.active_asr_model_id === asr.id
+                      ? "bg-primary/10 border-primary"
+                      : "bg-card border-border"
+                      }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-foreground truncate">{asr.name}</span>
+                        {config.active_asr_model_id === asr.id && (
+                          <span className="text-xs px-1.5 py-0.5 bg-primary text-primary-foreground rounded">
+                            {t("settings.active")}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-muted-foreground truncate">
+                        {asr.api_provider} / {asr.model}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {config.active_asr_model_id !== asr.id && (
+                        <Button
+                          type="button" variant="ghost" size="sm"
+                          onClick={() => setActiveAsr(asr.id)}
+                          title={t("settings.setAsActive")}
+                          className="h-7 w-7 p-0"
+                        >
+                          <Check size={14} />
+                        </Button>
+                      )}
+                      <Button
+                        type="button" variant="ghost" size="sm"
+                        onClick={() => startEditAsr(asr)}
+                        disabled={!!editingAsr}
+                        title={t("settings.editConfig")}
+                        className="h-7 w-7 p-0"
+                      >
+                        <Edit2 size={14} />
+                      </Button>
+                      <Button
+                        type="button" variant="ghost" size="sm"
+                        onClick={() => deleteAsr(asr.id)}
+                        disabled={!!editingAsr}
+                        title={t("settings.deleteConfig")}
+                        className="h-7 w-7 p-0 text-destructive hover:text-destructive/80"
+                      >
+                        <Trash2 size={14} />
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* ASR edit form */}
+            {editingAsr && (
+              <div className="border border-border rounded-lg p-4 space-y-3 bg-card">
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">
+                    {t("settings.configName", "配置名称")}
+                  </label>
+                  <Input
+                    value={editingAsr.name || ""}
+                    onChange={(e) => setEditingAsr({ ...editingAsr, name: e.target.value })}
+                    placeholder="Whisper (302)"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">
+                    {t("settings.apiProvider", "提供商")}
+                  </label>
+                  <Select
+                    value={editingAsr.api_provider || "302ai"}
+                    onChange={(e) => handleAsrProviderChange(e.target.value)}
+                  >
+                    {ASR_PROVIDERS.map((p) => (
+                      <option key={p} value={p}>
+                        {p === "siliconflow"
+                          ? `${p} ${t("settings.transcription.noTimestampTag", "(无时间戳，不适合字幕)")}`
+                          : p}
+                      </option>
+                    ))}
+                  </Select>
+                  {editingAsr.api_provider === "siliconflow" && (
+                    <p className="mt-1 text-xs text-destructive">
+                      {t("settings.transcription.siliconflowWarn", "SiliconFlow/SenseVoice 不返回时间戳，无法生成字幕，请改用 whisper-1。")}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">
+                    {t("settings.model", "模型")}
+                  </label>
+                  <Input
+                    value={editingAsr.model || ""}
+                    onChange={(e) => setEditingAsr({ ...editingAsr, model: e.target.value })}
+                    placeholder="whisper-1"
+                  />
+                </div>
+                {(editingAsr.api_provider === "openai-compatible" || editingAsr.base_url) && (
+                  <div>
+                    <label className="block text-sm font-medium text-foreground mb-1">
+                      {t("settings.baseUrl", "Base URL")}
+                    </label>
+                    <Input
+                      value={editingAsr.base_url || ""}
+                      onChange={(e) => setEditingAsr({ ...editingAsr, base_url: e.target.value })}
+                      placeholder="https://api.302.ai/v1"
+                    />
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1">
+                    {t("settings.apiKey", "API Key")}
+                  </label>
+                  <Input
+                    type="password"
+                    value={editingAsr.api_key || ""}
+                    onChange={(e) => setEditingAsr({ ...editingAsr, api_key: e.target.value })}
+                    placeholder={t("settings.apiKeyPlaceholder", "输入您的 API 密钥...")}
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <Button type="button" variant="secondary" size="sm" onClick={() => { setEditingAsr(null); setError(null); }}>
+                    {t("settings.cancel", "取消")}
+                  </Button>
+                  <Button type="button" size="sm" onClick={saveAsr}>
+                    {t("settings.save", "保存")}
+                  </Button>
+                </div>
               </div>
             )}
           </div>

@@ -206,7 +206,19 @@
       "appearance": "Appearance",
       "language": "Language",
       "advanced": "Advanced",
+      "transcription": "Subtitle Transcription",
       "logs": "Runtime Logs"
+    },
+    "transcription": {
+      "title": "Subtitle Transcription",
+      "desc": "Speech-to-text (ASR) model used to extract subtitles from video/audio — separate from your chat/translation models. Recommended: whisper-1 via 302ai. Falls back to Gemini/Kimi when none is configured.",
+      "add": "Add transcription model",
+      "empty": "No transcription model yet. Click \"Add\" in the top-right.",
+      "noTimestampTag": "(no timestamps, unsuitable for subtitles)",
+      "siliconflowWarn": "SiliconFlow/SenseVoice does not return timestamps and cannot generate subtitles — use whisper-1 instead.",
+      "errNoName": "Please enter a config name",
+      "errNoModel": "Please enter a transcription model",
+      "errNoKey": "Please enter an API key"
     },
     "logs": {
       "title": "Logs",
@@ -558,8 +570,8 @@
     "success": "Subtitles extracted successfully!",
     "successMessage": "Successfully extracted {{count}} subtitle segments!",
     "error": "Failed to extract subtitles",
-    "geminiRequired": "Subtitle extraction requires a cloud Gemini or Kimi K2.5/K2.6 model. Recommended: Gemini 3.0 Flash (faster). Pro is more accurate but much slower.",
-    "localNotSupported": "Subtitle extraction does not support local Ollama / LM Studio models yet. Please switch to Gemini or Kimi K2.5/K2.6.",
+    "geminiRequired": "Add a transcription model in Settings → Subtitle Transcription (recommended: whisper-1 via 302ai), or switch your active model to Gemini / Kimi K2.5/K2.6.",
+    "localNotSupported": "Configure a transcription model in Settings → Subtitle Transcription (recommended: whisper-1), or switch to Gemini / Kimi. Local Ollama / LM Studio models are not supported for the fallback path.",
     "reExtract": "Re-extract",
     "progress": {
       "start": "Starting subtitle extraction...",
