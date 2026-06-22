@@ -271,10 +271,8 @@ export function BookReader({ article, onBack }: BookReaderProps) {
                     dual: result.dual_pdf,
                 });
 
-                // 提示并询问是否切换查看
-                if (confirm(t("pdfTranslate.successSwitch", "翻译完成！是否切换到双语对照模式？"))) {
-                    setPdfVersion("dual");
-                }
+                // 翻译完成后自动切换到译文（mono）视图，无需再弹确认框
+                setPdfVersion("mono");
             }
         } catch (error) {
             console.error("[PDF Translate] Error:", error);
