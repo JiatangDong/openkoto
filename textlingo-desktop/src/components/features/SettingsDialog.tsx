@@ -169,18 +169,21 @@ const DEFAULT_MODELS = {
     { value: "gemini-1.5-flash", labelKey: "settings.models.google-ai-studio.gemini-1.5-flash" },
   ],
   [LEGACY_KIMI_PROVIDER]: [
+    { value: "kimi-k2.6", labelKey: "settings.models.moonshot.kimi-k2.6" },
     { value: "kimi-k2.5", labelKey: "settings.models.moonshot.kimi-k2.5" },
     { value: "moonshot-v1-128k", labelKey: "settings.models.moonshot.moonshot-v1-128k" },
     { value: "moonshot-v1-32k", labelKey: "settings.models.moonshot.moonshot-v1-32k" },
     { value: "moonshot-v1-8k", labelKey: "settings.models.moonshot.moonshot-v1-8k" },
   ],
   [KIMI_CHINA_PROVIDER]: [
+    { value: "kimi-k2.6", labelKey: "settings.models.moonshot.kimi-k2.6" },
     { value: "kimi-k2.5", labelKey: "settings.models.moonshot.kimi-k2.5" },
     { value: "moonshot-v1-128k", labelKey: "settings.models.moonshot.moonshot-v1-128k" },
     { value: "moonshot-v1-32k", labelKey: "settings.models.moonshot.moonshot-v1-32k" },
     { value: "moonshot-v1-8k", labelKey: "settings.models.moonshot.moonshot-v1-8k" },
   ],
   [KIMI_GLOBAL_PROVIDER]: [
+    { value: "kimi-k2.6", labelKey: "settings.models.moonshot.kimi-k2.6" },
     { value: "kimi-k2.5", labelKey: "settings.models.moonshot.kimi-k2.5" },
     { value: "moonshot-v1-128k", labelKey: "settings.models.moonshot.moonshot-v1-128k" },
     { value: "moonshot-v1-32k", labelKey: "settings.models.moonshot.moonshot-v1-32k" },

@@ -43,6 +43,9 @@ OPENKOTO_DEFAULT_MODELS = {
     "siliconflow": "Qwen/Qwen2.5-7B-Instruct",
     "302ai": "gpt-4o-mini",
     "google-ai-studio": "gemini-2.0-flash",
+    "moonshot": "kimi-k2.6",
+    "moonshot-cn": "kimi-k2.6",
+    "moonshot-global": "kimi-k2.6",
     "ollama": "llama3.2",
     "lmstudio": "local-model",
 }

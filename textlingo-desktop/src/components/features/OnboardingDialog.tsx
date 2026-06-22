@@ -456,7 +456,7 @@ export function OnboardingDialog({ isOpen, onFinish }: OnboardingDialogProps) {
                                             <button
                                                 onClick={() => {
                                                     setChinaProvider(KIMI_CHINA_PROVIDER);
-                                                    setCloudModel("kimi-k2.5");
+                                                    setCloudModel("kimi-k2.6");
                                                 }}
                                                 className={`flex items-center gap-2 p-3 rounded-xl border-2 transition-all ${chinaProvider === KIMI_CHINA_PROVIDER
                                                     ? "border-primary bg-primary/5 shadow-md ring-2 ring-primary/20"
@@ -512,20 +512,20 @@ export function OnboardingDialog({ isOpen, onFinish }: OnboardingDialogProps) {
                                         {chinaProvider === KIMI_CHINA_PROVIDER && (
                                             <div className="space-y-2">
                                                 <button
-                                                    onClick={() => setCloudModel("kimi-k2.5")}
-                                                    className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-all ${cloudModel === "kimi-k2.5"
+                                                    onClick={() => setCloudModel("kimi-k2.6")}
+                                                    className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-all ${cloudModel === "kimi-k2.6"
                                                         ? "border-primary bg-primary/5 shadow-md ring-2 ring-primary/20"
                                                         : "border-border hover:border-primary/50"}`}
                                                 >
-                                                    <div className={`p-2 rounded-lg ${cloudModel === "kimi-k2.5" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                                                    <div className={`p-2 rounded-lg ${cloudModel === "kimi-k2.6" ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
                                                         <Sparkles size={18} />
                                                     </div>
                                                     <div className="text-left">
                                                         <div className="text-sm font-bold flex items-center gap-1.5">
-                                                            Kimi K2.5
-                                                            {cloudModel === "kimi-k2.5" && <Star size={12} className="fill-current text-yellow-500" />}
+                                                            Kimi K2.6
+                                                            {cloudModel === "kimi-k2.6" && <Star size={12} className="fill-current text-yellow-500" />}
                                                         </div>
-                                                        <div className="text-[11px] text-muted-foreground leading-tight">{t("onboarding.model.kimi.k25")}</div>
+                                                        <div className="text-[11px] text-muted-foreground leading-tight">{t("onboarding.model.kimi.k26")}</div>
                                                     </div>
                                                 </button>
                                             </div>

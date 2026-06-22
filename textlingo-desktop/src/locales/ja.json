@@ -351,6 +351,7 @@
         "gemini-1.5-flash": "Gemini 1.5 Flash"
       },
       "moonshot": {
+        "kimi-k2.6": "Kimi k2.6",
         "kimi-k2.5": "Kimi k2.5",
         "moonshot-v1-128k": "Moonshot v1 128k",
         "moonshot-v1-32k": "Moonshot v1 32k",
@@ -552,8 +553,8 @@
     "success": "字幕の抽出に成功しました！",
     "successMessage": "{{count}}個の字幕セグメントを抽出しました！",
     "error": "字幕の抽出に失敗しました",
-    "geminiRequired": "字幕抽出にはクラウドの Gemini または Kimi K2.5 モデルが必要です。Gemini 3.0 Flash（高速）を推奨します。Pro は高精度ですが転写が遅くなります。",
-    "localNotSupported": "字幕抽出は Ollama / LM Studio のローカルモデルには未対応です。Gemini または Kimi K2.5 に切り替えてください。",
+    "geminiRequired": "字幕抽出にはクラウドの Gemini または Kimi K2.5/K2.6 モデルが必要です。Gemini 3.0 Flash（高速）を推奨します。Pro は高精度ですが転写が遅くなります。",
+    "localNotSupported": "字幕抽出は Ollama / LM Studio のローカルモデルには未対応です。Gemini または Kimi K2.5/K2.6 に切り替えてください。",
     "reExtract": "再抽出",
     "progress": {
       "start": "字幕抽出を開始...",
@@ -661,7 +662,8 @@
         "pro": "強力：複雑なタスクに最適"
       },
       "kimi": {
-        "k25": "推奨：検索と動画理解をサポート"
+        "k25": "推奨：検索と動画理解をサポート",
+        "k26": "推奨：検索と動画理解をサポート"
       },
       "apiKeyLabel": "API キー",
       "apiKeyPlaceholder": "ここにAPIキーを貼り付けてください",

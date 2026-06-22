@@ -72,9 +72,9 @@ pub async fn extract_subtitles(
     // 分片提取阈值：10分钟
     const CHUNK_THRESHOLD_SECONDS: f64 = 10.0 * 60.0;
 
-    // Kimi K2.5 视频理解模式
-    if is_moonshot_provider(provider) && model.contains("k2.5") {
-        println!("[SubtitleExtraction] 检测到 Kimi K2.5 模型，启用视频理解模式");
+    // Kimi K2.5 / K2.6 视频理解模式
+    if is_moonshot_provider(provider) && (model.contains("k2.5") || model.contains("k2.6")) {
+        println!("[SubtitleExtraction] 检测到 Kimi K2.5/K2.6 模型，启用视频理解模式");
         let _ = app.emit(&format!("subtitle-extraction-progress://{}", event_id), 
             serde_json::json!({ "phase": "processing", "message": "正在使用 Kimi 视频理解模式..." }));
 
@@ -882,12 +882,12 @@ async fn extract_subtitles_with_kimi(
 /// 返回 `None` 表示不带该字段（留给 API 走默认值）——用于兜底未来某模型拒绝任何
 /// 显式取值的情况。当前所有已知路径都有明确取值：
 ///
-/// - Kimi K2.5：模型强制要求 `temperature=1`。
+/// - Kimi K2.5 / K2.6：模型强制要求 `temperature=1`。
 /// - Google Gemini：允许 0.0，贪心解码对转录时间戳最稳定。
-/// - 其他（openai / openrouter / 302ai / 非-K2.5 kimi 等走 OpenAI 兼容接口）：
+/// - 其他（openai / openrouter / 302ai / 非-K2.5/K2.6 kimi 等走 OpenAI 兼容接口）：
 ///   沿用历史值 0.1，低随机但保留一点探索以避免极端退化。
 fn pick_transcription_temperature(provider: &str, model: &str) -> Option<f64> {
-    if is_moonshot_provider(provider) && model.contains("k2.5") {
+    if is_moonshot_provider(provider) && (model.contains("k2.5") || model.contains("k2.6")) {
         return Some(1.0);
     }
     match provider {
@@ -1430,6 +1430,19 @@ mod tests {
         );
         assert_eq!(
             pick_transcription_temperature("moonshot-global", "kimi-k2.5-latest"),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn test_pick_temperature_kimi_k26_must_be_one() {
+        // Kimi K2.6 behaves like K2.5: video understanding + temperature=1 only.
+        assert_eq!(
+            pick_transcription_temperature("moonshot-cn", "kimi-k2.6"),
+            Some(1.0)
+        );
+        assert_eq!(
+            pick_transcription_temperature("moonshot-global", "kimi-k2.6-latest"),
             Some(1.0)
         );
     }

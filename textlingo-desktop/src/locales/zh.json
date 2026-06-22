@@ -361,6 +361,7 @@
         "gemini-1.5-flash": "Gemini 1.5 Flash"
       },
       "moonshot": {
+        "kimi-k2.6": "Kimi k2.6 (搜索/视频理解)",
         "kimi-k2.5": "Kimi k2.5 (搜索/视频理解)",
         "moonshot-v1-128k": "Moonshot v1 128k",
         "moonshot-v1-32k": "Moonshot v1 32k",
@@ -562,8 +563,8 @@
     "success": "字幕提取成功！",
     "successMessage": "成功提取 {{count}} 个字幕片段！",
     "error": "字幕提取失败",
-    "geminiRequired": "字幕提取需要使用 Gemini 或 Kimi K2.5 云端模型。推荐使用 Gemini 3.0 Flash，速度较快，Pro 模型更精准但转录更慢。",
-    "localNotSupported": "字幕提取暂不支持 Ollama / LM Studio 本地模型，请切换到 Gemini 或 Kimi K2.5。",
+    "geminiRequired": "字幕提取需要使用 Gemini 或 Kimi K2.5/K2.6 云端模型。推荐使用 Gemini 3.0 Flash，速度较快，Pro 模型更精准但转录更慢。",
+    "localNotSupported": "字幕提取暂不支持 Ollama / LM Studio 本地模型，请切换到 Gemini 或 Kimi K2.5/K2.6。",
     "reExtract": "重新提取",
     "progress": {
       "start": "开始提取字幕...",
@@ -672,7 +673,8 @@
         "pro": "强大：适合复杂任务"
       },
       "kimi": {
-        "k25": "推荐：支持搜索和视频理解"
+        "k25": "推荐：支持搜索和视频理解",
+        "k26": "推荐：支持搜索和视频理解"
       },
       "apiKeyLabel": "API Key",
       "apiKeyPlaceholder": "在此粘贴您的 API Key",
