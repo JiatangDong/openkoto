@@ -478,12 +478,38 @@ class OpenAITranslator(BaseTranslator):
         trace(
             f"LLM request -> model={self.model} ({len(text)} chars)"
         )
+        messages = self.prompt(text, self.prompttext)
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 **self.options,
-                messages=self.prompt(text, self.prompttext),
+                messages=messages,
             )
+        except openai.BadRequestError as e:
+            # Some models (e.g. Kimi k2.5) reject a non-default sampling
+            # temperature with "invalid temperature: only 1 is allowed for this
+            # model". Drop the unsupported temperature and retry. The pop is
+            # idempotent and we retry on ANY temperature-related 400 (not only
+            # when we still hold the key) so concurrent worker threads that race
+            # on the same shared options all recover instead of bubbling up to
+            # the slower paragraph-level retry. Dropped for the rest of the run.
+            if "temperature" in str(e).lower():
+                self.options.pop("temperature", None)
+                trace(
+                    f"model rejected temperature; retrying without it "
+                    f"(model={self.model})"
+                )
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    **self.options,
+                    messages=messages,
+                )
+            else:
+                trace(
+                    f"LLM request error after {now() - _t:.2f}s: "
+                    f"{type(e).__name__}: {e}"
+                )
+                raise
         except BaseException as e:
             trace(
                 f"LLM request error after {now() - _t:.2f}s: "
