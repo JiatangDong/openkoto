@@ -193,16 +193,20 @@ jobs:
           releaseName: "OpenKoto Desktop ${{ github.ref_name }}"
           releaseBody: |
             ## Release Highlights
-            - Added native `.srt` subtitle import for local video and audio materials.
-            - Added a manual subtitle import action for existing media articles.
-            - Added standalone subtitle-file import so `.srt` files can be read as regular materials.
+            - Subtitle extraction now runs on real Whisper ASR instead of LLM listening, with word-level timestamps and smarter line segmentation for far more accurate subtitles.
+            - Added a dedicated transcription (ASR) section in Settings supporting multiple providers (302.AI, OpenAI, Groq, SiliconFlow, OpenAI-compatible), with model presets, API sync, and one-click links to each provider's docs.
+            - You can now pick which ASR model to use right from the "Extract" / "Re-extract" subtitle buttons — the chosen model is remembered as the default.
+            - Added drag-and-drop import: drop a video, audio, PDF, EPUB, or `.srt` file onto the main window to import it instantly.
 
-            ## Changed
-            - Subtitle import now uses a shared backend parsing pipeline across all entry points.
-            - Local media import forms now support an optional subtitle attachment field.
-            - Added reader/player controls to import or replace subtitles without cloud transcription.
-            - Desktop version is bumped to `${{ github.ref_name }}` for this release.
-            - Multi-platform GitHub release publishing remains tag-driven through this workflow.
+            ## Improved
+            - Long audio/video is automatically split into duration-based chunks before transcription, fixing timeouts on lengthy recordings.
+            - Audio is downmixed and compressed before upload to stay within ASR file-size limits.
+            - 302.AI transcription requests are auto-normalized to the supported `whisper-1` model to avoid provider errors.
+
+            ## Fixed
+            - Fixed PDF translation stalling when a model rejects a non-default temperature (now self-heals and retries).
+
+            > Desktop version `${{ github.ref_name }}`. Multi-platform release publishing remains tag-driven through this workflow.
           releaseDraft: false
           prerelease: false
           projectPath: "./textlingo-desktop"
