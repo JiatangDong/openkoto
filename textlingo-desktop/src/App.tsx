@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { BookOpen, RotateCw, Star, LayoutGrid, List, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ArticleList } from "./components/features/ArticleList";
@@ -13,6 +14,8 @@ import { ApiQuickSwitcher } from "./components/features/ApiQuickSwitcher";
 import { OnboardingDialog } from "./components/features/OnboardingDialog";
 import { Button } from "./components/ui/button";
 import { UpdateChecker } from "./components/features/UpdateChecker";
+import { DropImportOverlay, type DropImportStatus } from "./components/features/DropImportOverlay";
+import { importDroppedPath, isSupportedDropPath, getFileName } from "./lib/dropImport";
 import type { Article, AppConfig } from "./lib/tauri";
 import { getApiClient } from "./lib/api";
 import { useAgentOpenMaterialListener } from "./lib/hooks/useAgentOpenMaterialListener";
@@ -32,10 +35,100 @@ function App() {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const onboardingDismissedRef = useRef(false);
 
+  // 拖放导入状态
+  const [isDragging, setIsDragging] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importingCount, setImportingCount] = useState(0);
+  const [dropStatus, setDropStatus] = useState<DropImportStatus | null>(null);
+  const dropStatusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isImportingRef = useRef(false);
+
   // Load config and articles on mount
   useEffect(() => {
     loadData();
   }, []);
+
+  // 全局拖放导入：把 PDF/EPUB/视频/音频/字幕 拖到窗口即导入（Tauri 原生事件）
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    try {
+    void getCurrentWebview()
+      .onDragDropEvent(async (event) => {
+        const payload = event.payload;
+        if (payload.type === "enter" || payload.type === "over") {
+          if (!isImportingRef.current) setIsDragging(true);
+          return;
+        }
+        if (payload.type === "leave") {
+          setIsDragging(false);
+          return;
+        }
+        if (payload.type === "drop") {
+          setIsDragging(false);
+          if (isImportingRef.current) return;
+          const paths = (payload.paths || []).filter(isSupportedDropPath);
+          const unsupported = (payload.paths || []).filter((p) => !isSupportedDropPath(p));
+          if (paths.length === 0) {
+            setDropStatus({
+              ok: 0,
+              errors: [t("dropImport.unsupported", "不支持的文件类型: {{name}}", {
+                name: unsupported.map(getFileName).join(", ") || "?",
+              })],
+            });
+            scheduleStatusClear();
+            return;
+          }
+
+          isImportingRef.current = true;
+          setIsImporting(true);
+          setImportingCount(paths.length);
+          const imported: Article[] = [];
+          const errors: string[] = [];
+          for (const p of paths) {
+            try {
+              imported.push(await importDroppedPath(p));
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              errors.push(
+                msg.startsWith("unsupported:")
+                  ? t("dropImport.unsupported", "不支持的文件类型: {{name}}", { name: msg.slice("unsupported:".length) })
+                  : t("dropImport.failed", "导入失败: {{error}}", { error: msg }),
+              );
+            }
+          }
+          setIsImporting(false);
+          isImportingRef.current = false;
+
+          const fresh = await loadData();
+          // 单个文件成功 → 自动打开（用刷新后的列表，避免闭包里的旧 state）
+          if (imported.length === 1 && errors.length === 0) {
+            const art = fresh.find((a) => a.id === imported[0].id) ?? imported[0];
+            setSelectedIndex(fresh.findIndex((a) => a.id === art.id));
+            setShowFavorites(false);
+            setSelectedArticle(art);
+            setActiveScreen("reader");
+          }
+          setDropStatus({ ok: imported.length, errors });
+          scheduleStatusClear();
+        }
+      })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch(() => {});
+    } catch {
+      // 非 Tauri 环境（测试/浏览器）下拖放 API 不可用，忽略
+    }
+    return () => {
+      unlisten?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const scheduleStatusClear = () => {
+    if (dropStatusTimer.current) clearTimeout(dropStatusTimer.current);
+    dropStatusTimer.current = setTimeout(() => setDropStatus(null), 3500);
+  };
 
   useAgentOpenMaterialListener((materialId) => {
     const existingArticle = articles.find((article) => article.id === materialId);
@@ -181,6 +274,12 @@ function App() {
 
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
+      <DropImportOverlay
+        isDragging={isDragging}
+        isImporting={isImporting}
+        importingCount={importingCount}
+        status={dropStatus}
+      />
       {/* Header */}
       {!selectedArticle && (
         <header className="flex items-center justify-between px-6 py-4 border-b border-border bg-card/50 backdrop-blur-sm supports-[backdrop-filter]:bg-card/50">
