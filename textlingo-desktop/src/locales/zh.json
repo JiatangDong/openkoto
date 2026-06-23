@@ -216,6 +216,12 @@
       "empty": "还没有转写模型。点击右上角“添加”。",
       "noTimestampTag": "（无时间戳，不适合字幕）",
       "siliconflowWarn": "SiliconFlow/SenseVoice 不返回时间戳，无法生成字幕，请改用 whisper-1。",
+      "openDocs": "打开该平台的转写接口文档",
+      "sync": "同步",
+      "syncModels": "从接口加载可用模型",
+      "syncFailed": "同步失败",
+      "syncEmpty": "接口未返回可用模型，请手动填写。",
+      "syncedCount": "已加载 {{count}} 个模型，点输入框可选",
       "errNoName": "请填写配置名称",
       "errNoModel": "请填写转写模型",
       "errNoKey": "请填写 API Key"
@@ -568,6 +574,14 @@
       "bilingual": "双语"
     }
   },
+  "dropImport": {
+    "hint": "松开以导入",
+    "types": "PDF / EPUB / 视频 / 音频 / 字幕",
+    "importing": "正在导入 {{count}} 个文件…",
+    "done": "已导入 {{count}} 个",
+    "unsupported": "不支持的文件类型: {{name}}",
+    "failed": "导入失败: {{error}}"
+  },
   "subtitleExtraction": {
     "noSubtitles": "该视频没有字幕。",
     "extractButton": "提取字幕",
@@ -578,6 +592,9 @@
     "geminiRequired": "请在 设置 → 字幕转写 添加一个转写模型（推荐 302ai 的 whisper-1），或把激活模型切换为 Gemini / Kimi K2.5/K2.6。",
     "localNotSupported": "请在 设置 → 字幕转写 配置转写模型（推荐 whisper-1），或切换到 Gemini / Kimi。回退路径不支持 Ollama / LM Studio 本地模型。",
     "reExtract": "重新提取",
+    "chooseModel": "选择转写模型",
+    "llmListen": "Gemini/Kimi 听写",
+    "addAsrInSettings": "请在 设置 → 字幕转写 添加转写模型",
     "progress": {
       "start": "开始提取字幕...",
       "audio": "提取音频中...",

@@ -216,6 +216,12 @@
       "empty": "No transcription model yet. Click \"Add\" in the top-right.",
       "noTimestampTag": "(no timestamps, unsuitable for subtitles)",
       "siliconflowWarn": "SiliconFlow/SenseVoice does not return timestamps and cannot generate subtitles — use whisper-1 instead.",
+      "openDocs": "Open this provider's transcription API docs",
+      "sync": "Sync",
+      "syncModels": "Load available models from the API",
+      "syncFailed": "Sync failed",
+      "syncEmpty": "The API returned no models; please type one manually.",
+      "syncedCount": "Loaded {{count}} models — click the field to pick one",
       "errNoName": "Please enter a config name",
       "errNoModel": "Please enter a transcription model",
       "errNoKey": "Please enter an API key"
@@ -563,6 +569,14 @@
       "bilingual": "Bilingual"
     }
   },
+  "dropImport": {
+    "hint": "Release to import",
+    "types": "PDF / EPUB / video / audio / subtitle",
+    "importing": "Importing {{count}} file(s)…",
+    "done": "Imported {{count}} item(s)",
+    "unsupported": "Unsupported file type: {{name}}",
+    "failed": "Import failed: {{error}}"
+  },
   "subtitleExtraction": {
     "noSubtitles": "No subtitles found for this video.",
     "extractButton": "Extract Subtitles",
@@ -573,6 +587,9 @@
     "geminiRequired": "Add a transcription model in Settings → Subtitle Transcription (recommended: whisper-1 via 302ai), or switch your active model to Gemini / Kimi K2.5/K2.6.",
     "localNotSupported": "Configure a transcription model in Settings → Subtitle Transcription (recommended: whisper-1), or switch to Gemini / Kimi. Local Ollama / LM Studio models are not supported for the fallback path.",
     "reExtract": "Re-extract",
+    "chooseModel": "Choose transcription model",
+    "llmListen": "Gemini/Kimi listening",
+    "addAsrInSettings": "Add a transcription model in Settings → Subtitle Transcription",
     "progress": {
       "start": "Starting subtitle extraction...",
       "audio": "Extracting audio...",

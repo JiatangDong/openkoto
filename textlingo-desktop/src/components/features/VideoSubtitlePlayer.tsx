@@ -11,7 +11,7 @@
 
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { Button } from "../ui/button";
-import { ChevronDown, ChevronUp, Loader2, FileText, Minimize2, Download, X, FileJson, FileType, FolderOpen, Music, Eye, Languages, Split } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, FileText, Minimize2, Download, X, FileJson, FileType, FolderOpen, Music, Eye, Languages, Split, Check } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -19,9 +19,18 @@ import {
     DropdownMenuTrigger,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
 } from "../ui/dropdown-menu";
 import { useTranslation } from "react-i18next";
 import { ArticleSegment } from "../../types";
+import type { ModelConfig } from "../../lib/tauri";
+
+export interface AsrExtractOptions {
+    configs: ModelConfig[];
+    activeId?: string;
+    llmModelLabel: string | null;
+}
 
 // 播放位置存储的 key 前缀
 const PLAYBACK_POSITION_KEY_PREFIX = "textlingo_video_position_";
@@ -47,8 +56,10 @@ interface VideoSubtitlePlayerProps {
     isExtractingSubtitles?: boolean;
     /** 是否正在导入字幕 */
     isImportingSubtitles?: boolean;
-    /** 提取字幕回调 */
-    onExtractSubtitles?: () => void;
+    /** 提取字幕回调。transcriptionConfigId: ASR 配置 id / "__llm__" / undefined */
+    onExtractSubtitles?: (transcriptionConfigId?: string) => void;
+    /** 可选的字幕转写模型（提取按钮下拉菜单） */
+    asrOptions?: AsrExtractOptions;
     /** 导入字幕回调 */
     onImportSubtitles?: () => void;
     /** 文章标题（用于导出文件名） */
@@ -71,6 +82,71 @@ interface VideoSubtitlePlayerProps {
     onViewModeChange?: (mode: ViewMode) => void;
 }
 
+/** 提取字幕的「选模型」下拉菜单：trigger 用原按钮外观 */
+function ExtractSubtitlesMenu({
+    trigger,
+    disabled,
+    asrOptions,
+    onExtract,
+}: {
+    trigger: React.ReactNode;
+    disabled?: boolean;
+    asrOptions?: AsrExtractOptions;
+    onExtract: (id?: string) => void;
+}) {
+    const { t } = useTranslation();
+    const opts = asrOptions ?? { configs: [], llmModelLabel: null };
+    const hasAny = opts.configs.length > 0 || !!opts.llmModelLabel;
+
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild disabled={disabled}>
+                {trigger}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[15rem]">
+                {hasAny ? (
+                    <>
+                        <DropdownMenuLabel>{t("subtitleExtraction.chooseModel", "选择转写模型")}</DropdownMenuLabel>
+                        {opts.configs.map((c) => (
+                            <DropdownMenuItem
+                                key={c.id}
+                                onSelect={() => onExtract(c.id)}
+                                className="flex-col items-start gap-0.5"
+                            >
+                                <span className="flex items-center gap-1.5 font-medium">
+                                    {opts.activeId === c.id && <Check size={14} className="text-primary" />}
+                                    {c.name}
+                                </span>
+                                <span className="text-xs text-muted-foreground">
+                                    {c.api_provider} / {c.model}
+                                </span>
+                            </DropdownMenuItem>
+                        ))}
+                        {opts.llmModelLabel && (
+                            <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                    onSelect={() => onExtract("__llm__")}
+                                    className="flex-col items-start gap-0.5"
+                                >
+                                    <span className="font-medium">
+                                        {t("subtitleExtraction.llmListen", "Gemini/Kimi 听写")}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">{opts.llmModelLabel}</span>
+                                </DropdownMenuItem>
+                            </>
+                        )}
+                    </>
+                ) : (
+                    <DropdownMenuItem disabled>
+                        {t("subtitleExtraction.addAsrInSettings", "请在 设置 → 字幕转写 添加转写模型")}
+                    </DropdownMenuItem>
+                )}
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
+}
+
 export function VideoSubtitlePlayer({
     videoUrl,
     segments,
@@ -82,6 +158,7 @@ export function VideoSubtitlePlayer({
     isExtractingSubtitles = false,
     isImportingSubtitles = false,
     onExtractSubtitles,
+    asrOptions,
     onImportSubtitles,
     articleTitle = "subtitles",
     articleId,
@@ -472,23 +549,26 @@ export function VideoSubtitlePlayer({
                                 </Button>
                             )}
                             {onExtractSubtitles && (
-                                <Button
-                                    onClick={onExtractSubtitles}
+                                <ExtractSubtitlesMenu
                                     disabled={isExtractingSubtitles}
-                                    className="gap-2"
-                                >
-                                    {isExtractingSubtitles ? (
-                                        <>
-                                            <Loader2 size={16} className="animate-spin" />
-                                            {t("subtitleExtraction.extracting")}
-                                        </>
-                                    ) : (
-                                        <>
-                                            <FileText size={16} />
-                                            {t("subtitleExtraction.extractButton")}
-                                        </>
-                                    )}
-                                </Button>
+                                    asrOptions={asrOptions}
+                                    onExtract={(id) => onExtractSubtitles(id)}
+                                    trigger={
+                                        <Button disabled={isExtractingSubtitles} className="gap-2">
+                                            {isExtractingSubtitles ? (
+                                                <>
+                                                    <Loader2 size={16} className="animate-spin" />
+                                                    {t("subtitleExtraction.extracting")}
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <FileText size={16} />
+                                                    {t("subtitleExtraction.extractButton")}
+                                                </>
+                                            )}
+                                        </Button>
+                                    }
+                                />
                             )}
                         </div>
                     </div>
@@ -852,21 +932,27 @@ export function VideoSubtitlePlayer({
                     )}
 
                     {onExtractSubtitles && (
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={onExtractSubtitles}
+                        <ExtractSubtitlesMenu
                             disabled={isExtractingSubtitles}
-                            className="gap-2 shrink-0"
-                            title={t("subtitleExtraction.reExtract")}
-                        >
-                            {isExtractingSubtitles ? (
-                                <Loader2 size={16} className="animate-spin" />
-                            ) : (
-                                <FileText size={16} />
-                            )}
-                            <span className="hidden sm:inline">{t("subtitleExtraction.reExtract")}</span>
-                        </Button>
+                            asrOptions={asrOptions}
+                            onExtract={(id) => onExtractSubtitles(id)}
+                            trigger={
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={isExtractingSubtitles}
+                                    className="gap-2 shrink-0"
+                                    title={t("subtitleExtraction.reExtract")}
+                                >
+                                    {isExtractingSubtitles ? (
+                                        <Loader2 size={16} className="animate-spin" />
+                                    ) : (
+                                        <FileText size={16} />
+                                    )}
+                                    <span className="hidden sm:inline">{t("subtitleExtraction.reExtract")}</span>
+                                </Button>
+                            }
+                        />
                     )}
                 </div>
 

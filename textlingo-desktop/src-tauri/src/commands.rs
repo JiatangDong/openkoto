@@ -2668,8 +2668,12 @@ pub async fn export_ktv_video_cmd(
 pub async fn extract_subtitles_cmd(
     app_handle: AppHandle,
     article_id: String,
+    transcription_config_id: Option<String>,
 ) -> Result<Article, String> {
-    println!("[ExtractSubtitles] 开始提取字幕: {}", article_id);
+    println!(
+        "[ExtractSubtitles] 开始提取字幕: {} (transcription_config_id={:?})",
+        article_id, transcription_config_id
+    );
 
     // 1. 加载文章
     let article_json = load_article(&app_handle, &article_id)?;
@@ -2688,11 +2692,71 @@ pub async fn extract_subtitles_cmd(
     }
 
     // 3. 获取 API 配置
-    let config = load_config(&app_handle)?.ok_or("未配置 API，请先在设置中配置 AI 模型")?;
+    let mut config = load_config(&app_handle)?.ok_or("未配置 API，请先在设置中配置 AI 模型")?;
 
-    // 优先使用专门的「字幕转写」(ASR / Whisper) 配置；没有则回退到激活的对话模型 + 旧的 LLM 听写路径。
+    // 旧的 Gemini/Kimi「LLM 听写」回退路径解析（沿用激活对话模型 + 白名单校验）
+    let resolve_llm = |config: &crate::types::AppConfig| -> Result<(String, String, String, Option<String>, bool), String> {
+        let active_config = config.get_active_config().ok_or(
+            "未配置字幕转写模型。请在 设置 → 字幕转写 添加一个转写模型（推荐 302ai whisper-1），或切换到 Gemini/Kimi 模型。",
+        )?;
+        let provider = active_config.api_provider.clone();
+        let model = active_config.model.clone();
+        if provider == "ollama" || provider == "lmstudio" {
+            return Err(
+                "字幕提取暂不支持 Ollama / LM Studio 本地模型。请在 设置 → 字幕转写 配置转写模型，或切换到 Gemini/Kimi。"
+                    .to_string(),
+            );
+        }
+        let is_supported = model.contains("gemini")
+            || model.starts_with("google/gemini")
+            || provider == "google"
+            || provider == "google-ai-studio"
+            || (is_moonshot_provider(&provider) && model.contains("kimi"))
+            || model.contains("kimi");
+        if !is_supported {
+            return Err(
+                "未配置字幕转写模型。请在 设置 → 字幕转写 添加一个转写模型（推荐 302ai whisper-1），或切换到 Gemini/Kimi 模型。"
+                    .to_string(),
+            );
+        }
+        Ok((provider, active_config.api_key.clone(), model, active_config.base_url.clone(), false))
+    };
+
+    // "__llm__" 哨兵 = 强制走旧的 Gemini/Kimi 听写；真实 id = 指定 ASR 配置；None = 默认。
+    const LLM_SENTINEL: &str = "__llm__";
+    let force_llm = transcription_config_id.as_deref() == Some(LLM_SENTINEL);
+    let explicit_asr_id: Option<String> = match transcription_config_id.as_deref() {
+        Some(LLM_SENTINEL) | None => None,
+        Some(id) if id.is_empty() => None,
+        Some(id) => Some(id.to_string()),
+    };
+
     let (provider, api_key, model, base_url, use_asr): (String, String, String, Option<String>, bool) =
-        if let Some(asr) = config.get_active_asr_config() {
+        if let Some(id) = explicit_asr_id {
+            // 菜单显式选了某个转写模型
+            let asr = config
+                .asr_configs
+                .iter()
+                .find(|c| c.id == id)
+                .ok_or("所选转写模型不存在，请在 设置 → 字幕转写 重新选择。")?;
+            let picked = (
+                asr.api_provider.clone(),
+                asr.api_key.clone(),
+                asr.model.clone(),
+                asr.base_url.clone(),
+                true,
+            );
+            // 记为默认（设为激活）并落盘
+            if config.active_asr_model_id.as_deref() != Some(id.as_str()) {
+                config.active_asr_model_id = Some(id.clone());
+                if let Err(e) = save_config(&app_handle, &config) {
+                    println!("[ExtractSubtitles] 保存激活转写配置失败: {}", e);
+                }
+            }
+            picked
+        } else if force_llm {
+            resolve_llm(&config)?
+        } else if let Some(asr) = config.get_active_asr_config() {
             (
                 asr.api_provider.clone(),
                 asr.api_key.clone(),
@@ -2701,39 +2765,7 @@ pub async fn extract_subtitles_cmd(
                 true,
             )
         } else {
-            let active_config = config.get_active_config().ok_or(
-                "未配置字幕转写模型。请在 设置 → 字幕转写 添加一个转写模型（推荐 302ai whisper-1），或切换到 Gemini/Kimi 模型。",
-            )?;
-            let provider = active_config.api_provider.clone();
-            let model = active_config.model.clone();
-
-            // 旧路径：本地 provider 不支持
-            if provider == "ollama" || provider == "lmstudio" {
-                return Err(
-                    "字幕提取暂不支持 Ollama / LM Studio 本地模型。请在 设置 → 字幕转写 配置转写模型，或切换到 Gemini/Kimi。"
-                        .to_string(),
-                );
-            }
-            // 旧路径：仅允许 Gemini / Kimi 多模态听写
-            let is_supported = model.contains("gemini")
-                || model.starts_with("google/gemini")
-                || provider == "google"
-                || provider == "google-ai-studio"
-                || (is_moonshot_provider(&provider) && model.contains("kimi"))
-                || model.contains("kimi");
-            if !is_supported {
-                return Err(
-                    "未配置字幕转写模型。请在 设置 → 字幕转写 添加一个转写模型（推荐 302ai whisper-1），或切换到 Gemini/Kimi 模型。"
-                        .to_string(),
-                );
-            }
-            (
-                provider,
-                active_config.api_key.clone(),
-                model,
-                active_config.base_url.clone(),
-                false,
-            )
+            resolve_llm(&config)?
         };
 
     // 4. 调用字幕提取模块 (使用 article_id 作为 event_id)

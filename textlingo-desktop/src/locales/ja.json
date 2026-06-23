@@ -206,6 +206,12 @@
       "empty": "文字起こしモデルがまだありません。右上の「追加」をクリック。",
       "noTimestampTag": "（タイムスタンプなし、字幕に不向き）",
       "siliconflowWarn": "SiliconFlow/SenseVoice はタイムスタンプを返さず字幕を生成できません。whisper-1 をご利用ください。",
+      "openDocs": "このプロバイダーの文字起こし API ドキュメントを開く",
+      "sync": "同期",
+      "syncModels": "API から利用可能なモデルを読み込む",
+      "syncFailed": "同期に失敗しました",
+      "syncEmpty": "API がモデルを返しませんでした。手動で入力してください。",
+      "syncedCount": "{{count}} 個のモデルを読み込みました。入力欄をクリックして選択",
       "errNoName": "設定名を入力してください",
       "errNoModel": "文字起こしモデルを入力してください",
       "errNoKey": "API キーを入力してください"
@@ -558,6 +564,14 @@
       "bilingual": "対訳"
     }
   },
+  "dropImport": {
+    "hint": "離してインポート",
+    "types": "PDF / EPUB / 動画 / 音声 / 字幕",
+    "importing": "{{count}} 個のファイルをインポート中…",
+    "done": "{{count}} 件をインポートしました",
+    "unsupported": "未対応のファイル形式: {{name}}",
+    "failed": "インポート失敗: {{error}}"
+  },
   "subtitleExtraction": {
     "noSubtitles": "この動画には字幕がありません。",
     "extractButton": "字幕を抽出",
@@ -568,6 +582,9 @@
     "geminiRequired": "設定 → 字幕の文字起こし で文字起こしモデル（推奨：302ai の whisper-1）を追加するか、アクティブモデルを Gemini / Kimi K2.5/K2.6 に切り替えてください。",
     "localNotSupported": "設定 → 字幕の文字起こし で文字起こしモデル（推奨：whisper-1）を設定するか、Gemini / Kimi に切り替えてください。フォールバック経路は Ollama / LM Studio のローカルモデルに未対応です。",
     "reExtract": "再抽出",
+    "chooseModel": "文字起こしモデルを選択",
+    "llmListen": "Gemini/Kimi で聞き取り",
+    "addAsrInSettings": "設定 → 字幕の文字起こし でモデルを追加してください",
     "progress": {
       "start": "字幕抽出を開始...",
       "audio": "音声を抽出中...",

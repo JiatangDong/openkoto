@@ -855,8 +855,108 @@ async fn extract_audio_for_asr(
     Ok(audio_path)
 }
 
+/// 一个词（whisper word 级时间戳）
+struct AsrWord {
+    text: String,
+    start: f64,
+    end: f64,
+}
+
+/// 是否含 CJK（中日韩）字符 —— 决定分行的字符上限/不加空格
+fn contains_cjk(s: &str) -> bool {
+    s.chars().any(|c| {
+        let u = c as u32;
+        (0x3040..=0x30FF).contains(&u)      // 平假名/片假名
+            || (0x4E00..=0x9FFF).contains(&u) // CJK 统一表意
+            || (0x3400..=0x4DBF).contains(&u) // CJK 扩展 A
+            || (0xAC00..=0xD7AF).contains(&u) // 谚文（韩）
+    })
+}
+
+/// 一句是否以句末标点结束（硬断句）
+fn ends_sentence(s: &str) -> bool {
+    matches!(
+        s.trim_end().chars().last(),
+        Some('.') | Some('?') | Some('!') | Some('。') | Some('？') | Some('！') | Some('…')
+    )
+}
+
+/// 把 word 级时间戳重新切成「可读字幕块」：
+/// 限制每块字符数 / 时长，在句末标点、长停顿处断句。
+/// 这是字幕质量的关键 —— 直接用 whisper 的 segment 往往一行过长、在短语中间断。
+fn segment_words_into_cues(words: &[AsrWord], time_offset: f64) -> Vec<TranscriptionSegment> {
+    const MAX_DURATION: f64 = 6.0; // 单块最长 6 秒
+    const PAUSE_GAP: f64 = 0.7; // 词间停顿 > 0.7s 视为自然边界
+
+    let full: String = words.iter().map(|w| w.text.as_str()).collect();
+    let is_cjk = contains_cjk(&full);
+    let max_chars: usize = if is_cjk { 20 } else { 42 };
+    let joiner = if is_cjk { "" } else { " " };
+
+    let cue_text = |ws: &[&AsrWord]| -> String {
+        ws.iter()
+            .map(|w| w.text.trim())
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+            .join(joiner)
+    };
+
+    let mut cues: Vec<TranscriptionSegment> = Vec::new();
+    let mut cur: Vec<&AsrWord> = Vec::new();
+
+    let flush = |cur: &mut Vec<&AsrWord>, cues: &mut Vec<TranscriptionSegment>| {
+        if cur.is_empty() {
+            return;
+        }
+        let text = cur
+            .iter()
+            .map(|w| w.text.trim())
+            .filter(|t| !t.is_empty())
+            .collect::<Vec<_>>()
+            .join(if contains_cjk(&cur.iter().map(|w| w.text.as_str()).collect::<String>()) { "" } else { " " });
+        if !text.is_empty() {
+            cues.push(TranscriptionSegment {
+                speaker: None,
+                content: text,
+                start_time: Some(cur.first().unwrap().start + time_offset),
+                end_time: Some(cur.last().unwrap().end + time_offset),
+            });
+        }
+        cur.clear();
+    };
+
+    for (i, w) in words.iter().enumerate() {
+        // 加入前判断长度/时长是否超限（当前非空时才另起一块）
+        if !cur.is_empty() {
+            let mut tentative: Vec<&AsrWord> = cur.clone();
+            tentative.push(w);
+            let over_len = cue_text(&tentative).chars().count() > max_chars;
+            let over_dur = w.end - cur.first().unwrap().start > MAX_DURATION;
+            if over_len || over_dur {
+                flush(&mut cur, &mut cues);
+            }
+        }
+        cur.push(w);
+
+        // 句末标点 → 硬断
+        if ends_sentence(&w.text) {
+            flush(&mut cur, &mut cues);
+            continue;
+        }
+        // 与下一个词间停顿过长 → 自然断
+        if let Some(next) = words.get(i + 1) {
+            if next.start - w.end > PAUSE_GAP {
+                flush(&mut cur, &mut cues);
+            }
+        }
+    }
+    flush(&mut cur, &mut cues);
+    cues
+}
+
 /// 调用 Whisper /audio/transcriptions（OpenAI 兼容，multipart）转写单个音频文件。
-/// 返回带 segment 时间戳的结果。`time_offset` 会加到每段时间戳上（用于分片拼接）。
+/// 优先用 word 级时间戳重新分行；没有 word 时退回 segment。
+/// `time_offset` 会加到每段时间戳上（用于分片拼接）。
 async fn transcribe_audio_with_whisper(
     audio_path: &Path,
     endpoint: &str,
@@ -873,9 +973,15 @@ async fn transcribe_audio_with_whisper(
         .part("file", part)
         .text("model", model.to_string())
         .text("response_format", "verbose_json")
-        .text("timestamp_granularities[]", "segment");
+        .text("timestamp_granularities[]", "segment")
+        .text("timestamp_granularities[]", "word");
 
-    let client = Client::new();
+    // 显式超时：单片 ~10 分钟音频请求一般 1 分钟内返回，给足 5 分钟兜底；
+    // 卡住时干净失败，而不是无限等待。
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("构造 HTTP 客户端失败: {}", e))?;
     let response = client
         .post(endpoint)
         .bearer_auth(api_key)
@@ -896,20 +1002,43 @@ async fn transcribe_audio_with_whisper(
         .map_err(|e| format!("解析转写响应失败: {}", e))?;
 
     let mut segments: Vec<TranscriptionSegment> = Vec::new();
-    if let Some(arr) = v["segments"].as_array() {
-        for s in arr {
-            let text = s["text"].as_str().unwrap_or("").trim().to_string();
-            if text.is_empty() {
-                continue;
+
+    // 优先：用 word 级时间戳重新分行（字幕可读性更好）
+    if let Some(warr) = v["words"].as_array() {
+        let words: Vec<AsrWord> = warr
+            .iter()
+            .filter_map(|w| {
+                let text = w["word"].as_str()?.to_string();
+                let start = w["start"].as_f64()?;
+                let end = w["end"].as_f64()?;
+                if text.trim().is_empty() {
+                    return None;
+                }
+                Some(AsrWord { text, start, end })
+            })
+            .collect();
+        if !words.is_empty() {
+            segments = segment_words_into_cues(&words, time_offset);
+        }
+    }
+
+    // 退回：没有 word 时用 segment
+    if segments.is_empty() {
+        if let Some(arr) = v["segments"].as_array() {
+            for s in arr {
+                let text = s["text"].as_str().unwrap_or("").trim().to_string();
+                if text.is_empty() {
+                    continue;
+                }
+                let start = s["start"].as_f64();
+                let end = s["end"].as_f64();
+                segments.push(TranscriptionSegment {
+                    speaker: None,
+                    content: text,
+                    start_time: start.map(|t| t + time_offset),
+                    end_time: end.map(|t| t + time_offset),
+                });
             }
-            let start = s["start"].as_f64();
-            let end = s["end"].as_f64();
-            segments.push(TranscriptionSegment {
-                speaker: None,
-                content: text,
-                start_time: start.map(|t| t + time_offset),
-                end_time: end.map(|t| t + time_offset),
-            });
         }
     }
 
@@ -945,6 +1074,19 @@ async fn extract_subtitles_with_whisper(
     event_id: &str,
 ) -> Result<Vec<ArticleSegment>, String> {
     let endpoint = asr_transcriptions_url(provider, base_url);
+
+    // 302 的 /audio/transcriptions 目前只支持 whisper-1；其它模型名（如 whisper-large-v3，
+    // 实为 Groq 的模型）会返回 500。这里对 302 统一纠正成 whisper-1，避免用户填错就卡死。
+    let model: &str = if provider == "302ai" && model != "whisper-1" {
+        println!(
+            "[SubtitleExtraction][ASR] 302 仅支持 whisper-1，已将 '{}' 自动纠正为 whisper-1",
+            model
+        );
+        "whisper-1"
+    } else {
+        model
+    };
+
     println!(
         "[SubtitleExtraction][ASR] provider={} model={} endpoint={}",
         provider, model, endpoint
@@ -955,13 +1097,26 @@ async fn extract_subtitles_with_whisper(
         serde_json::json!({ "phase": "audio", "message": "提取音频中..." }),
     );
 
-    // 先压完整音频，看是否超过单文件上限
+    // 单片最长时长：太长的单次请求容易被 302/代理超时断开（499）。控制在 ~10 分钟，
+    // 单次请求约 1 分钟，稳定很多。
+    const MAX_CHUNK_SECS: f64 = 600.0;
+
+    // 先压完整音频，拿到大小
     let full_audio = extract_audio_for_asr(&app, video_path, "full", None, None).await?;
     let size = fs::metadata(&full_audio).map(|m| m.len()).unwrap_or(0);
 
+    // 分片数 = max(按时长, 按大小)，两者都要满足
+    let parts_by_dur = if duration > 0.0 {
+        (duration / MAX_CHUNK_SECS).ceil() as usize
+    } else {
+        1
+    };
+    let parts_by_size = ((size as f64) / (MAX_ASR_BYTES as f64)).ceil() as usize;
+    let parts = parts_by_dur.max(parts_by_size).max(1);
+
     let mut all_segments: Vec<TranscriptionSegment> = Vec::new();
 
-    if size <= MAX_ASR_BYTES || duration <= 0.0 {
+    if parts <= 1 {
         // 一次过
         let _ = app.emit(
             &format!("subtitle-extraction-progress://{}", event_id),
@@ -971,13 +1126,12 @@ async fn extract_subtitles_with_whisper(
         all_segments = result.segments;
         let _ = fs::remove_file(&full_audio);
     } else {
-        // 超过上限：按文件大小估算需要的分片数（无 overlap，Whisper 段本身干净）
+        // 分片：按时长均分（无 overlap，Whisper 段本身干净）
         let _ = fs::remove_file(&full_audio);
-        let parts = ((size as f64) / (MAX_ASR_BYTES as f64)).ceil() as usize;
-        let parts = parts.max(2);
         let chunk_dur = duration / parts as f64;
         println!(
-            "[SubtitleExtraction][ASR] 音频 {:.1}MB 超限，分 {} 段（每段 ~{:.1} 分钟）",
+            "[SubtitleExtraction][ASR] 时长 {:.1} 分钟 / {:.1}MB，分 {} 段（每段 ~{:.1} 分钟）",
+            duration / 60.0,
             size as f64 / 1024.0 / 1024.0,
             parts,
             chunk_dur / 60.0
@@ -1598,6 +1752,68 @@ fn transcription_to_segments(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn w(text: &str, start: f64, end: f64) -> AsrWord {
+        AsrWord { text: text.to_string(), start, end }
+    }
+
+    #[test]
+    fn test_segment_words_breaks_on_sentence_end() {
+        let words = vec![
+            w("Hello", 0.0, 0.4),
+            w("world.", 0.4, 0.9),
+            w("How", 1.0, 1.2),
+            w("are", 1.2, 1.4),
+            w("you?", 1.4, 1.8),
+        ];
+        let cues = segment_words_into_cues(&words, 0.0);
+        assert_eq!(cues.len(), 2);
+        assert_eq!(cues[0].content, "Hello world.");
+        assert_eq!(cues[0].start_time, Some(0.0));
+        assert_eq!(cues[0].end_time, Some(0.9));
+        assert_eq!(cues[1].content, "How are you?");
+    }
+
+    #[test]
+    fn test_segment_words_breaks_on_long_pause() {
+        let words = vec![
+            w("first", 0.0, 0.4),
+            w("part", 0.4, 0.8),
+            // 1.5s 停顿
+            w("second", 2.3, 2.7),
+            w("part", 2.7, 3.0),
+        ];
+        let cues = segment_words_into_cues(&words, 0.0);
+        assert_eq!(cues.len(), 2);
+        assert_eq!(cues[0].content, "first part");
+        assert_eq!(cues[1].content, "second part");
+    }
+
+    #[test]
+    fn test_segment_words_caps_line_length() {
+        // 一长串无标点无停顿的词，应按 42 字符上限切成多块
+        let words: Vec<AsrWord> = (0..20)
+            .map(|i| w("toomanywords", i as f64 * 0.3, i as f64 * 0.3 + 0.3))
+            .collect();
+        let cues = segment_words_into_cues(&words, 0.0);
+        assert!(cues.len() > 1);
+        assert!(cues.iter().all(|c| c.content.chars().count() <= 42));
+    }
+
+    #[test]
+    fn test_segment_words_time_offset_applied() {
+        let words = vec![w("a", 0.0, 0.2), w("b.", 0.2, 0.4)];
+        let cues = segment_words_into_cues(&words, 100.0);
+        assert_eq!(cues[0].start_time, Some(100.0));
+        assert_eq!(cues[0].end_time, Some(100.4));
+    }
+
+    #[test]
+    fn test_contains_cjk() {
+        assert!(contains_cjk("こんにちは"));
+        assert!(contains_cjk("你好world"));
+        assert!(!contains_cjk("hello world"));
+    }
 
     #[test]
     fn test_extract_json_from_markdown() {

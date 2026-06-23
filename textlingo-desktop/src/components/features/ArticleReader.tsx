@@ -26,7 +26,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { isKimiProvider } from "../../lib/kimiProvider";
 import ReactMarkdown from "react-markdown";
-import { AnalysisType, AppConfig } from "../../lib/tauri";
+import { AnalysisType, AppConfig, ModelConfig } from "../../lib/tauri";
 import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
 import { Article, SegmentExplanation } from "../../types";
 import { AgentPanel } from "./AgentPanel";
@@ -112,6 +112,44 @@ export function ArticleReader({
 
   // 字幕提取状态
   const [isExtractingSubtitles, setIsExtractingSubtitles] = useState(false);
+  // 字幕转写(ASR)可选模型，供提取按钮的下拉菜单使用
+  const [asrOptions, setAsrOptions] = useState<{
+    configs: ModelConfig[];
+    activeId?: string;
+    llmModelLabel: string | null;
+  }>({ configs: [], llmModelLabel: null });
+
+  const loadAsrOptions = async () => {
+    try {
+      const cfg = await invoke<AppConfig | null>("get_config");
+      const configs = cfg?.asr_configs || [];
+      const activeId = cfg?.active_asr_model_id;
+      // 当激活对话模型是 Gemini/Kimi 时，给个展示名以在菜单里提供「听写」回退项
+      const mc = cfg?.model_configs || [];
+      const active = cfg?.active_model_id ? mc.find((c) => c.id === cfg.active_model_id) : mc[0];
+      let llmModelLabel: string | null = null;
+      if (active) {
+        const p = active.api_provider;
+        const m = active.model || "";
+        const ok =
+          m.includes("gemini") ||
+          m.startsWith("google/gemini") ||
+          p === "google" ||
+          p === "google-ai-studio" ||
+          (isKimiProvider(p) && m.includes("kimi")) ||
+          m.includes("kimi");
+        if (ok) llmModelLabel = m || p;
+      }
+      setAsrOptions({ configs, activeId, llmModelLabel });
+    } catch (e) {
+      console.error("[ArticleReader] load ASR options failed:", e);
+    }
+  };
+
+  useEffect(() => {
+    loadAsrOptions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [article.id]);
   const [isImportingSubtitles, setIsImportingSubtitles] = useState(false);
   const [extractionProgress, setExtractionProgress] = useState<string | null>(null);
 
@@ -299,8 +337,11 @@ export function ArticleReader({
     }
   };
 
-  // 字幕提取处理函数
-  const handleExtractSubtitles = async () => {
+  // 字幕提取处理函数。transcriptionConfigId:
+  //   真实 ASR 配置 id → 用该模型转写并记为默认；
+  //   "__llm__" → 强制走 Gemini/Kimi 听写；
+  //   undefined → 默认（激活 ASR，否则回退听写）。
+  const handleExtractSubtitles = async (transcriptionConfigId?: string) => {
     if (!article.media_path) return;
 
     setError(null);
@@ -308,13 +349,18 @@ export function ArticleReader({
     try {
       const latestConfig = await invoke<AppConfig | null>("get_config");
 
-      // 优先用专门的「字幕转写」(ASR) 配置；有激活的 ASR 配置就直接放行。
+      const isExplicitAsr = !!transcriptionConfigId && transcriptionConfigId !== "__llm__";
+      const forceLlm = transcriptionConfigId === "__llm__";
+
       const asrConfigs = latestConfig?.asr_configs || [];
       const activeAsr = latestConfig?.active_asr_model_id
         ? asrConfigs.find(c => c.id === latestConfig.active_asr_model_id)
         : asrConfigs[0];
 
-      if (!activeAsr) {
+      // 需要走 LLM 听写校验：显式选了听写，或没传且无任何 ASR 配置
+      const needLlmCheck = forceLlm || (!isExplicitAsr && !activeAsr);
+
+      if (needLlmCheck) {
         // 回退路径:必须是 Gemini / Kimi 多模态听写模型
         const modelConfigs = latestConfig?.model_configs || [];
         const activeConfig = latestConfig?.active_model_id
@@ -348,6 +394,7 @@ export function ArticleReader({
       setIsExtractingSubtitles(true);
       const updatedArticle = await invoke<Article>("extract_subtitles_cmd", {
         articleId: article.id,
+        transcriptionConfigId: transcriptionConfigId ?? null,
       });
 
       // 更新本地状态
@@ -370,6 +417,8 @@ export function ArticleReader({
       onUpdate?.();
       // 确保本地状态完全同步
       await refreshArticle();
+      // 选定的转写模型可能已被设为默认，刷新菜单选项
+      await loadAsrOptions();
     } catch (err) {
       console.error("[ArticleReader] Subtitle extraction failed:", err);
       setError(t("subtitleExtraction.error") + ": " + String(err));
@@ -1233,6 +1282,7 @@ export function ArticleReader({
                         isExtractingSubtitles={isExtractingSubtitles}
                         isImportingSubtitles={isImportingSubtitles}
                         onExtractSubtitles={handleExtractSubtitles}
+                        asrOptions={asrOptions}
                         onImportSubtitles={handleImportSubtitles}
                         articleTitle={article.title}
                         articleId={article.id}

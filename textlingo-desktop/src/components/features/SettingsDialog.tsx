@@ -141,6 +141,22 @@ const ASR_DEFAULT_BASE_URLS: Record<string, string> = {
   "groq": "https://api.groq.com/openai/v1",
   "siliconflow": "https://api.siliconflow.cn/v1",
 };
+// 预设的常用转写模型（下拉建议，仍可自由输入）
+const ASR_PRESET_MODELS: Record<string, string[]> = {
+  "302ai": ["whisper-1"],
+  "openai": ["whisper-1", "gpt-4o-transcribe", "gpt-4o-mini-transcribe"],
+  "groq": ["whisper-large-v3-turbo", "whisper-large-v3", "distil-whisper-large-v3-en"],
+  "siliconflow": ["FunAudioLLM/SenseVoiceSmall", "TeleAI/TeleSpeechASR"],
+  "openai-compatible": [],
+};
+// 各平台「转写」文档（点 ? 打开）
+const ASR_DOC_URLS: Record<string, string> = {
+  "302ai": "https://doc.302.ai/api-207705218",
+  "openai": "https://platform.openai.com/docs/api-reference/audio/createTranscription",
+  "groq": "https://console.groq.com/docs/speech-to-text",
+  "siliconflow": "https://docs.siliconflow.cn/en/api-reference/audio/create-audio-transcriptions",
+  "openai-compatible": "",
+};
 
 // Default preset models
 const DEFAULT_MODELS = {
@@ -240,6 +256,9 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
 
   // ASR (subtitle transcription) config form state
   const [editingAsr, setEditingAsr] = useState<Partial<ModelConfig> | null>(null);
+  const [asrSyncedModels, setAsrSyncedModels] = useState<string[]>([]);
+  const [isAsrSyncing, setIsAsrSyncing] = useState(false);
+  const [asrSyncError, setAsrSyncError] = useState<string | null>(null);
 
   // Model config form state
   const [editingConfig, setEditingConfig] = useState<Partial<ModelConfig> | null>(null);
@@ -505,6 +524,8 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
   // ===== ASR (subtitle transcription) config handlers =====
   // 这些只改本地 config.asr_configs / active_asr_model_id，关闭时由 save_config_cmd 整体落盘。
   const startNewAsr = () => {
+    setAsrSyncedModels([]);
+    setAsrSyncError(null);
     setEditingAsr({
       id: "",
       name: "",
@@ -517,16 +538,64 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
   };
 
   const startEditAsr = (cfg: ModelConfig) => {
+    setAsrSyncedModels([]);
+    setAsrSyncError(null);
     setEditingAsr({ ...cfg });
   };
 
   const handleAsrProviderChange = (provider: string) => {
+    setAsrSyncedModels([]);
+    setAsrSyncError(null);
     setEditingAsr((cur) => ({
       ...cur,
       api_provider: provider,
       model: ASR_DEFAULT_MODELS[provider] ?? cur?.model ?? "",
       base_url: ASR_DEFAULT_BASE_URLS[provider] ?? "",
     }));
+  };
+
+  // 从 provider 的 /models 接口拉取可用模型，过滤出转写类（whisper / transcribe / voice / asr / speech / sense）
+  const syncAsrModels = async () => {
+    if (!editingAsr) return;
+    const provider = editingAsr.api_provider || "302ai";
+    // 302 的 /audio/transcriptions 目前只支持 whisper-1，/models 里的对话模型（如 whisper-large-v3）会 500。
+    if (provider === "302ai") {
+      setAsrSyncedModels(["whisper-1"]);
+      setAsrSyncError(null);
+      return;
+    }
+    const apiKey = (editingAsr.api_key || "").trim();
+    if (!apiKey && provider !== "openai-compatible") {
+      setAsrSyncError(t("settings.transcription.errNoKey", "请填写 API Key"));
+      return;
+    }
+    const base = (editingAsr.base_url || "").trim() || ASR_DEFAULT_BASE_URLS[provider] || "https://api.302.ai/v1";
+    const url = `${base.replace(/\/$/, "")}/models`;
+    setIsAsrSyncing(true);
+    setAsrSyncError(null);
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const data = await response.json();
+      const raw: any[] = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+      const ids: string[] = raw
+        .map((m) => (typeof m === "string" ? m : m?.id))
+        .filter((x): x is string => typeof x === "string" && x.length > 0);
+      const re = /(whisper|transcrib|voice|asr|speech|sense)/i;
+      const filtered = ids.filter((id) => re.test(id));
+      const result = (filtered.length > 0 ? filtered : ids).slice(0, 100);
+      setAsrSyncedModels(result);
+      if (result.length === 0) {
+        setAsrSyncError(t("settings.transcription.syncEmpty", "接口未返回可用模型，请手动填写。"));
+      }
+    } catch (err) {
+      setAsrSyncError(`${t("settings.transcription.syncFailed", "同步失败")}: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsAsrSyncing(false);
+    }
   };
 
   const saveAsr = () => {
@@ -1555,8 +1624,18 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-foreground mb-1">
+                  <label className="flex items-center gap-1.5 text-sm font-medium text-foreground mb-1">
                     {t("settings.apiProvider", "提供商")}
+                    {ASR_DOC_URLS[editingAsr.api_provider || "302ai"] && (
+                      <button
+                        type="button"
+                        onClick={() => openUrl(ASR_DOC_URLS[editingAsr.api_provider || "302ai"])}
+                        className="text-muted-foreground hover:text-primary transition-colors focus:outline-none"
+                        title={t("settings.transcription.openDocs", "打开该平台的转写接口文档")}
+                      >
+                        <HelpCircle size={14} />
+                      </button>
+                    )}
                   </label>
                   <Select
                     value={editingAsr.api_provider || "302ai"}
@@ -1580,11 +1659,43 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
                   <label className="block text-sm font-medium text-foreground mb-1">
                     {t("settings.model", "模型")}
                   </label>
-                  <Input
-                    value={editingAsr.model || ""}
-                    onChange={(e) => setEditingAsr({ ...editingAsr, model: e.target.value })}
-                    placeholder="whisper-1"
-                  />
+                  <div className="flex gap-2">
+                    <Input
+                      list="asr-model-suggestions"
+                      value={editingAsr.model || ""}
+                      onChange={(e) => setEditingAsr({ ...editingAsr, model: e.target.value })}
+                      placeholder="whisper-1"
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={syncAsrModels}
+                      disabled={isAsrSyncing}
+                      title={t("settings.transcription.syncModels", "从接口加载可用模型")}
+                      className="gap-1 shrink-0"
+                    >
+                      {isAsrSyncing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                      {t("settings.transcription.sync", "同步")}
+                    </Button>
+                  </div>
+                  <datalist id="asr-model-suggestions">
+                    {Array.from(
+                      new Set([
+                        ...(ASR_PRESET_MODELS[editingAsr.api_provider || "302ai"] || []),
+                        ...asrSyncedModels,
+                      ]),
+                    ).map((m) => (
+                      <option key={m} value={m} />
+                    ))}
+                  </datalist>
+                  {asrSyncError && <p className="mt-1 text-xs text-destructive">{asrSyncError}</p>}
+                  {asrSyncedModels.length > 0 && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {t("settings.transcription.syncedCount", "已加载 {{count}} 个模型，点输入框可选", { count: asrSyncedModels.length })}
+                    </p>
+                  )}
                 </div>
                 {(editingAsr.api_provider === "openai-compatible" || editingAsr.base_url) && (
                   <div>
