@@ -1,0 +1,12 @@
+{
+  "name": "openkoto-fsrs-golden-generator",
+  "private": true,
+  "type": "module",
+  "description": "Generates docs/specs/fixtures/fsrs_golden_v1.json from the pinned ts-fsrs reference implementation. Run: npm install && npm run generate",
+  "scripts": {
+    "generate": "node generate_fsrs_golden.mjs"
+  },
+  "dependencies": {
+    "ts-fsrs": "5.4.1"
+  }
+}
