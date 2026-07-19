@@ -13,6 +13,7 @@ interface WordPackManagerProps {
   onCreatePack: () => void;
   onCopyWords: (packId: string) => void;
   onDownloadTxt: (packId: string) => void;
+  onExportAnkiTsv: (packId: string) => void;
   onExportWordPack: (packId: string) => void;
   onDeletePack: (pack: WordPack) => void;
   onStartReview: () => void;
@@ -27,6 +28,7 @@ interface ActionMenuProps {
   allowDelete: boolean;
   onCopyWords: (packId: string) => void;
   onDownloadTxt: (packId: string) => void;
+  onExportAnkiTsv: (packId: string) => void;
   onExportWordPack?: (packId: string) => void;
   onDelete?: () => void;
 }
@@ -40,6 +42,7 @@ function PackActionsMenu({
   allowDelete,
   onCopyWords,
   onDownloadTxt,
+  onExportAnkiTsv,
   onExportWordPack,
   onDelete,
 }: ActionMenuProps) {
@@ -70,6 +73,10 @@ function PackActionsMenu({
             <DropdownMenuItem onClick={() => onDownloadTxt(packId)}>
               <FileDown className="mr-2 h-4 w-4" />
               <span>{t("favorites.downloadTxt", "下载 TXT 文件")}</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onExportAnkiTsv(packId)}>
+              <FileDown className="mr-2 h-4 w-4" />
+              <span>{t("favorites.exportAnkiTsv", "导出 Anki 文件 (TSV)")}</span>
             </DropdownMenuItem>
             {(allowWordPackExport || allowDelete) && <DropdownMenuSeparator />}
           </>
@@ -102,6 +109,7 @@ export function WordPackManager({
   onCreatePack,
   onCopyWords,
   onDownloadTxt,
+  onExportAnkiTsv,
   onExportWordPack,
   onDeletePack,
   onStartReview,
@@ -139,6 +147,7 @@ export function WordPackManager({
             allowDelete={false}
             onCopyWords={onCopyWords}
             onDownloadTxt={onDownloadTxt}
+            onExportAnkiTsv={onExportAnkiTsv}
             onExportWordPack={onExportWordPack}
           />
         </div>
@@ -165,6 +174,7 @@ export function WordPackManager({
                 allowDelete={!pack.is_system}
                 onCopyWords={onCopyWords}
                 onDownloadTxt={onDownloadTxt}
+                onExportAnkiTsv={onExportAnkiTsv}
                 onExportWordPack={onExportWordPack}
                 onDelete={!pack.is_system ? () => onDeletePack(pack) : undefined}
               />

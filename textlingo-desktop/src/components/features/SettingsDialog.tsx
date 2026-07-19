@@ -6,7 +6,7 @@ import { Dialog } from "../ui/dialog";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select } from "../ui/select";
-import { Settings, Plus, Trash2, Edit2, Check, RefreshCw, Loader2, HelpCircle, Boxes, MessageSquare, Palette, Languages, Settings2, ScrollText, AudioLines } from "lucide-react";
+import { Settings, Plus, Trash2, Edit2, Check, RefreshCw, Loader2, HelpCircle, Boxes, MessageSquare, Palette, Languages, Settings2, ScrollText, AudioLines, GraduationCap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useTheme } from "../theme-provider";
 import { LogsPanel } from "./LogsPanel";
@@ -114,17 +114,27 @@ const BUILTIN_PROMPT_FEATURE_DEFAULTS: Record<string, PromptFeature> = {
 
 const PROMPT_FEATURE_ICON_OPTIONS = ["sparkles", "translate", "explain", "grammar", "book-open"];
 
-type SettingsSectionKey = "models" | "chat" | "appearance" | "language" | "advanced" | "transcription" | "logs";
+export type SettingsSectionKey = "models" | "chat" | "appearance" | "language" | "review" | "advanced" | "transcription" | "logs";
 
 const SETTINGS_SECTIONS: { key: SettingsSectionKey; icon: LucideIcon; labelKey: string }[] = [
   { key: "models", icon: Boxes, labelKey: "settings.nav.models" },
   { key: "chat", icon: MessageSquare, labelKey: "settings.nav.chat" },
   { key: "transcription", icon: AudioLines, labelKey: "settings.nav.transcription" },
+  { key: "review", icon: GraduationCap, labelKey: "settings.nav.review" },
   { key: "appearance", icon: Palette, labelKey: "settings.nav.appearance" },
   { key: "language", icon: Languages, labelKey: "settings.nav.language" },
   { key: "advanced", icon: Settings2, labelKey: "settings.nav.advanced" },
   { key: "logs", icon: ScrollText, labelKey: "settings.nav.logs" },
 ];
+
+// FSRS 期望保持率可选值(规范 §2.1)
+const SRS_RETENTION_OPTIONS = [0.8, 0.85, 0.9, 0.95];
+
+function normalizeSrsLimit(raw: string, fallback: number): number {
+  const value = Number.parseInt(raw, 10);
+  if (Number.isNaN(value)) return fallback;
+  return Math.min(Math.max(value, 0), 999);
+}
 
 // 字幕转写(ASR)provider —— 走 OpenAI 兼容 /audio/transcriptions
 const ASR_PROVIDERS = ["302ai", "openai", "groq", "openai-compatible", "siliconflow"] as const;
@@ -235,9 +245,11 @@ interface SettingsDialogProps {
   isOpen: boolean;
   onClose: () => void;
   onSave?: () => void;
+  /** 打开时定位到的分区（默认 models） */
+  initialSection?: SettingsSectionKey;
 }
 
-export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps) {
+export function SettingsDialog({ isOpen, onClose, onSave, initialSection }: SettingsDialogProps) {
   const { t, i18n } = useTranslation();
   const { themeName, themeMode, setThemeName, setThemeMode } = useTheme();
   const [config, setConfig] = useState<AppConfig>({
@@ -252,7 +264,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isCorrupted, setIsCorrupted] = useState(false);
-  const [activeSection, setActiveSection] = useState<SettingsSectionKey>("models");
+  const [activeSection, setActiveSection] = useState<SettingsSectionKey>(initialSection ?? "models");
 
   // ASR (subtitle transcription) config form state
   const [editingAsr, setEditingAsr] = useState<Partial<ModelConfig> | null>(null);
@@ -289,6 +301,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
   useEffect(() => {
     if (isOpen) {
       loadConfig();
+      setActiveSection(initialSection ?? "models");
     }
   }, [isOpen]);
 
@@ -1809,6 +1822,75 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
           </div>
           )}
 
+          {/* Review (SRS) Section */}
+          {activeSection === "review" && (
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="srs-daily-new-limit" className="block text-sm font-medium text-foreground mb-2">
+                {t("settings.srsDailyNewLimit", "每日新词上限")}
+              </label>
+              <Input
+                id="srs-daily-new-limit"
+                type="number"
+                min={0}
+                max={999}
+                step={1}
+                value={config.srs_daily_new_limit ?? 20}
+                onChange={(e) =>
+                  setConfig({ ...config, srs_daily_new_limit: normalizeSrsLimit(e.target.value, 20) })
+                }
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("settings.srsDailyNewLimitHelp", "每天最多引入多少个新单词进入复习队列。")}
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="srs-daily-review-limit" className="block text-sm font-medium text-foreground mb-2">
+                {t("settings.srsDailyReviewLimit", "每日复习上限")}
+              </label>
+              <Input
+                id="srs-daily-review-limit"
+                type="number"
+                min={0}
+                max={999}
+                step={1}
+                value={config.srs_daily_review_limit ?? 100}
+                onChange={(e) =>
+                  setConfig({ ...config, srs_daily_review_limit: normalizeSrsLimit(e.target.value, 100) })
+                }
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("settings.srsDailyReviewLimitHelp", "每天最多复习多少张到期卡片。")}
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-2">
+                {t("settings.srsDesiredRetention", "期望记忆保持率")}
+              </label>
+              <Select
+                value={String(config.srs_desired_retention ?? 0.9)}
+                onChange={(e) =>
+                  setConfig({ ...config, srs_desired_retention: Number(e.target.value) })
+                }
+              >
+                {SRS_RETENTION_OPTIONS.map((value) => (
+                  <option key={value} value={String(value)}>
+                    {Math.round(value * 100)}%
+                  </option>
+                ))}
+              </Select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t(
+                  "settings.srsDesiredRetentionHelp",
+                  "FSRS 算法的目标保持率:越高复习越频繁、记得越牢;越低间隔越长、负担越轻。默认 90%。",
+                )}
+              </p>
+            </div>
+          </div>
+          )}
+
           {/* Advanced Section */}
           {activeSection === "advanced" && (
           <div className="space-y-4">
@@ -1858,35 +1940,22 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
 }
 
 interface SettingsButtonProps {
+  /** 点击按钮时触发（由父组件控制弹窗的打开） */
   onOpen?: () => void;
-  onSave?: () => void;
 }
 
-export function SettingsButton({ onOpen, onSave }: SettingsButtonProps) {
+export function SettingsButton({ onOpen }: SettingsButtonProps) {
   const { t } = useTranslation();
-  const [isOpen, setIsOpen] = useState(false);
-
-  const handleOpen = () => {
-    onOpen?.();
-    setIsOpen(true);
-  };
 
   return (
-    <>
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={handleOpen}
-        className="gap-2 text-foreground"
-      >
-        <Settings size={16} />
-        {t("header.settings")}
-      </Button>
-      <SettingsDialog
-        isOpen={isOpen}
-        onClose={() => setIsOpen(false)}
-        onSave={onSave}
-      />
-    </>
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => onOpen?.()}
+      className="gap-2 text-foreground"
+    >
+      <Settings size={16} />
+      {t("header.settings")}
+    </Button>
   );
 }

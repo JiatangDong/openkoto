@@ -62,6 +62,7 @@ vi.mock("./components/features/FavoritesPage", () => ({
 
 vi.mock("./components/features/SettingsDialog", () => ({
   SettingsButton: () => <button type="button">settings</button>,
+  SettingsDialog: () => null,
 }));
 
 vi.mock("./components/features/ApiQuickSwitcher", () => ({

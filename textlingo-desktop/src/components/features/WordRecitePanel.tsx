@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { FavoriteVocabulary } from "../../types";
+import { useTranslation } from "react-i18next";
+import type { FavoriteVocabulary, ReviewStats } from "../../types";
+import type { AppConfig } from "../../lib/tauri";
+import { currentRetention } from "../../lib/srs";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 
@@ -26,19 +29,35 @@ export function WordRecitePanel({
   packName,
   onReviewed,
 }: WordRecitePanelProps) {
+  const { t } = useTranslation();
   const [queue, setQueue] = useState<FavoriteVocabulary[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showAnswer, setShowAnswer] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [stats, setStats] = useState<ReviewStats | null>(null);
+  const [limits, setLimits] = useState<{ newLimit: number; reviewLimit: number }>({
+    newLimit: 20,
+    reviewLimit: 100,
+  });
 
   const current = useMemo(() => queue[currentIndex], [queue, currentIndex]);
+  const retention = useMemo(() => (current ? currentRetention(current) : null), [current]);
 
   useEffect(() => {
     if (!open) return;
     setCurrentIndex(0);
     setShowAnswer(false);
     void loadQueue();
+    void loadStats();
+    void invoke<AppConfig>("get_config")
+      .then((config) =>
+        setLimits({
+          newLimit: config.srs_daily_new_limit ?? 20,
+          reviewLimit: config.srs_daily_review_limit ?? 100,
+        })
+      )
+      .catch(() => undefined);
   }, [open, packId]);
 
   const loadQueue = async () => {
@@ -58,6 +77,18 @@ export function WordRecitePanel({
     }
   };
 
+  const loadStats = async () => {
+    try {
+      const result = await invoke<ReviewStats>("get_review_stats_cmd", {
+        packId,
+        dateLocal: formatLocalDate(new Date()),
+      });
+      setStats(result);
+    } catch (error) {
+      console.error("Failed to load review stats:", error);
+    }
+  };
+
   const handleGrade = async (grade: "unknown" | "uncertain" | "known") => {
     if (!current) return;
     setIsSubmitting(true);
@@ -72,6 +103,7 @@ export function WordRecitePanel({
       setQueue((prev) => prev.filter((item) => item.id !== current.id));
       setCurrentIndex(0);
       setShowAnswer(false);
+      void loadStats();
       await onReviewed();
     } catch (error) {
       console.error("Failed to review vocabulary:", error);
@@ -80,24 +112,70 @@ export function WordRecitePanel({
     }
   };
 
+  const progressBar = (label: string, value: number, limit: number, color: string) => (
+    <div className="flex-1">
+      <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
+        <span>{label}</span>
+        <span>
+          {Math.min(value, limit)}/{limit}
+        </span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted/60">
+        <div
+          className="h-full rounded-full transition-all"
+          style={{
+            width: `${limit > 0 ? Math.min((value / limit) * 100, 100) : 0}%`,
+            backgroundColor: color,
+          }}
+        />
+      </div>
+    </div>
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>{packName} - 今日复习</DialogTitle>
+          <DialogTitle>
+            {packName} - {t("favorites.todayReview", "今日复习")}
+          </DialogTitle>
         </DialogHeader>
 
+        {stats && (
+          <div className="flex gap-4 rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
+            {progressBar(
+              t("favorites.progressNew", "今日新词"),
+              stats.new_today,
+              limits.newLimit,
+              "var(--srs-strong)"
+            )}
+            {progressBar(
+              t("favorites.progressReview", "今日复习"),
+              stats.review_today,
+              limits.reviewLimit,
+              "var(--srs-fading)"
+            )}
+          </div>
+        )}
+
         {isLoading ? (
-          <div className="py-12 text-center text-muted-foreground">加载复习队列中...</div>
+          <div className="py-12 text-center text-muted-foreground">
+            {t("favorites.loadingQueue", "加载复习队列中...")}
+          </div>
         ) : !current ? (
           <div className="space-y-3 py-10 text-center">
-            <div className="text-lg font-semibold">今日已完成</div>
-            <div className="text-sm text-muted-foreground">当前没有到期卡片</div>
+            <div className="text-lg font-semibold">{t("favorites.reviewDone", "今日已完成")}</div>
+            <div className="text-sm text-muted-foreground">
+              {t("favorites.reviewDoneDesc", "当前没有到期卡片")}
+            </div>
           </div>
         ) : (
           <div className="space-y-4">
             <div className="text-sm text-muted-foreground">
-              第 {currentIndex + 1} 张 / 共 {queue.length} 张
+              {t("favorites.queuePosition", "第 {{current}} 张 / 共 {{total}} 张", {
+                current: currentIndex + 1,
+                total: queue.length,
+              })}
             </div>
             <div className="rounded-xl border border-border bg-card p-6">
               <div className="mb-3 text-2xl font-bold text-primary">{current.word}</div>
@@ -109,15 +187,22 @@ export function WordRecitePanel({
                   {current.usage && <div className="text-muted-foreground">{current.usage}</div>}
                   {current.example && <div className="italic text-muted-foreground">{current.example}</div>}
                   {current.explanation && <div className="text-muted-foreground">{current.explanation}</div>}
+                  {retention !== null && (
+                    <div className="pt-1 text-[11px] text-muted-foreground/70">
+                      {t("favorites.retention", "保持率")} {Math.round(retention * 100)}%
+                    </div>
+                  )}
                 </div>
               ) : (
-                <div className="text-sm text-muted-foreground">先尝试回忆，再点击“显示答案”</div>
+                <div className="text-sm text-muted-foreground">
+                  {t("favorites.recallHint", "先尝试回忆，再点击“显示答案”")}
+                </div>
               )}
             </div>
 
             {!showAnswer ? (
               <Button className="w-full" onClick={() => setShowAnswer(true)}>
-                显示答案
+                {t("favorites.showAnswer", "显示答案")}
               </Button>
             ) : (
               <div className="grid grid-cols-3 gap-2">
@@ -126,17 +211,17 @@ export function WordRecitePanel({
                   disabled={isSubmitting}
                   onClick={() => void handleGrade("unknown")}
                 >
-                  不认识
+                  {t("favorites.gradeUnknown", "不认识")}
                 </Button>
                 <Button
                   variant="outline"
                   disabled={isSubmitting}
                   onClick={() => void handleGrade("uncertain")}
                 >
-                  模糊
+                  {t("favorites.gradeUncertain", "模糊")}
                 </Button>
                 <Button disabled={isSubmitting} onClick={() => void handleGrade("known")}>
-                  认识
+                  {t("favorites.gradeKnown", "认识")}
                 </Button>
               </div>
             )}

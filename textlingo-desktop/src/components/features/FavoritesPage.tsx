@@ -6,11 +6,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
-import { ArrowLeft, BookOpen, Loader2, SpellCheck, Upload } from "lucide-react";
-import type { Article, FavoriteGrammar, FavoriteVocabulary, WordPack } from "../../types";
+import { ArrowLeft, BookOpen, Flame, Loader2, Plus, Search, SpellCheck, Upload } from "lucide-react";
+import type { Article, FavoriteGrammar, FavoriteVocabulary, ReviewStats, WordPack } from "../../types";
+import { buildAnkiTsv } from "../../lib/ankiExport";
 import { EmptyState, GrammarCard, VocabularyCard } from "./FavoritesCards";
+import { VocabEditDialog, type VocabFormValues } from "./VocabEditDialog";
 import { WordPackManager } from "./WordPackManager";
 import { WordRecitePanel } from "./WordRecitePanel";
+
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 
 interface FavoritesPageProps {
   onBack: () => void;
@@ -44,6 +53,10 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
   const [isCreatePackOpen, setIsCreatePackOpen] = useState(false);
   const [newPackName, setNewPackName] = useState("");
   const [isCreatingPack, setIsCreatingPack] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [stats, setStats] = useState<ReviewStats | null>(null);
+  const [isVocabDialogOpen, setIsVocabDialogOpen] = useState(false);
+  const [editingVocab, setEditingVocab] = useState<FavoriteVocabulary | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const getPackName = (packId: string) => {
@@ -67,8 +80,36 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
   }, [vocabularies]);
 
   const filteredVocabularies = useMemo(() => {
-    if (selectedPackId === "all") return vocabularies;
-    return vocabularies.filter((vocab) => vocab.pack_ids?.includes(selectedPackId));
+    let list =
+      selectedPackId === "all"
+        ? vocabularies
+        : vocabularies.filter((vocab) => vocab.pack_ids?.includes(selectedPackId));
+    const query = searchQuery.trim().toLowerCase();
+    if (query) {
+      list = list.filter(
+        (vocab) =>
+          vocab.word.toLowerCase().includes(query) ||
+          vocab.meaning.toLowerCase().includes(query) ||
+          (vocab.reading ?? "").toLowerCase().includes(query)
+      );
+    }
+    return list;
+  }, [selectedPackId, vocabularies, searchQuery]);
+
+  const loadStats = async (packId: string) => {
+    try {
+      const result = await invoke<ReviewStats>("get_review_stats_cmd", {
+        packId,
+        dateLocal: formatLocalDate(new Date()),
+      });
+      setStats(result);
+    } catch (error) {
+      console.error("Failed to load review stats:", error);
+    }
+  };
+
+  useEffect(() => {
+    void loadStats(selectedPackId);
   }, [selectedPackId, vocabularies]);
 
   const getVocabulariesForPack = (packId: string) => {
@@ -127,6 +168,71 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
       setVocabularies((prev) => prev.filter((item) => item.id !== id));
     } catch (error) {
       console.error("Failed to delete vocabulary:", error);
+    }
+  };
+
+  const handleToggleSuspended = async (vocab: FavoriteVocabulary) => {
+    try {
+      const updated = await invoke<FavoriteVocabulary>("set_vocabulary_suspended_cmd", {
+        vocabularyId: vocab.id,
+        suspended: !vocab.suspended_at,
+      });
+      setVocabularies((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+    } catch (error) {
+      console.error("Failed to toggle suspended:", error);
+    }
+  };
+
+  const handleVocabFormSubmit = async (values: VocabFormValues) => {
+    if (editingVocab) {
+      const updated = await invoke<FavoriteVocabulary>("update_favorite_vocabulary_cmd", {
+        vocabularyId: editingVocab.id,
+        word: values.word,
+        meaning: values.meaning,
+        usage: values.usage || null,
+        explanation: editingVocab.explanation ?? null,
+        example: values.example || null,
+        reading: values.reading || null,
+      });
+      setVocabularies((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+    } else {
+      await invoke<FavoriteVocabulary>("add_favorite_vocabulary_cmd", {
+        word: values.word,
+        meaning: values.meaning,
+        usage: values.usage,
+        explanation: null,
+        example: values.example || null,
+        reading: values.reading || null,
+        sourceArticleId: null,
+        sourceArticleTitle: null,
+        packIds: values.packIds.length ? values.packIds : null,
+      });
+      await loadFavorites();
+    }
+  };
+
+  const openAddVocab = () => {
+    setEditingVocab(undefined);
+    setIsVocabDialogOpen(true);
+  };
+
+  const openEditVocab = (vocab: FavoriteVocabulary) => {
+    setEditingVocab(vocab);
+    setIsVocabDialogOpen(true);
+  };
+
+  const handleExportAnkiTsv = async (packId: string) => {
+    const list = getVocabulariesForPack(packId);
+    if (list.length === 0) return;
+    const filePath = await save({
+      defaultPath: `${getPackName(packId)}-anki.txt`,
+      filters: [{ name: "Anki TSV", extensions: ["txt", "tsv"] }],
+    });
+    if (!filePath) return;
+    try {
+      await invoke("write_text_file", { path: filePath, content: buildAnkiTsv(list) });
+    } catch (error) {
+      console.error("Failed to export Anki TSV:", error);
     }
   };
 
@@ -297,18 +403,66 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
         ) : (
           <div className="flex-1 overflow-y-auto pr-2 min-h-0">
             <TabsContent value="vocabulary" className="mt-0 h-full flex flex-col">
-              <div className="mb-5 flex justify-end">
-                <input
-                  ref={fileInputRef}
-                  className="hidden"
-                  type="file"
-                  accept=".json,.okpack.json"
-                  onChange={handleImportWordPack}
-                />
-                <Button variant="outline" size="sm" className="gap-2" onClick={() => fileInputRef.current?.click()}>
-                  <Upload size={16} />
-                  {t("favorites.importWordPack", "导入单词包")}
-                </Button>
+              {stats && (
+                <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-border/50 bg-card px-4 py-3 text-sm">
+                  <span className="flex items-center gap-1.5 font-medium text-foreground">
+                    <Flame size={15} className="text-[var(--srs-fading)]" />
+                    {t("favorites.statsStreak", "连续打卡 {{count}} 天", { count: stats.streak_days })}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {t("favorites.statsTodayProgress", "今日:新词 {{new}} · 复习 {{review}}", {
+                      new: stats.new_today,
+                      review: stats.review_today,
+                    })}
+                  </span>
+                  <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
+                    <span>{t("favorites.statsTotal", "共 {{count}} 词", { count: stats.total })}</span>
+                    <span className="text-muted-foreground/70">
+                      {t("favorites.statsNew", "未学")} {stats.count_new}
+                    </span>
+                    <span style={{ color: "var(--srs-fading)" }}>
+                      {t("favorites.statsLearning", "学习中")} {stats.count_learning}
+                    </span>
+                    <span style={{ color: "var(--srs-strong)" }}>
+                      {t("favorites.statsReview", "复习中")} {stats.count_review}
+                    </span>
+                    <span>
+                      {t("favorites.mastered", "已掌握")} {stats.count_suspended}
+                    </span>
+                  </span>
+                </div>
+              )}
+
+              <div className="mb-5 flex items-center gap-3">
+                <div className="relative flex-1 max-w-sm">
+                  <Search
+                    size={15}
+                    className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/70"
+                  />
+                  <Input
+                    className="pl-9"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder={t("favorites.searchPlaceholder", "搜索单词、释义或读音")}
+                  />
+                </div>
+                <div className="ml-auto flex items-center gap-2">
+                  <Button variant="outline" size="sm" className="gap-2" onClick={openAddVocab}>
+                    <Plus size={16} />
+                    {t("favorites.addWord", "添加单词")}
+                  </Button>
+                  <input
+                    ref={fileInputRef}
+                    className="hidden"
+                    type="file"
+                    accept=".json,.okpack.json"
+                    onChange={handleImportWordPack}
+                  />
+                  <Button variant="outline" size="sm" className="gap-2" onClick={() => fileInputRef.current?.click()}>
+                    <Upload size={16} />
+                    {t("favorites.importWordPack", "导入单词包")}
+                  </Button>
+                </div>
               </div>
 
               <div className="flex gap-4 min-h-0 pb-8">
@@ -321,6 +475,7 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
                   onCreatePack={() => setIsCreatePackOpen(true)}
                   onCopyWords={(packId) => void handleCopyToClipboard(packId)}
                   onDownloadTxt={(packId) => void handleDownloadTxt(packId)}
+                  onExportAnkiTsv={(packId) => void handleExportAnkiTsv(packId)}
                   onExportWordPack={(packId) => void handleExportWordPack(packId)}
                   onDeletePack={(pack) => void handleDeletePack(pack)}
                   onStartReview={() => setIsReciteOpen(true)}
@@ -341,6 +496,8 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
                           vocab={vocab}
                           article={vocab.source_article_id ? articles.get(vocab.source_article_id) : undefined}
                           onDelete={() => void handleDeleteVocabulary(vocab.id)}
+                          onEdit={() => openEditVocab(vocab)}
+                          onToggleSuspended={() => void handleToggleSuspended(vocab)}
                           onGoToArticle={
                             vocab.source_article_id
                               ? () => handleGoToArticle(vocab.source_article_id as string)
@@ -389,6 +546,15 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
         packId={selectedPackId}
         packName={selectedPackName}
         onReviewed={loadFavorites}
+      />
+
+      <VocabEditDialog
+        open={isVocabDialogOpen}
+        onOpenChange={setIsVocabDialogOpen}
+        vocab={editingVocab}
+        packs={packs}
+        defaultPackId={selectedPackId}
+        onSubmit={handleVocabFormSubmit}
       />
 
       <Dialog

@@ -762,15 +762,6 @@ fn build_word_pack_export_result(
     })
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SrsUpdateResult {
-    pub srs_state: String,
-    pub repetitions: i32,
-    pub interval_days: i32,
-    pub ease_factor: f64,
-    pub due_date: String,
-}
-
 fn normalize_word(word: &str) -> String {
     word.trim().to_lowercase()
 }
@@ -939,53 +930,26 @@ fn sanitize_file_name(name: &str) -> String {
     }
 }
 
-pub fn calculate_sm2_update(
-    repetitions: i32,
-    interval_days: i32,
-    ease_factor: f64,
-    grade: &str,
+/// 距上次复习的本地日期差(规范 §2.7):
+/// last_reviewed_at(UTC)转本地日期作差,下限 0;
+/// 缺失时回退 due_date - interval_days(旧 SM-2 字段)推算;仍失败则 0。
+pub fn elapsed_days_for_review(
+    favorite: &FavoriteVocabulary,
     review_date: chrono::NaiveDate,
-) -> Result<SrsUpdateResult, String> {
-    let q = match grade {
-        "unknown" => 2.0,
-        "uncertain" => 3.0,
-        "known" => 5.0,
-        _ => return Err("Invalid grade, expected unknown|uncertain|known".to_string()),
-    };
-
-    let mut next_repetitions = repetitions.max(0);
-    let mut next_interval_days = interval_days.max(0);
-    let mut next_ease_factor = if ease_factor < 1.3 { 2.5 } else { ease_factor };
-    let next_state;
-
-    if q < 3.0 {
-        next_repetitions = 0;
-        next_interval_days = 1;
-        next_state = "learning".to_string();
-    } else {
-        if next_repetitions == 0 {
-            next_interval_days = 1;
-        } else if next_repetitions == 1 {
-            next_interval_days = 6;
-        } else {
-            next_interval_days = ((next_interval_days as f64) * next_ease_factor).round() as i32;
-        }
-        next_repetitions += 1;
-        next_state = "review".to_string();
+) -> i64 {
+    if let Some(last) = favorite
+        .last_reviewed_at
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+    {
+        let last_local = last.with_timezone(&chrono::Local).date_naive();
+        return (review_date - last_local).num_days().max(0);
     }
-
-    next_ease_factor = (next_ease_factor + (0.1 - (5.0 - q) * (0.08 + (5.0 - q) * 0.02))).max(1.3);
-    let due_date = (review_date + chrono::Duration::days(next_interval_days as i64))
-        .format("%Y-%m-%d")
-        .to_string();
-
-    Ok(SrsUpdateResult {
-        srs_state: next_state,
-        repetitions: next_repetitions,
-        interval_days: next_interval_days,
-        ease_factor: next_ease_factor,
-        due_date,
-    })
+    if let Ok(due) = parse_local_date(&favorite.due_date) {
+        let implied_last = due - chrono::Duration::days(favorite.interval_days.max(0) as i64);
+        return (review_date - implied_last).num_days().max(0);
+    }
+    0
 }
 
 pub fn build_due_vocabulary_queue(
@@ -999,6 +963,8 @@ pub fn build_due_vocabulary_queue(
     let new_limit = new_limit.max(0) as usize;
     let review_limit = review_limit.max(0) as usize;
 
+    // 已掌握/暂停的卡片不进队列(规范 §3)
+    all.retain(|fav| fav.suspended_at.is_none());
     if pack_id != "all" {
         all.retain(|fav| fav.pack_ids.iter().any(|id| id == pack_id));
     }
@@ -1082,12 +1048,113 @@ fn migrate_favorite_vocabularies(app_handle: &AppHandle) -> Result<(), String> {
             changed = true;
         }
 
+        if seed_fsrs_if_needed(&mut favorite) {
+            changed = true;
+        }
+
         if changed {
             persist_favorite_vocabulary(app_handle, &favorite)?;
         }
     }
 
     Ok(())
+}
+
+/// SM-2 → FSRS 一次性种子(规范 §4)。返回是否有修改。
+/// 迁移 fix-up 在 init_app 与每次 list 都会执行,必须以 scheduler_version
+/// 守卫保证幂等:已迁移的卡片(包括已被 FSRS 复习过的)绝不能被重新种子。
+pub fn seed_fsrs_if_needed(favorite: &mut FavoriteVocabulary) -> bool {
+    if favorite.scheduler_version.is_some() {
+        return false;
+    }
+    if favorite.srs_state != "new" && favorite.review_count > 0 {
+        let (stability, difficulty) =
+            crate::fsrs::seed_from_sm2(favorite.interval_days, favorite.ease_factor);
+        favorite.stability = stability;
+        favorite.difficulty = difficulty;
+    }
+    favorite.scheduler_version = Some(crate::fsrs::SCHEDULER_VERSION.to_string());
+    true
+}
+
+/// 复习统计(规范 §6)。纯函数,便于测试。
+/// events 需为全量事件;pack_id == "all" 表示不过滤词包。
+pub fn build_review_stats(
+    cards: &[FavoriteVocabulary],
+    events: &[crate::types::ReviewEvent],
+    pack_id: &str,
+    date_local: &str,
+) -> crate::types::ReviewStats {
+    use std::collections::BTreeSet;
+
+    let in_pack = |card: &FavoriteVocabulary| {
+        pack_id == "all" || card.pack_ids.iter().any(|id| id == pack_id)
+    };
+    let card_ids: HashSet<&str> = cards
+        .iter()
+        .filter(|c| in_pack(c))
+        .map(|c| c.id.as_str())
+        .collect();
+
+    // 今日新学 / 今日复习:按卡去重,新学优先(同一卡当日先 new 后复习只计新学)
+    let mut new_cards: HashSet<&str> = HashSet::new();
+    let mut review_cards: HashSet<&str> = HashSet::new();
+    for event in events {
+        if event.date_local != date_local || !card_ids.contains(event.card_id.as_str()) {
+            continue;
+        }
+        if event.previous_state == "new" {
+            new_cards.insert(event.card_id.as_str());
+        } else {
+            review_cards.insert(event.card_id.as_str());
+        }
+    }
+    let review_today = review_cards.difference(&new_cards).count() as i32;
+
+    // 连续打卡:从今日(或昨日,若今日无事件)起向前连续有事件的天数。
+    // 打卡不过滤词包(打卡是全局习惯指标)。
+    let event_days: BTreeSet<&str> = events.iter().map(|e| e.date_local.as_str()).collect();
+    let mut streak_days = 0;
+    if let Ok(today) = parse_local_date(date_local) {
+        let mut cursor = if event_days.contains(date_local) {
+            today
+        } else {
+            today - chrono::Duration::days(1)
+        };
+        loop {
+            let key = cursor.format("%Y-%m-%d").to_string();
+            if event_days.contains(key.as_str()) {
+                streak_days += 1;
+                cursor -= chrono::Duration::days(1);
+            } else {
+                break;
+            }
+        }
+    }
+
+    let mut stats = crate::types::ReviewStats {
+        new_today: new_cards.len() as i32,
+        review_today,
+        streak_days,
+        total: 0,
+        count_new: 0,
+        count_learning: 0,
+        count_review: 0,
+        count_suspended: 0,
+    };
+    for card in cards.iter().filter(|c| in_pack(c)) {
+        stats.total += 1;
+        if card.suspended_at.is_some() {
+            stats.count_suspended += 1;
+        } else {
+            match card.srs_state.as_str() {
+                "learning" => stats.count_learning += 1,
+                "review" => stats.count_review += 1,
+                _ => stats.count_new += 1,
+            }
+        }
+    }
+    stats
 }
 
 // Initialize the app (ensure directories exist)
@@ -2105,6 +2172,10 @@ pub async fn add_favorite_vocabulary_cmd(
         ease_factor: 2.5,
         repetitions: 0,
         interval_days: 0,
+        stability: 0.0,
+        difficulty: 0.0,
+        scheduler_version: Some(crate::fsrs::SCHEDULER_VERSION.to_string()),
+        suspended_at: None,
         due_date: today_local_date().format("%Y-%m-%d").to_string(),
         last_reviewed_at: None,
         review_count: 0,
@@ -2195,7 +2266,7 @@ pub async fn get_due_vocabulary_queue_cmd(
     )
 }
 
-/// 复习单词并更新 SM-2 状态
+/// 复习单词并更新 FSRS 状态(规范 §2.5),同时追加一条不可变复习事件(§1.3)。
 #[tauri::command]
 pub async fn review_vocabulary_cmd(
     app_handle: AppHandle,
@@ -2204,29 +2275,135 @@ pub async fn review_vocabulary_cmd(
     date_local: String,
 ) -> Result<FavoriteVocabulary, String> {
     let review_date = parse_local_date(&date_local)?;
+    let config = load_config(&app_handle)?.unwrap_or_default();
+    let desired_retention = config.srs_desired_retention;
 
     let json = load_favorite_vocabulary(&app_handle, &vocabulary_id)?;
     let mut favorite: FavoriteVocabulary = serde_json::from_str(&json)
         .map_err(|e| format!("Failed to parse favorite vocabulary: {}", e))?;
 
-    let next = calculate_sm2_update(
-        favorite.repetitions,
-        favorite.interval_days,
-        favorite.ease_factor,
-        &grade,
-        review_date,
+    let grade_value = crate::fsrs::grade_from_str(&grade)?;
+    let previous_state = favorite.srs_state.clone();
+    let elapsed_days = if favorite.stability == 0.0 && favorite.difficulty == 0.0 {
+        0 // new 卡首评
+    } else {
+        elapsed_days_for_review(&favorite, review_date)
+    };
+
+    let next = crate::fsrs::next_review(
+        favorite.stability,
+        favorite.difficulty,
+        elapsed_days,
+        grade_value,
+        desired_retention,
     )?;
 
-    favorite.srs_state = next.srs_state;
-    favorite.repetitions = next.repetitions;
-    favorite.interval_days = next.interval_days;
-    favorite.ease_factor = next.ease_factor;
-    favorite.due_date = next.due_date;
+    favorite.srs_state = next.srs_state.clone();
+    favorite.stability = next.stability;
+    favorite.difficulty = next.difficulty;
+    favorite.scheduler_version = Some(crate::fsrs::SCHEDULER_VERSION.to_string());
+    favorite.due_date = (review_date + chrono::Duration::days(next.interval_days as i64))
+        .format("%Y-%m-%d")
+        .to_string();
     favorite.last_reviewed_at = Some(chrono::Utc::now().to_rfc3339());
     favorite.review_count += 1;
 
+    let event = crate::types::ReviewEvent {
+        id: Uuid::new_v4().to_string(),
+        card_id: favorite.id.clone(),
+        reviewed_at: chrono::Utc::now().to_rfc3339(),
+        date_local: date_local.clone(),
+        grade: grade_value,
+        elapsed_days,
+        previous_state,
+        scheduler_version: crate::fsrs::SCHEDULER_VERSION.to_string(),
+        desired_retention,
+        result_stability: next.stability,
+        result_difficulty: next.difficulty,
+        result_interval_days: next.interval_days,
+        result_state: next.srs_state,
+    };
+    crate::storage::append_review_event(&app_handle, &event)?;
+
     persist_favorite_vocabulary(&app_handle, &favorite)?;
     Ok(favorite)
+}
+
+/// 编辑单词收藏(手动编辑词形/释义/例句等)。
+/// 改词形时:若与其他卡片撞 normalized_word,报错让用户改用合并(删除+加入既有卡)。
+#[tauri::command]
+pub async fn update_favorite_vocabulary_cmd(
+    app_handle: AppHandle,
+    vocabulary_id: String,
+    word: String,
+    meaning: String,
+    usage: Option<String>,
+    explanation: Option<String>,
+    example: Option<String>,
+    reading: Option<String>,
+) -> Result<FavoriteVocabulary, String> {
+    let normalized_input = normalize_word(&word);
+    if normalized_input.is_empty() || meaning.trim().is_empty() {
+        return Err("Word and meaning are required".to_string());
+    }
+
+    let json = load_favorite_vocabulary(&app_handle, &vocabulary_id)?;
+    let mut favorite: FavoriteVocabulary = serde_json::from_str(&json)
+        .map_err(|e| format!("Failed to parse favorite vocabulary: {}", e))?;
+
+    if normalize_word(&favorite.word) != normalized_input {
+        let favorites = load_all_favorite_vocabularies_internal(&app_handle)?;
+        if favorites
+            .iter()
+            .any(|fav| fav.id != vocabulary_id && normalize_word(&fav.word) == normalized_input)
+        {
+            return Err("DUPLICATE_WORD".to_string());
+        }
+    }
+
+    favorite.word = word.trim().to_string();
+    favorite.meaning = meaning.trim().to_string();
+    favorite.usage = usage.unwrap_or_default().trim().to_string();
+    favorite.explanation = explanation.filter(|s| !s.trim().is_empty());
+    favorite.example = example.filter(|s| !s.trim().is_empty());
+    favorite.reading = reading.filter(|s| !s.trim().is_empty());
+
+    persist_favorite_vocabulary(&app_handle, &favorite)?;
+    Ok(favorite)
+}
+
+/// 标记已掌握(暂停复习)/ 恢复复习。FSRS 状态不动(规范 §3)。
+#[tauri::command]
+pub async fn set_vocabulary_suspended_cmd(
+    app_handle: AppHandle,
+    vocabulary_id: String,
+    suspended: bool,
+) -> Result<FavoriteVocabulary, String> {
+    let json = load_favorite_vocabulary(&app_handle, &vocabulary_id)?;
+    let mut favorite: FavoriteVocabulary = serde_json::from_str(&json)
+        .map_err(|e| format!("Failed to parse favorite vocabulary: {}", e))?;
+
+    favorite.suspended_at = if suspended {
+        Some(chrono::Utc::now().to_rfc3339())
+    } else {
+        None
+    };
+
+    persist_favorite_vocabulary(&app_handle, &favorite)?;
+    Ok(favorite)
+}
+
+/// 复习统计(规范 §6):今日新学/复习、连续打卡、状态分布。
+#[tauri::command]
+pub async fn get_review_stats_cmd(
+    app_handle: AppHandle,
+    pack_id: String,
+    date_local: String,
+) -> Result<crate::types::ReviewStats, String> {
+    parse_local_date(&date_local)?;
+    let cards = list_favorite_vocabularies_cmd(app_handle.clone()).await?;
+    let events = crate::storage::list_review_events(&app_handle)?;
+    Ok(build_review_stats(&cards, &events, &pack_id, &date_local))
 }
 
 /// 导出单词包为 OpenKoto JSON 包
@@ -2409,6 +2586,10 @@ pub async fn import_word_pack_cmd(
             ease_factor: 2.5,
             repetitions: 0,
             interval_days: 0,
+            stability: 0.0,
+            difficulty: 0.0,
+            scheduler_version: Some(crate::fsrs::SCHEDULER_VERSION.to_string()),
+            suspended_at: None,
             due_date: today_local_date().format("%Y-%m-%d").to_string(),
             last_reviewed_at: None,
             review_count: 0,

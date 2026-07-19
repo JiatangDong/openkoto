@@ -47,6 +47,8 @@ export interface AppConfig {
   // SRS daily limits
   srs_daily_new_limit?: number;
   srs_daily_review_limit?: number;
+  // FSRS desired retention (0.70–0.97), default 0.9
+  srs_desired_retention?: number;
   // User-configurable prompt features for AI chat
   prompt_features?: PromptFeature[];
   // Subtitle transcription (ASR) provider configs — separate from model_configs

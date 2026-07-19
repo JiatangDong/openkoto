@@ -188,13 +188,33 @@ export interface FavoriteVocabulary {
     source_article_title?: string;
     pack_ids?: string[];
     srs_state?: "new" | "learning" | "review";
+    /** 旧 SM-2 字段(已冻结,仅兼容保留) */
     ease_factor?: number;
     repetitions?: number;
     interval_days?: number;
+    /** FSRS 记忆稳定性;0 = 未初始化 */
+    stability?: number;
+    /** FSRS 难度 [1,10] */
+    difficulty?: number;
+    scheduler_version?: string;
+    /** 非空 = 已掌握/暂停复习 */
+    suspended_at?: string;
     due_date?: string;
     last_reviewed_at?: string;
     review_count?: number;
     created_at: string;
+}
+
+// 复习统计(规范 §6)
+export interface ReviewStats {
+    new_today: number;
+    review_today: number;
+    streak_days: number;
+    total: number;
+    count_new: number;
+    count_learning: number;
+    count_review: number;
+    count_suspended: number;
 }
 
 export interface WordPack {

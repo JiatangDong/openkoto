@@ -8,11 +8,27 @@
 /* 暗色模式变体 */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* 
+/*
  * 注意：主题变量由主题 CSS 文件定义
  * 默认主题是 California（由 ThemeProvider 在启动时应用）
  * 不设置 :root 默认值，让主题 CSS 完全控制颜色
  */
+
+/*
+ * SRS 记忆保持率标色（规范 docs/specs/vocabulary-srs-spec.md §5）
+ * 语义色与城市主题无关：绿=保持良好 琥珀=正在衰减 红=可能遗忘
+ */
+:root {
+  --srs-strong: oklch(0.6 0.14 150);
+  --srs-fading: oklch(0.68 0.14 70);
+  --srs-weak: oklch(0.58 0.19 27);
+}
+
+.dark {
+  --srs-strong: oklch(0.72 0.15 150);
+  --srs-fading: oklch(0.78 0.13 78);
+  --srs-weak: oklch(0.68 0.18 27);
+}
 
 @theme inline {
   --color-background: var(--background);

@@ -116,6 +116,9 @@ pub struct AppConfig {
     /// Daily limit for review cards in SRS
     #[serde(default = "default_srs_daily_review_limit")]
     pub srs_daily_review_limit: i32,
+    /// FSRS 期望保持率(0.70–0.97),默认 0.9
+    #[serde(default = "default_srs_desired_retention")]
+    pub srs_desired_retention: f64,
     /// User-editable prompt features for chat and quick actions
     #[serde(
         default = "default_prompt_features",
@@ -145,6 +148,7 @@ impl Default for AppConfig {
             auth_token: None,
             srs_daily_new_limit: default_srs_daily_new_limit(),
             srs_daily_review_limit: default_srs_daily_review_limit(),
+            srs_desired_retention: default_srs_desired_retention(),
             prompt_features: default_prompt_features(),
             asr_configs: Vec::new(),
             active_asr_model_id: None,
@@ -270,6 +274,10 @@ fn default_srs_daily_new_limit() -> i32 {
 
 fn default_srs_daily_review_limit() -> i32 {
     100
+}
+
+fn default_srs_desired_retention() -> f64 {
+    0.9
 }
 
 fn default_srs_state() -> String {
@@ -644,12 +652,27 @@ pub struct FavoriteVocabulary {
     pub pack_ids: Vec<String>,
     #[serde(default = "default_srs_state")]
     pub srs_state: String,
+    /// 旧 SM-2 字段(已冻结,仅保留用于回滚/旧版本兼容,复习不再更新)
     #[serde(default = "default_srs_ease_factor")]
     pub ease_factor: f64,
+    /// 旧 SM-2 字段(已冻结)
     #[serde(default = "default_zero")]
     pub repetitions: i32,
+    /// 旧 SM-2 字段(已冻结)
     #[serde(default = "default_zero")]
     pub interval_days: i32,
+    /// FSRS 记忆稳定性;0 = 未初始化(new 卡)。规范 §1.1
+    #[serde(default)]
+    pub stability: f64,
+    /// FSRS 难度 ∈ [1,10];0 = 未初始化
+    #[serde(default)]
+    pub difficulty: f64,
+    /// "fsrs6";None 表示尚未做 SM-2→FSRS 一次性迁移
+    #[serde(default)]
+    pub scheduler_version: Option<String>,
+    /// 非空 = 已掌握/暂停复习(RFC3339);队列排除,恢复时置空
+    #[serde(default)]
+    pub suspended_at: Option<String>,
     #[serde(default = "default_srs_due_date")]
     pub due_date: String,
     #[serde(default)]
@@ -657,6 +680,42 @@ pub struct FavoriteVocabulary {
     #[serde(default = "default_zero")]
     pub review_count: i32,
     pub created_at: String,
+}
+
+/// 复习事件(append-only,不可变;规范 §1.3)。
+/// 存储:favorites/review_log/YYYY-MM.jsonl,一行一个事件。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewEvent {
+    pub id: String,
+    pub card_id: String,
+    /// UTC RFC3339
+    pub reviewed_at: String,
+    /// 复习时的本地日期 "YYYY-MM-DD"
+    pub date_local: String,
+    /// 1=Again 2=Hard 3=Good 4=Easy
+    pub grade: u8,
+    pub elapsed_days: i64,
+    /// 复习前状态("new" 时计入"今日新学")
+    pub previous_state: String,
+    pub scheduler_version: String,
+    pub desired_retention: f64,
+    pub result_stability: f64,
+    pub result_difficulty: f64,
+    pub result_interval_days: i32,
+    pub result_state: String,
+}
+
+/// 复习统计(规范 §6),由事件日志 + 卡片状态推导。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewStats {
+    pub new_today: i32,
+    pub review_today: i32,
+    pub streak_days: i32,
+    pub total: i32,
+    pub count_new: i32,
+    pub count_learning: i32,
+    pub count_review: i32,
+    pub count_suspended: i32,
 }
 
 /// 单词包 - 用于组织和分享单词集合

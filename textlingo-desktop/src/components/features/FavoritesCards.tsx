@@ -1,5 +1,7 @@
-import { BookOpen, ExternalLink, Trash2 } from "lucide-react";
+import { BookOpen, CircleCheck, ExternalLink, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import type { Article, FavoriteGrammar, FavoriteVocabulary } from "../../types";
+import { currentRetention, retentionBucket, type RetentionBucket } from "../../lib/srs";
 import { Button } from "../ui/button";
 
 function formatLocalDate(dateString?: string): string {
@@ -7,6 +9,37 @@ function formatLocalDate(dateString?: string): string {
   const date = new Date(dateString);
   if (Number.isNaN(date.getTime())) return "-";
   return date.toLocaleDateString("zh-CN");
+}
+
+const BUCKET_STYLES: Record<RetentionBucket, { dot: string; badge: string }> = {
+  new: { dot: "bg-muted-foreground/40", badge: "bg-muted/60 text-muted-foreground" },
+  strong: { dot: "bg-[var(--srs-strong)]", badge: "bg-[var(--srs-strong)]/15 text-[var(--srs-strong)]" },
+  fading: { dot: "bg-[var(--srs-fading)]", badge: "bg-[var(--srs-fading)]/15 text-[var(--srs-fading)]" },
+  weak: { dot: "bg-[var(--srs-weak)]", badge: "bg-[var(--srs-weak)]/15 text-[var(--srs-weak)]" },
+};
+
+/** 记忆保持率徽章(规范 §5):new 灰点;其余按保持率显示 绿/琥珀/红 + 百分比。 */
+function RetentionBadge({ vocab }: { vocab: FavoriteVocabulary }) {
+  const { t } = useTranslation();
+  if (vocab.suspended_at) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 text-[10px] text-muted-foreground">
+        <CircleCheck size={10} />
+        {t("favorites.mastered", "已掌握")}
+      </span>
+    );
+  }
+  const bucket = retentionBucket(vocab);
+  const retention = currentRetention(vocab);
+  const style = BUCKET_STYLES[bucket];
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] ${style.badge}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} />
+      {bucket === "new"
+        ? t("favorites.retentionNew", "未学")
+        : `${t("favorites.retention", "保持率")} ${Math.round((retention ?? 0) * 100)}%`}
+    </span>
+  );
 }
 
 export function EmptyState({
@@ -33,15 +66,25 @@ export function VocabularyCard({
   vocab,
   article,
   onDelete,
+  onEdit,
+  onToggleSuspended,
   onGoToArticle,
 }: {
   vocab: FavoriteVocabulary;
   article?: Article;
   onDelete: () => void;
+  onEdit?: () => void;
+  onToggleSuspended?: () => void;
   onGoToArticle?: () => void;
 }) {
+  const { t } = useTranslation();
+  const isSuspended = Boolean(vocab.suspended_at);
   return (
-    <div className="group relative rounded-xl border border-border/50 bg-card p-5 shadow-sm transition-all duration-300 hover:border-primary/20 hover:bg-gradient-to-br hover:from-card hover:to-primary/5 hover:shadow-md">
+    <div
+      className={`group relative rounded-xl border border-border/50 bg-card p-5 shadow-sm transition-all duration-300 hover:border-primary/20 hover:bg-gradient-to-br hover:from-card hover:to-primary/5 hover:shadow-md ${
+        isSuspended ? "opacity-60" : ""
+      }`}
+    >
       <div className="mb-3 flex items-start justify-between">
         <div className="flex items-baseline gap-2">
           <span className="text-lg font-bold text-primary">{vocab.word}</span>
@@ -57,6 +100,32 @@ export function VocabularyCard({
               title={article.title}
             >
               <ExternalLink size={14} />
+            </Button>
+          )}
+          {onEdit && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:text-primary"
+              onClick={onEdit}
+              title={t("favorites.editWordTitle", "编辑单词")}
+            >
+              <Pencil size={14} />
+            </Button>
+          )}
+          {onToggleSuspended && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:text-primary"
+              onClick={onToggleSuspended}
+              title={
+                isSuspended
+                  ? t("favorites.resumeReview", "恢复复习")
+                  : t("favorites.markMastered", "标记已掌握")
+              }
+            >
+              {isSuspended ? <RotateCcw size={14} /> : <CircleCheck size={14} />}
             </Button>
           )}
           <Button
@@ -80,8 +149,11 @@ export function VocabularyCard({
         {vocab.explanation && <div className="line-clamp-3 text-xs text-muted-foreground">{vocab.explanation}</div>}
       </div>
 
-      <div className="mt-2 rounded-md bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground">
-        状态: {vocab.srs_state ?? "new"} | 到期: {vocab.due_date ?? "-"} | 复习: {vocab.review_count ?? 0}
+      <div className="mt-2 flex items-center justify-between gap-2 rounded-md bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground">
+        <span>
+          {t("favorites.cardDue", "到期")}: {vocab.due_date ?? "-"} · {t("favorites.cardReviews", "复习")}: {vocab.review_count ?? 0}
+        </span>
+        <RetentionBadge vocab={vocab} />
       </div>
 
       {vocab.source_article_title && (

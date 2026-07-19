@@ -11,7 +11,7 @@
 
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { Button } from "../ui/button";
-import { ChevronDown, ChevronUp, Loader2, FileText, Minimize2, Download, X, FileJson, FileType, FolderOpen, Music, Eye, Languages, Split, Check } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, FileText, Minimize2, Download, X, FileJson, FileType, FolderOpen, Music, Eye, Languages, Split, Check, Mic } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -78,6 +78,8 @@ interface VideoSubtitlePlayerProps {
     isAudio?: boolean;
     /** 打开 KTV 导出页面 */
     onOpenKtvExport?: () => void;
+    /** 打开 设置 → 字幕转写 分区（用于未配置 ASR 时的推荐引导） */
+    onOpenAsrSettings?: () => void;
     /** 切换阅读模式 */
     onViewModeChange?: (mode: ViewMode) => void;
 }
@@ -88,15 +90,18 @@ function ExtractSubtitlesMenu({
     disabled,
     asrOptions,
     onExtract,
+    onOpenAsrSettings,
 }: {
     trigger: React.ReactNode;
     disabled?: boolean;
     asrOptions?: AsrExtractOptions;
     onExtract: (id?: string) => void;
+    onOpenAsrSettings?: () => void;
 }) {
     const { t } = useTranslation();
     const opts = asrOptions ?? { configs: [], llmModelLabel: null };
-    const hasAny = opts.configs.length > 0 || !!opts.llmModelLabel;
+    // 是否已配置专门的 ASR 模型（Gemini/Kimi 听写只是回退，不算）
+    const hasRealAsr = opts.configs.length > 0;
 
     return (
         <DropdownMenu>
@@ -104,7 +109,7 @@ function ExtractSubtitlesMenu({
                 {trigger}
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-[15rem]">
-                {hasAny ? (
+                {hasRealAsr ? (
                     <>
                         <DropdownMenuLabel>{t("subtitleExtraction.chooseModel", "选择转写模型")}</DropdownMenuLabel>
                         {opts.configs.map((c) => (
@@ -138,9 +143,38 @@ function ExtractSubtitlesMenu({
                         )}
                     </>
                 ) : (
-                    <DropdownMenuItem disabled>
-                        {t("subtitleExtraction.addAsrInSettings", "请在 设置 → 字幕转写 添加转写模型")}
-                    </DropdownMenuItem>
+                    <>
+                        {/* 未配置专门 ASR 模型：可点击跳转到 设置 → 字幕转写 的推荐引导项 */}
+                        <DropdownMenuItem
+                            onSelect={() => onOpenAsrSettings?.()}
+                            className="flex-col items-start gap-0.5"
+                        >
+                            <span className="flex items-center gap-1.5 font-medium">
+                                <Mic size={14} className="text-primary" />
+                                {t("subtitleExtraction.recommendAsr", "配置 ASR 模型，字幕更准更快")}
+                                <span className="ml-1 text-[10px] leading-none px-1.5 py-0.5 rounded bg-primary text-primary-foreground">
+                                    {t("subtitleExtraction.recommendedBadge", "推荐")}
+                                </span>
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                                {t("subtitleExtraction.recommendAsrHint", "whisper-1 等专用模型比 Gemini/Kimi 听写更精确")}
+                            </span>
+                        </DropdownMenuItem>
+                        {opts.llmModelLabel && (
+                            <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                    onSelect={() => onExtract("__llm__")}
+                                    className="flex-col items-start gap-0.5"
+                                >
+                                    <span className="font-medium">
+                                        {t("subtitleExtraction.llmListen", "Gemini/Kimi 听写")}
+                                    </span>
+                                    <span className="text-xs text-muted-foreground">{opts.llmModelLabel}</span>
+                                </DropdownMenuItem>
+                            </>
+                        )}
+                    </>
                 )}
             </DropdownMenuContent>
         </DropdownMenu>
@@ -168,6 +202,7 @@ export function VideoSubtitlePlayer({
     translationProgress,
     isAudio = false,
     onOpenKtvExport,
+    onOpenAsrSettings,
     onViewModeChange,
 }: VideoSubtitlePlayerProps) {
     const { t } = useTranslation();
@@ -553,6 +588,7 @@ export function VideoSubtitlePlayer({
                                     disabled={isExtractingSubtitles}
                                     asrOptions={asrOptions}
                                     onExtract={(id) => onExtractSubtitles(id)}
+                                    onOpenAsrSettings={onOpenAsrSettings}
                                     trigger={
                                         <Button disabled={isExtractingSubtitles} className="gap-2">
                                             {isExtractingSubtitles ? (
@@ -936,6 +972,7 @@ export function VideoSubtitlePlayer({
                             disabled={isExtractingSubtitles}
                             asrOptions={asrOptions}
                             onExtract={(id) => onExtractSubtitles(id)}
+                            onOpenAsrSettings={onOpenAsrSettings}
                             trigger={
                                 <Button
                                     variant="outline"

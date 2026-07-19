@@ -72,6 +72,8 @@ interface ArticleReaderProps {
   hasPrev?: boolean;
   onUpdate?: () => void;
   onOpenKtvExport?: () => void;
+  /** 打开 设置 → 字幕转写 分区 */
+  onOpenAsrSettings?: () => void;
 }
 
 export function ArticleReader({
@@ -83,6 +85,7 @@ export function ArticleReader({
   hasPrev,
   onUpdate,
   onOpenKtvExport,
+  onOpenAsrSettings,
 }: ArticleReaderProps) {
   const { t } = useTranslation();
   const assistantModeStorageKey = "article-reader-assistant-mode";
@@ -1292,6 +1295,7 @@ export function ArticleReader({
                         translationProgress={translationProgress}
                         isAudio={isAudioFile}
                         onOpenKtvExport={onOpenKtvExport}
+                        onOpenAsrSettings={onOpenAsrSettings}
                         onViewModeChange={setViewMode}
                       />
                     );

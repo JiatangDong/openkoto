@@ -237,6 +237,7 @@ pub fn update_article_active_mind_map_artifact(
 const FAVORITES_VOCAB_DIR: &str = "favorites/vocabulary";
 const FAVORITES_GRAMMAR_DIR: &str = "favorites/grammar";
 const FAVORITES_PACKS_DIR: &str = "favorites/packs";
+const FAVORITES_REVIEW_LOG_DIR: &str = "favorites/review_log";
 
 /// 确保收藏夹目录存在
 pub fn ensure_favorites_dirs(app_handle: &AppHandle) -> Result<(), String> {
@@ -244,6 +245,7 @@ pub fn ensure_favorites_dirs(app_handle: &AppHandle) -> Result<(), String> {
     let vocab_dir = data_dir.join(FAVORITES_VOCAB_DIR);
     let grammar_dir = data_dir.join(FAVORITES_GRAMMAR_DIR);
     let packs_dir = data_dir.join(FAVORITES_PACKS_DIR);
+    let review_log_dir = data_dir.join(FAVORITES_REVIEW_LOG_DIR);
 
     fs::create_dir_all(&vocab_dir)
         .map_err(|e| format!("Failed to create vocabulary favorites directory: {}", e))?;
@@ -251,8 +253,78 @@ pub fn ensure_favorites_dirs(app_handle: &AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Failed to create grammar favorites directory: {}", e))?;
     fs::create_dir_all(&packs_dir)
         .map_err(|e| format!("Failed to create word packs directory: {}", e))?;
+    fs::create_dir_all(&review_log_dir)
+        .map_err(|e| format!("Failed to create review log directory: {}", e))?;
 
     Ok(())
+}
+
+// ----------------------------------------------------------------------------
+// 复习事件日志(append-only JSONL,按本地年月分文件;规范 §1.3)
+// ----------------------------------------------------------------------------
+
+/// 追加一条复习事件到 favorites/review_log/YYYY-MM.jsonl。
+/// 事件不可变:只追加,永不改写既有行。
+pub fn append_review_event(
+    app_handle: &AppHandle,
+    event: &crate::types::ReviewEvent,
+) -> Result<(), String> {
+    ensure_favorites_dirs(app_handle)?;
+    let data_dir = get_app_data_dir(app_handle)?;
+    // date_local 固定为 "YYYY-MM-DD",取前 7 位作月份文件名
+    let month = event.date_local.get(..7).unwrap_or("unknown");
+    let path = data_dir
+        .join(FAVORITES_REVIEW_LOG_DIR)
+        .join(format!("{month}.jsonl"));
+
+    let mut line = serde_json::to_string(event)
+        .map_err(|e| format!("Failed to serialize review event: {}", e))?;
+    line.push('\n');
+
+    use std::io::Write;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("Failed to open review log: {}", e))?;
+    file.write_all(line.as_bytes())
+        .map_err(|e| format!("Failed to append review event: {}", e))?;
+    Ok(())
+}
+
+/// 读取全部复习事件(按文件名升序);无法解析的行(如崩溃产生的半行)静默跳过。
+pub fn list_review_events(
+    app_handle: &AppHandle,
+) -> Result<Vec<crate::types::ReviewEvent>, String> {
+    let data_dir = get_app_data_dir(app_handle)?;
+    let dir = data_dir.join(FAVORITES_REVIEW_LOG_DIR);
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut paths: Vec<PathBuf> = fs::read_dir(&dir)
+        .map_err(|e| format!("Failed to read review log directory: {}", e))?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "jsonl"))
+        .collect();
+    paths.sort();
+
+    let mut events = Vec::new();
+    for path in paths {
+        let content = fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read review log file: {}", e))?;
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            if let Ok(event) = serde_json::from_str::<crate::types::ReviewEvent>(line) {
+                events.push(event);
+            }
+        }
+    }
+    Ok(events)
 }
 
 /// 保存单词收藏

@@ -3,6 +3,7 @@ pub mod agent_worker;
 mod ai_service;
 pub mod commands;
 pub mod ffmpeg;
+pub mod fsrs;
 pub mod ktv_export;
 pub mod logging;
 pub mod moonshot;
@@ -79,6 +80,9 @@ pub fn run() {
             commands::set_vocabulary_pack_ids_cmd,
             commands::get_due_vocabulary_queue_cmd,
             commands::review_vocabulary_cmd,
+            commands::update_favorite_vocabulary_cmd,
+            commands::set_vocabulary_suspended_cmd,
+            commands::get_review_stats_cmd,
             commands::export_word_pack_cmd,
             commands::import_word_pack_cmd,
             commands::delete_favorite_vocabulary_cmd,

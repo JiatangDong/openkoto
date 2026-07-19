@@ -23,11 +23,29 @@ fn make_vocab(
         ease_factor: 2.5,
         repetitions: 0,
         interval_days: 0,
+        stability: 0.0,
+        difficulty: 0.0,
+        scheduler_version: Some("fsrs6".to_string()),
+        suspended_at: None,
         due_date: due_date.to_string(),
         last_reviewed_at: last_reviewed_at.map(|s| s.to_string()),
         review_count: 0,
         created_at: "2026-02-16T00:00:00Z".to_string(),
     }
+}
+
+#[test]
+fn queue_excludes_suspended_cards() {
+    let mut suspended = make_vocab("s1", "review", "2026-02-16", None, vec!["p1"]);
+    suspended.suspended_at = Some("2026-02-15T00:00:00Z".to_string());
+    let all = vec![
+        suspended,
+        make_vocab("n1", "new", "2026-02-16", None, vec!["p1"]),
+    ];
+
+    let queue = build_due_vocabulary_queue(all, "p1", "2026-02-16", 20, 100).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].id, "n1");
 }
 
 #[test]

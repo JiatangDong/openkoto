@@ -9,7 +9,7 @@ import { BookReader } from "./components/features/BookReader";
 import { KtvExportPage } from "./components/features/KtvExportPage";
 import { NewMaterialDialog } from "./components/features/NewMaterialDialog";
 import { FavoritesPage } from "./components/features/FavoritesPage";
-import { SettingsButton } from "./components/features/SettingsDialog";
+import { SettingsButton, SettingsDialog, type SettingsSectionKey } from "./components/features/SettingsDialog";
 import { ApiQuickSwitcher } from "./components/features/ApiQuickSwitcher";
 import { OnboardingDialog } from "./components/features/OnboardingDialog";
 import { Button } from "./components/ui/button";
@@ -34,6 +34,14 @@ function App() {
   const [activeScreen, setActiveScreen] = useState<"home" | "favorites" | "reader" | "ktv-export">("home");
   const [showOnboarding, setShowOnboarding] = useState(false);
   const onboardingDismissedRef = useRef(false);
+
+  // 设置弹窗（上提到 App，便于从其他组件按指定分区打开）
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionKey>("models");
+  const openSettings = (section: SettingsSectionKey = "models") => {
+    setSettingsSection(section);
+    setSettingsOpen(true);
+  };
 
   // 拖放导入状态
   const [isDragging, setIsDragging] = useState(false);
@@ -313,7 +321,7 @@ function App() {
               <Plus size={16} />
               {t("header.newMaterial")}
             </Button>
-            <SettingsButton onSave={handleArticleUpdate} />
+            <SettingsButton onOpen={() => openSettings("models")} />
           </div>
         </header>
       )}
@@ -335,6 +343,12 @@ function App() {
           }}
         />
         <UpdateChecker />
+        <SettingsDialog
+          isOpen={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          onSave={handleArticleUpdate}
+          initialSection={settingsSection}
+        />
         {selectedArticle ? (
           activeScreen === "ktv-export" ? (
             <KtvExportPage
@@ -357,6 +371,7 @@ function App() {
               hasPrev={selectedIndex > 0}
               onUpdate={handleArticleUpdate}
               onOpenKtvExport={() => setActiveScreen("ktv-export")}
+              onOpenAsrSettings={() => openSettings("transcription")}
             />
           )
         ) : showFavorites || activeScreen === "favorites" ? (
