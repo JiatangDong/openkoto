@@ -1,0 +1,87 @@
+import Foundation
+
+/// Prompt 常量库（设计文档 §4.3）。
+///
+/// 以**语义与输出 schema 对齐**为准移植桌面 `ai_service.rs`，而非依赖易漂移的源码行号。
+/// 每个 Prompt 分配稳定 `version`；Prompt 变化时 bump version，并让共享 golden fixtures 发现漂移。
+public enum PromptLibrary {
+    /// 逐句精讲 Prompt 版本。写入 `explanation_json.prompt_version`，
+    /// 正文/目标语言/Prompt 变化时据此判定精讲结果是否过期（设计文档 §3.2）。
+    public static let segmentExplainVersion = "explain-v1"
+
+    /// 纯翻译 Prompt 版本（快翻/全文翻译，无精讲）。
+    public static let segmentTranslateVersion = "translate-v1"
+
+    /// 目标语言代码 → prompt 内使用的母语名（对齐 `segment_translate_explain` 映射表）。
+    public static func nativeLanguageName(for targetLanguage: String) -> String {
+        switch targetLanguage {
+        case "zh", "zh-CN": return "中文"
+        case "zh-TW": return "繁體中文"
+        case "en": return "English"
+        case "ja": return "Japanese"
+        case "ko": return "Korean"
+        case "es": return "Español"
+        case "fr": return "Français"
+        case "de": return "Deutsch"
+        case "ru": return "Русский"
+        case "ar": return "العربية"
+        default: return "中文"
+        }
+    }
+
+    /// 逐句精讲 system prompt（对齐 `segment_translate_explain`，输出 schema 与桌面一致）。
+    /// user message 固定为 `"Analyze this: {text}"`。
+    public static func segmentExplainSystemPrompt(text: String, targetLanguage: String) -> String {
+        let lang = nativeLanguageName(for: targetLanguage)
+        return """
+        You are a professional language learning assistant. The user's native language is \(lang). Please analyze the following text segment comprehensively and return the result strictly in the following JSON format. Do NOT add any extra explanations or markdown formatting outside the JSON block.
+
+        User's Native Language: \(lang)
+
+        Text to Analyze:
+        ---
+        \(text)
+        ---
+
+        Please strictly adhere to this JSON structure (all keys must be in English):
+        {
+          "translation": "Translate the text into natural, fluent \(lang)",
+          "explanation": "Explain the text in \(lang), covering context, tone, and cultural background. Use Markdown formatting.",
+          "vocabulary": [
+            {
+              "word": "The word or phrase from the text",
+              "reading": "Pronunciation/Reading (e.g., Hiragana for Japanese, IPA for English)",
+              "meaning": "Core meaning in the context, explained in \(lang)",
+              "usage": "Usage notes and collocations in \(lang)",
+              "example": "Example sentence containing the word, with \(lang) translation"
+            }
+          ],
+          "grammar_points": [
+            {
+              "point": "Name of the grammar point",
+              "explanation": "Detailed explanation in \(lang)",
+              "example": "Example sentence using the grammar point, with \(lang) translation"
+            }
+          ],
+          "cultural_context": "Cultural background info in \(lang) (if applicable, else null)",
+          "difficulty_level": "beginner | intermediate | advanced",
+          "learning_tips": "Learning advice for this segment in \(lang)"
+        }
+
+        Ensure all explanations, meanings, and descriptive text are written in \(lang).
+        """
+    }
+
+    /// 精讲请求的 user message（对齐 Rust `format!("Analyze this: {}", text)`）。
+    public static func analyzeUserMessage(text: String) -> String {
+        "Analyze this: \(text)"
+    }
+
+    /// 纯翻译 system prompt（对齐桌面 `ai_service.rs::translate`）。
+    /// user message 直接为原文；只返回译文，不带解释。
+    public static func segmentTranslateSystemPrompt(targetLanguage: String) -> String {
+        let lang = nativeLanguageName(for: targetLanguage)
+        return "You are a professional translator. Translate the following text to \(lang). "
+            + "Preserve the original meaning and tone. Only return the translated text without any explanations."
+    }
+}

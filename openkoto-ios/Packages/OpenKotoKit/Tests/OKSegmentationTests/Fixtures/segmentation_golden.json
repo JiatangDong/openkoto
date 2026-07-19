@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "note": "Shared golden fixtures for sentence segmentation. Must stay 1:1 with the Rust implementation in textlingo-desktop/src-tauri/src/commands.rs (split_into_sentences / is_abbreviation). Any change to segmentation behavior on either side must update this file and both test suites.",
+  "cases": [
+    {
+      "name": "japanese_basic",
+      "input": "こんな夢を見た。女はもう死にますと云う。",
+      "expected": [
+        { "text": "こんな夢を見た。", "newParagraph": true },
+        { "text": "女はもう死にますと云う。", "newParagraph": false }
+      ]
+    },
+    {
+      "name": "paragraph_marking",
+      "input": "第一段第一句。第一段第二句。\n第二段第一句。",
+      "expected": [
+        { "text": "第一段第一句。", "newParagraph": true },
+        { "text": "第一段第二句。", "newParagraph": false },
+        { "text": "第二段第一句。", "newParagraph": true }
+      ]
+    },
+    {
+      "name": "empty_lines_dropped",
+      "input": "\n\n  \nこんにちは。\n\n",
+      "expected": [
+        { "text": "こんにちは。", "newParagraph": true }
+      ]
+    },
+    {
+      "name": "trailing_without_terminator",
+      "input": "句点で終わる。終わらない行",
+      "expected": [
+        { "text": "句点で終わる。", "newParagraph": true },
+        { "text": "終わらない行", "newParagraph": false }
+      ]
+    },
+    {
+      "name": "title_line_no_terminator",
+      "input": "just a title line",
+      "expected": [
+        { "text": "just a title line", "newParagraph": true }
+      ]
+    },
+    {
+      "name": "abbreviation_mr_word_list",
+      "input": "Mr. Smith went home. He was tired.",
+      "expected": [
+        { "text": "Mr. Smith went home.", "newParagraph": true },
+        { "text": "He was tired.", "newParagraph": false }
+      ]
+    },
+    {
+      "name": "abbreviation_dot_followed_by_letter",
+      "input": "The U.S.A. is big.",
+      "expected": [
+        { "text": "The U.S.A. is big.", "newParagraph": true }
+      ]
+    },
+    {
+      "name": "closing_double_quote_merge",
+      "input": "He said \"Go home.\" She left.",
+      "expected": [
+        { "text": "He said \"Go home.\"", "newParagraph": true },
+        { "text": "She left.", "newParagraph": false }
+      ]
+    },
+    {
+      "name": "closing_paren_merge",
+      "input": "(See note.) Next sentence.",
+      "expected": [
+        { "text": "(See note.)", "newParagraph": true },
+        { "text": "Next sentence.", "newParagraph": false }
+      ]
+    },
+    {
+      "name": "mixed_cjk_english",
+      "input": "今日はいい天気です。It is sunny today. 散歩しましょう！",
+      "expected": [
+        { "text": "今日はいい天気です。", "newParagraph": true },
+        { "text": "It is sunny today.", "newParagraph": false },
+        { "text": "散歩しましょう！", "newParagraph": false }
+      ]
+    },
+    {
+      "name": "halfwidth_period_between_digits_quirk",
+      "input": "3.14 is pi.",
+      "expected": [
+        { "text": "3.", "newParagraph": true },
+        { "text": "14 is pi.", "newParagraph": false }
+      ]
+    },
+    {
+      "name": "crlf_paragraph_split",
+      "input": "line one.\r\nline two.",
+      "expected": [
+        { "text": "line one.", "newParagraph": true },
+        { "text": "line two.", "newParagraph": true }
+      ]
+    }
+  ]
+}

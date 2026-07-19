@@ -1,0 +1,71 @@
+import Foundation
+
+/// Share Extension 与主 App 之间的 App Group 收件箱（设计文档 §6.3）。
+///
+/// 扩展只向 inbox 目录**原子**写入 `ImportEnvelope` JSON（不访问主库）；
+/// 主 App 启动时 `drain()` 读取并清空。坏文件跳过并删除，保证队列不卡死。
+public struct ShareInbox: Sendable {
+    /// App Group 标识——需在主 App 与扩展两端 entitlements 中声明一致。
+    public static let appGroupID = "group.com.openkoto.ios"
+
+    private let directory: URL
+
+    private static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }()
+
+    private static let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
+
+    /// 用 App Group 容器初始化；容器不可用（缺 entitlement）时返回 nil。
+    public init?(appGroupID: String = ShareInbox.appGroupID) {
+        guard let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: appGroupID)
+        else { return nil }
+        self.directory = container.appendingPathComponent("Inbox", isDirectory: true)
+    }
+
+    /// 自定义目录初始化（测试用）。
+    public init(directory: URL) {
+        self.directory = directory
+    }
+
+    /// 原子写入一个信封（扩展侧）。文件名用 `envelope.id` 保证唯一、幂等。
+    public func write(_ envelope: ImportEnvelope) throws {
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true)
+        let data = try Self.encoder.encode(envelope)
+        let url = directory.appendingPathComponent("\(envelope.id.uuidString).json")
+        try data.write(to: url, options: .atomic)
+    }
+
+    /// 读取并删除全部信封（主 App 侧），按 `createdAt` 升序返回。坏文件跳过并删除。
+    @discardableResult
+    public func drain() -> [ImportEnvelope] {
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil)
+        else { return [] }
+        var envelopes: [ImportEnvelope] = []
+        for file in files where file.pathExtension == "json" {
+            defer { try? fm.removeItem(at: file) }
+            guard let data = try? Data(contentsOf: file),
+                  let envelope = try? Self.decoder.decode(ImportEnvelope.self, from: data)
+            else { continue }
+            envelopes.append(envelope)
+        }
+        return envelopes.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// 待处理信封数（不删除；供 UI 徽标，可选）。
+    public var pendingCount: Int {
+        (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil))?
+            .filter { $0.pathExtension == "json" }.count ?? 0
+    }
+}

@@ -1,0 +1,376 @@
+import Foundation
+
+// 领域模型：强类型（UUID / Date / enum）。
+// 跨端传输与 SQLite 编解码使用 snake_case WireDTO（M2 引入），
+// 桌面字段语义见 textlingo-desktop/src-tauri/src/types.rs 与设计文档 §3.2。
+
+public enum SourceType: String, Codable, Sendable, CaseIterable {
+    case article
+    case web
+}
+
+public enum SRSState: String, Codable, Sendable {
+    case new
+    case learning
+    case review
+}
+
+public struct Article: Codable, Identifiable, Sendable, Hashable {
+    public var id: UUID
+    public var title: String
+    public var content: String
+    public var sourceType: SourceType?
+    public var sourceURL: String?
+    public var createdAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        title: String,
+        content: String,
+        sourceType: SourceType? = .article,
+        sourceURL: String? = nil,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.title = title
+        self.content = content
+        self.sourceType = sourceType
+        self.sourceURL = sourceURL
+        self.createdAt = createdAt
+    }
+}
+
+public struct ArticleSegment: Codable, Identifiable, Sendable, Hashable {
+    public var id: UUID
+    public var articleId: UUID
+    public var order: Int
+    public var text: String
+    /// 注音/furigana 行（独立一行显示，非 ruby）
+    public var readingText: String?
+    public var translation: String?
+    public var explanation: SegmentExplanation?
+    public var isNewParagraph: Bool
+    public var createdAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        articleId: UUID,
+        order: Int,
+        text: String,
+        readingText: String? = nil,
+        translation: String? = nil,
+        explanation: SegmentExplanation? = nil,
+        isNewParagraph: Bool = false,
+        createdAt: Date = .now
+    ) {
+        self.id = id
+        self.articleId = articleId
+        self.order = order
+        self.text = text
+        self.readingText = readingText
+        self.translation = translation
+        self.explanation = explanation
+        self.isNewParagraph = isNewParagraph
+        self.createdAt = createdAt
+    }
+}
+
+public struct SegmentExplanation: Codable, Sendable, Hashable {
+    public var translation: String
+    public var explanation: String
+    public var readingText: String?
+    public var vocabulary: [VocabularyItem]
+    public var grammarPoints: [GrammarPoint]
+    public var culturalContext: String?
+    public var difficultyLevel: String?   // beginner | intermediate | advanced
+    public var learningTips: String?
+
+    public init(
+        translation: String,
+        explanation: String,
+        readingText: String? = nil,
+        vocabulary: [VocabularyItem] = [],
+        grammarPoints: [GrammarPoint] = [],
+        culturalContext: String? = nil,
+        difficultyLevel: String? = nil,
+        learningTips: String? = nil
+    ) {
+        self.translation = translation
+        self.explanation = explanation
+        self.readingText = readingText
+        self.vocabulary = vocabulary
+        self.grammarPoints = grammarPoints
+        self.culturalContext = culturalContext
+        self.difficultyLevel = difficultyLevel
+        self.learningTips = learningTips
+    }
+}
+
+/// 一次精讲生成的溯源元数据（设计文档 §3.2）：
+/// 正文、目标语言或 Prompt 改变时可据此判定结果已过期。
+/// 属性名用 `providerId`/`modelId`（小写 d）以保证 snake_case 编解码策略可往返。
+public struct ExplanationMeta: Codable, Sendable, Hashable {
+    public var targetLanguage: String
+    public var providerId: String
+    public var modelId: String
+    public var promptVersion: String
+    public var generatedAt: Date
+    /// 原文 SHA-256 十六进制摘要
+    public var sourceTextHash: String
+
+    public init(
+        targetLanguage: String,
+        providerId: String,
+        modelId: String,
+        promptVersion: String,
+        generatedAt: Date,
+        sourceTextHash: String
+    ) {
+        self.targetLanguage = targetLanguage
+        self.providerId = providerId
+        self.modelId = modelId
+        self.promptVersion = promptVersion
+        self.generatedAt = generatedAt
+        self.sourceTextHash = sourceTextHash
+    }
+}
+
+/// 真实 AI 精讲的完整产物：结构化结果 + 溯源元数据。
+public struct GeneratedExplanation: Sendable {
+    public var explanation: SegmentExplanation
+    public var meta: ExplanationMeta
+
+    public init(explanation: SegmentExplanation, meta: ExplanationMeta) {
+        self.explanation = explanation
+        self.meta = meta
+    }
+}
+
+public struct VocabularyItem: Codable, Sendable, Hashable {
+    public var word: String
+    public var meaning: String
+    public var usage: String?
+    public var example: String?
+    public var reading: String?
+
+    public init(word: String, meaning: String, usage: String? = nil,
+                example: String? = nil, reading: String? = nil) {
+        self.word = word
+        self.meaning = meaning
+        self.usage = usage
+        self.example = example
+        self.reading = reading
+    }
+}
+
+public struct GrammarPoint: Codable, Sendable, Hashable {
+    public var point: String
+    public var explanation: String
+    public var example: String?
+
+    public init(point: String, explanation: String, example: String? = nil) {
+        self.point = point
+        self.explanation = explanation
+        self.example = example
+    }
+}
+
+public struct FavoriteVocabulary: Codable, Identifiable, Sendable, Hashable {
+    public var id: UUID
+    public var word: String
+    public var meaning: String
+    public var usage: String?
+    public var explanation: String?
+    public var example: String?
+    public var reading: String?
+    public var sourceArticleId: UUID?
+    public var sourceArticleTitle: String?
+    public var packIds: [UUID]
+
+    // FSRS 状态(引擎 OKSRS/FSRS.swift,规范 docs/specs/vocabulary-srs-spec.md §1.1)
+    public var srsState: SRSState
+    /// FSRS 记忆稳定性;0 = 未初始化(new 卡)
+    public var stability: Double
+    /// FSRS 难度 ∈ [1,10];0 = 未初始化
+    public var difficulty: Double
+    /// "fsrs6"
+    public var schedulerVersion: String?
+    /// 非空 = 已掌握/暂停复习;队列排除,恢复时置 nil
+    public var suspendedAt: Date?
+    /// 本地日期 "YYYY-MM-DD",天粒度(与桌面语义一致)
+    public var dueDate: String
+    public var lastReviewedAt: Date?
+    public var reviewCount: Int
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        word: String,
+        meaning: String,
+        usage: String? = nil,
+        explanation: String? = nil,
+        example: String? = nil,
+        reading: String? = nil,
+        sourceArticleId: UUID? = nil,
+        sourceArticleTitle: String? = nil,
+        packIds: [UUID] = [],
+        srsState: SRSState = .new,
+        stability: Double = 0,
+        difficulty: Double = 0,
+        schedulerVersion: String? = "fsrs6",
+        suspendedAt: Date? = nil,
+        dueDate: String = "",
+        lastReviewedAt: Date? = nil,
+        reviewCount: Int = 0,
+        createdAt: Date = .now,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.word = word
+        self.meaning = meaning
+        self.usage = usage
+        self.explanation = explanation
+        self.example = example
+        self.reading = reading
+        self.sourceArticleId = sourceArticleId
+        self.sourceArticleTitle = sourceArticleTitle
+        self.packIds = packIds
+        self.srsState = srsState
+        self.stability = stability
+        self.difficulty = difficulty
+        self.schedulerVersion = schedulerVersion
+        self.suspendedAt = suspendedAt
+        self.dueDate = dueDate
+        self.lastReviewedAt = lastReviewedAt
+        self.reviewCount = reviewCount
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+/// 词包(镜像桌面 types.rs::WordPack;规范 §1.2)。
+public struct WordPack: Codable, Identifiable, Sendable, Hashable {
+    /// 系统默认词包("未分组")的固定 id。
+    /// 桌面端用字符串 "system-ungrouped";iOS 主键为 UUID,取固定值,语义等价(规范 §1.2)。
+    public static let systemUngroupedID = UUID(uuidString: "00000000-0000-4000-8000-0000756E6772")!
+
+    public var id: UUID
+    public var name: String
+    public var packDescription: String?
+    public var coverURL: String?
+    public var author: String?
+    public var languageFrom: String?
+    public var languageTo: String?
+    public var tags: [String]
+    public var version: String?
+    public var isSystem: Bool
+    public var createdAt: Date
+    public var updatedAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        name: String,
+        packDescription: String? = nil,
+        coverURL: String? = nil,
+        author: String? = nil,
+        languageFrom: String? = nil,
+        languageTo: String? = nil,
+        tags: [String] = [],
+        version: String? = nil,
+        isSystem: Bool = false,
+        createdAt: Date = .now,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.name = name
+        self.packDescription = packDescription
+        self.coverURL = coverURL
+        self.author = author
+        self.languageFrom = languageFrom
+        self.languageTo = languageTo
+        self.tags = tags
+        self.version = version
+        self.isSystem = isSystem
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
+/// 复习事件(append-only、不可变;规范 §1.3)。
+/// 事件独立于卡片生命周期,未来云同步以事件为单元重放重算。
+public struct ReviewEvent: Codable, Identifiable, Sendable, Hashable {
+    public var id: UUID
+    public var vocabularyId: UUID
+    /// UTC 时刻
+    public var reviewedAt: Date
+    /// 复习时的本地日期 "YYYY-MM-DD"
+    public var dateLocal: String
+    /// 1=Again 2=Hard 3=Good 4=Easy
+    public var grade: Int
+    public var elapsedDays: Int
+    /// 复习前状态("new" 时计入"今日新学")
+    public var previousState: SRSState
+    public var schedulerVersion: String
+    public var desiredRetention: Double
+    public var resultStability: Double
+    public var resultDifficulty: Double
+    public var resultIntervalDays: Int
+    public var resultState: SRSState
+
+    public init(
+        id: UUID = UUID(),
+        vocabularyId: UUID,
+        reviewedAt: Date,
+        dateLocal: String,
+        grade: Int,
+        elapsedDays: Int,
+        previousState: SRSState,
+        schedulerVersion: String = "fsrs6",
+        desiredRetention: Double,
+        resultStability: Double,
+        resultDifficulty: Double,
+        resultIntervalDays: Int,
+        resultState: SRSState
+    ) {
+        self.id = id
+        self.vocabularyId = vocabularyId
+        self.reviewedAt = reviewedAt
+        self.dateLocal = dateLocal
+        self.grade = grade
+        self.elapsedDays = elapsedDays
+        self.previousState = previousState
+        self.schedulerVersion = schedulerVersion
+        self.desiredRetention = desiredRetention
+        self.resultStability = resultStability
+        self.resultDifficulty = resultDifficulty
+        self.resultIntervalDays = resultIntervalDays
+        self.resultState = resultState
+    }
+}
+
+/// 复习统计(规范 §6,由事件日志 + 卡片状态推导)。
+public struct ReviewStats: Sendable, Hashable {
+    public var newToday: Int
+    public var reviewToday: Int
+    public var streakDays: Int
+    public var total: Int
+    public var countNew: Int
+    public var countLearning: Int
+    public var countReview: Int
+    public var countSuspended: Int
+
+    public init(
+        newToday: Int = 0, reviewToday: Int = 0, streakDays: Int = 0, total: Int = 0,
+        countNew: Int = 0, countLearning: Int = 0, countReview: Int = 0, countSuspended: Int = 0
+    ) {
+        self.newToday = newToday
+        self.reviewToday = reviewToday
+        self.streakDays = streakDays
+        self.total = total
+        self.countNew = countNew
+        self.countLearning = countLearning
+        self.countReview = countReview
+        self.countSuspended = countSuspended
+    }
+}
