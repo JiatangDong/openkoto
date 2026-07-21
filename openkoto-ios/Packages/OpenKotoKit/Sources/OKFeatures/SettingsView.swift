@@ -123,8 +123,16 @@ struct SettingsView: View {
 
                 Section(L("settings.about")) {
                     LabeledContent("OpenKoto iOS") {
-                        Text(verbatim: "0.1.0 (prototype)")
+                        Text(verbatim: appVersionDescription)
                     }
+                    Link(
+                        "Privacy Policy",
+                        destination: URL(string: "https://www.openkoto.com/privacy-policy")!
+                    )
+                    Link(
+                        "Support",
+                        destination: URL(string: "https://github.com/hikariming/OpenKoto/issues")!
+                    )
                     Link(
                         "GitHub",
                         destination: URL(string: "https://github.com/hikariming/openkoto")!
@@ -141,6 +149,13 @@ struct SettingsView: View {
                 ModelConfigFormView(editing: config)
             }
         }
+    }
+
+    private var appVersionDescription: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(version) (\(build))"
     }
 
     // MARK: - AI 模型配置

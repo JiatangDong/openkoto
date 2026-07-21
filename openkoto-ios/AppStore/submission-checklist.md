@@ -1,0 +1,23 @@
+# App Store submission checklist
+
+- [ ] Apple Developer agreements are active.
+- [ ] `com.openkoto.ios` and `com.openkoto.ios.ShareExtension` belong to the release team.
+- [ ] `group.com.openkoto.ios` is enabled for both targets.
+- [ ] Marketing version is final; build number is unique.
+- [ ] Release archive is built with Xcode 26 / iOS 26 SDK or later.
+- [ ] Release build is tested on a physical iPhone.
+- [ ] Share Extension is tested from Safari and Notes.
+- [ ] iPad layout is tested, or iPad support is removed before archive.
+- [ ] iPhone 6.9-inch screenshots are uploaded.
+- [ ] iPad 13-inch screenshots are uploaded if iPad remains supported.
+- [ ] Price is Free and availability is selected.
+- [ ] Privacy policy and support URLs return HTTP 200.
+- [ ] App Privacy answers match the shipped binary and selected AI providers.
+- [ ] Updated age-rating questionnaire is complete.
+- [ ] Content-rights declaration is complete.
+- [ ] Export-compliance questions are complete.
+- [ ] DSA trader status is complete if distributing in the EU.
+- [ ] Mainland China is excluded unless required compliance information is ready.
+- [ ] Review contact details are current.
+- [ ] Optional AI reviewer credentials are added or the review note states how to test without them.
+- [ ] Release method is set to manual release for the first version.
