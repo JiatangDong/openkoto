@@ -13,9 +13,15 @@ public struct RootTabView: View {
     @State private var appConfig = AppConfigStore()
     @AppStorage("app.interfaceLanguage") private var interfaceLanguage = "system"
 
+    // 首启引导门控。向导状态必须在这里持有（.id 边界之外）：
+    // 语言步切界面语言触发子树重建时，步骤进度与已输入内容才能存活。
+    @AppStorage(OnboardingGate.completedKey) private var onboardingCompleted = false
+    @State private var onboarding = OnboardingState()
+
     private enum Tab: Hashable { case library, vocabulary, statistics, settings }
 
     // 截图/UI 测试用（-startTab*）：启动直接落在指定页；默认书库。
+    // 配合 -app.onboarding.completed YES（NSArgumentDomain）可跳过首启引导。
     @State private var selection: Tab = {
         let args = ProcessInfo.processInfo.arguments
         if args.contains("-startTabSettings") { return .settings }
@@ -23,7 +29,10 @@ public struct RootTabView: View {
         return .library
     }()
 
-    public init() {}
+    public init() {
+        // 老用户（升级前已有模型配置）在首帧求值前直接标记完成，避免向导闪现。
+        OnboardingGate.migrateIfNeeded()
+    }
 
     private var theme: ThemeTokens {
         themeManager.tokens(for: systemScheme)
@@ -38,19 +47,27 @@ public struct RootTabView: View {
         // 在任何子视图的 L() 求值之前同步应用界面语言覆盖，保证实时切换当帧生效、无残留旧语言。
         // 放在 body 顶部（而非 .onChange）可消除“子树先按旧 bundle 渲染、onChange 才改全局”的求值顺序竞态。
         let _ = L10n.setOverrideLanguage(interfaceLanguage == "system" ? nil : interfaceLanguage)
-        TabView(selection: $selection) {
-            LibraryView()
-                .tabItem { Label(L("tab.library"), systemImage: "books.vertical") }
-                .tag(Tab.library)
-            VocabularyView()
-                .tabItem { Label(L("tab.vocabulary"), systemImage: "star.square.on.square") }
-                .tag(Tab.vocabulary)
-            StatisticsView()
-                .tabItem { Label(L("tab.statistics"), systemImage: "chart.bar.xaxis") }
-                .tag(Tab.statistics)
-            SettingsView()
-                .tabItem { Label(L("tab.settings"), systemImage: "gearshape") }
-                .tag(Tab.settings)
+        Group {
+            if onboardingCompleted {
+                TabView(selection: $selection) {
+                    LibraryView()
+                        .tabItem { Label(L("tab.library"), systemImage: "books.vertical") }
+                        .tag(Tab.library)
+                    VocabularyView()
+                        .tabItem { Label(L("tab.vocabulary"), systemImage: "star.square.on.square") }
+                        .tag(Tab.vocabulary)
+                    StatisticsView()
+                        .tabItem { Label(L("tab.statistics"), systemImage: "chart.bar.xaxis") }
+                        .tag(Tab.statistics)
+                    SettingsView()
+                        .tabItem { Label(L("tab.settings"), systemImage: "gearshape") }
+                        .tag(Tab.settings)
+                }
+            } else {
+                OnboardingView(state: onboarding) {
+                    withAnimation { onboardingCompleted = true }
+                }
+            }
         }
         // 语言切换时改变身份，强制整棵子树（含各 Feature 视图内部的 L()）按新语言重建。
         .id(interfaceLanguage)

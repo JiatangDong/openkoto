@@ -24,26 +24,7 @@ struct SettingsView: View {
     @State private var editingConfig: ModelConfig?
     @State private var isAddingConfig = false
 
-    private let targetLanguages = [
-        "zh-CN", "zh-TW", "en", "ja", "ko", "es", "fr", "de", "ru", "ar",
-    ]
-
-    /// 界面语言选项：code → 以该语言自身书写的名字（本地惯例，不本地化）。
-    private let interfaceLanguages: [(code: String, name: String)] = [
-        ("en", "English"), ("zh-Hans", "简体中文"), ("ja", "日本語"),
-    ]
-
     private let retentionOptions: [Double] = [0.80, 0.85, 0.90, 0.95]
-
-    /// 讲解语言的显示名：中文两项用中性的“简体/繁体中文”（避免系统按地区命名引起争议），
-    /// 其余语言用系统按界面语言本地化的纯语言名（无地区）。存储代码 zh-CN/zh-TW 不变（喂 AI prompt）。
-    private func targetLanguageName(_ code: String) -> String {
-        switch code {
-        case "zh-CN": return L("lang.simplifiedChinese")
-        case "zh-TW": return L("lang.traditionalChinese")
-        default: return locale.localizedString(forIdentifier: code) ?? code
-        }
-    }
 
     var body: some View {
         @Bindable var themeManager = themeManager
@@ -68,7 +49,7 @@ struct SettingsView: View {
                     // 界面语言：App 菜单/按钮的显示语言（跟随系统 或 en/zh-Hans/ja）。
                     Picker(L("settings.interfaceLanguage"), selection: $interfaceLanguage) {
                         Text(L("settings.interfaceLanguage.system")).tag("system")
-                        ForEach(interfaceLanguages, id: \.code) { item in
+                        ForEach(LanguageOptions.interface, id: \.code) { item in
                             Text(item.name).tag(item.code)
                         }
                     }
@@ -76,8 +57,8 @@ struct SettingsView: View {
 
                     // 讲解语言：AI 生成精讲/翻译所用的语言（复用 learning.targetLanguage）。
                     Picker(L("settings.explanationLanguage"), selection: $targetLanguage) {
-                        ForEach(targetLanguages, id: \.self) { code in
-                            Text(targetLanguageName(code)).tag(code)
+                        ForEach(LanguageOptions.target, id: \.self) { code in
+                            Text(LanguageOptions.targetDisplayName(code, locale: locale)).tag(code)
                         }
                     }
                     .pickerStyle(.navigationLink)
