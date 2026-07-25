@@ -138,6 +138,79 @@ public struct AppDatabase: Sendable {
                 t.column("seconds", .integer).notNull()
             }
         }
+        // v3：书籍(TXT / EPUB)。
+        // 章节复用 article/segment 表——精讲回填、生词外键、阅读会话、统计一行不改即可对
+        // 书籍生效；归属关系由 book_chapter 关联表表达(同 word_pack_membership 模式)。
+        migrator.registerMigration("v3") { db in
+            try db.create(table: "book") { t in
+                t.primaryKey("id", .text)
+                t.column("title", .text).notNull()
+                t.column("author", .text)
+                t.column("language", .text)
+                t.column("format", .text).notNull()  // "txt" | "epub"
+                // Books/<dir_name>；绝对路径随重装变化，只存相对名
+                t.column("dir_name", .text).notNull()
+                t.column("opf_path", .text)
+                t.column("cover_href", .text)
+                t.column("total_chars", .integer).notNull().defaults(to: 0)
+                // 导入期抽取质量检测的结果
+                t.column("default_mode", .text).notNull().defaults(to: "native")
+                // 固定版式/纯图书：禁用原生模式
+                t.column("original_only", .boolean).notNull().defaults(to: false)
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+            // 章节 = article 行。article_id 既是主键也是外键。
+            // book → article 的级联无法用外键表达，由 BookRepository.deleteBook 显式事务完成。
+            try db.create(table: "book_chapter") { t in
+                t.primaryKey("article_id", .text).references("article", onDelete: .cascade)
+                t.column("book_id", .text).notNull().indexed()
+                    .references("book", onDelete: .cascade)
+                t.column("chapter_index", .integer).notNull()
+                // 相对书籍目录的原始文件（EPUB 的 XHTML / TXT 章节切片）
+                t.column("source_href", .text)
+                t.column("is_segmented", .boolean).notNull().defaults(to: false)
+                t.column("char_count", .integer).notNull().defaults(to: 0)
+                t.uniqueKey(["book_id", "chapter_index"])
+            }
+            // 阅读位置：每本书一行。原生锚点 segment_order 与原版锚点 scroll_fraction
+            // 同时维护，保证任意时刻切换模式都有落点。
+            try db.create(table: "book_progress") { t in
+                t.primaryKey("book_id", .text).references("book", onDelete: .cascade)
+                t.column("chapter_article_id", .text).references("article", onDelete: .setNull)
+                t.column("chapter_index", .integer).notNull().defaults(to: 0)
+                t.column("segment_order", .integer)
+                t.column("scroll_fraction", .double)
+                t.column("mode", .text).notNull().defaults(to: "native")
+                t.column("updated_at", .datetime).notNull()
+            }
+            // 书签 / 划线。selected_text 永远保存，作为两种模式共同的兜底重锚依据。
+            try db.create(table: "book_mark") { t in
+                t.primaryKey("id", .text)
+                t.column("book_id", .text).notNull().references("book", onDelete: .cascade)
+                t.column("chapter_article_id", .text).references("article", onDelete: .setNull)
+                t.column("chapter_index", .integer).notNull()
+                t.column("kind", .text).notNull()  // "bookmark" | "highlight"
+                t.column("segment_order", .integer)
+                t.column("char_start", .integer)  // 句内 Unicode 标量偏移
+                t.column("char_end", .integer)
+                t.column("locator", .text)  // 自定义定位格式，非 EPUB CFI
+                t.column("scroll_fraction", .double)
+                t.column("selected_text", .text)
+                t.column("note", .text)
+                t.column("color", .text)
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+            try db.create(
+                index: "book_mark_on_book_chapter", on: "book_mark",
+                columns: ["book_id", "chapter_index", "created_at"])
+            // 启动只查计数、不读正文：已精讲句数走这条部分索引，全程 index-only。
+            try db.create(
+                index: "segment_on_article_explained", on: "segment",
+                columns: ["article_id"],
+                condition: Column("explanation_json") != nil)
+        }
         return migrator
     }
 }

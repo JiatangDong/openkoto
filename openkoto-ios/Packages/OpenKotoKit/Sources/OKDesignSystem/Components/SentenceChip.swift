@@ -16,6 +16,9 @@ public struct SentenceChip: View {
     let state: SentenceState
     let isSelected: Bool
     let fontSize: CGFloat
+    /// 词级读音。非空时正文改用 CoreText 绘制，注音排在词的上方；
+    /// 为空时与不带注音时逐像素一致。边框、选中态、命中区都不受影响。
+    let runs: [RubyRun]?
     let action: () -> Void
 
     public init(
@@ -23,12 +26,14 @@ public struct SentenceChip: View {
         state: SentenceState,
         isSelected: Bool,
         fontSize: CGFloat = 18,
+        runs: [RubyRun]? = nil,
         action: @escaping () -> Void
     ) {
         self.text = text
         self.state = state
         self.isSelected = isSelected
         self.fontSize = fontSize
+        self.runs = runs
         self.action = action
     }
 
@@ -49,11 +54,28 @@ public struct SentenceChip: View {
         }
     }
 
-    public var body: some View {
-        Button(action: action) {
+    @ViewBuilder
+    private var content: some View {
+        #if os(iOS)
+        if let runs, !runs.isEmpty {
+            RubyLabel(
+                runs: runs, fontSize: fontSize,
+                color: theme.foreground, rubyColor: theme.mutedForeground)
+        } else {
             Text(text)
                 .font(.system(size: fontSize))
                 .foregroundStyle(theme.foreground)
+        }
+        #else
+        Text(text)
+            .font(.system(size: fontSize))
+            .foregroundStyle(theme.foreground)
+        #endif
+    }
+
+    public var body: some View {
+        Button(action: action) {
+            content
                 .padding(.horizontal, 4)
                 .padding(.vertical, 3)
                 .background(

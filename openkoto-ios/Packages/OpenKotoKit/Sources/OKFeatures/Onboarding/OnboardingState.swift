@@ -10,15 +10,20 @@ import OKModels
 @MainActor
 @Observable
 final class OnboardingState {
+    /// `appLanguage` 必须是第一步：欢迎语本身也要用用户看得懂的语言写，
+    /// 而系统语言不在 en/zh/ja 里时（韩语、法语…）整页会退回英文。
+    /// 先让用户挑一次界面语言，后面所有文案才有意义。
     enum Step: Int, CaseIterable {
-        case welcome, language, theme, model, done
+        case appLanguage, welcome, language, theme, model, done
+
+        static var first: Step { .appLanguage }
     }
 
     enum TestState: Equatable {
         case idle, testing, success, failure(String)
     }
 
-    var step: Step = .welcome
+    var step: Step = .first
     /// 步骤切换方向，驱动 push 转场的进出边。
     private(set) var movingForward = true
 
@@ -29,6 +34,7 @@ final class OnboardingState {
         let args = ProcessInfo.processInfo.arguments
         if let idx = args.firstIndex(of: "-onboardingStep"), idx + 1 < args.count {
             switch args[idx + 1] {
+            case "appLanguage": step = .appLanguage
             case "welcome": step = .welcome
             case "language": step = .language
             case "theme": step = .theme
@@ -49,6 +55,8 @@ final class OnboardingState {
     var selectedProviderID: ProviderID?
     var modelName = ""
     var apiKeyInput = ""
+    /// 仅 OpenAI 兼容需要：用户自带服务商的 Base URL。
+    var baseURLInput = ""
     var testState: TestState = .idle
     /// 已保存过的配置 id：回退再前进时更新同一条，避免重复建配置。
     var savedConfigID: UUID?
@@ -80,6 +88,21 @@ final class OnboardingState {
         guard let previous = Step(rawValue: step.rawValue - 1) else { return }
         movingForward = false
         step = previous
+    }
+
+    /// 从设置页重看引导时回到第一步。模型步的草稿一并清掉——
+    /// 上次填的 Key 早已存进 Keychain，留着只会让人以为要重填一遍。
+    func reset() {
+        step = .first
+        movingForward = true
+        selectedProviderID = nil
+        modelName = ""
+        apiKeyInput = ""
+        baseURLInput = ""
+        testState = .idle
+        savedConfigID = nil
+        modelStepSkipped = false
+        lastPrefilledModel = ""
     }
 }
 #endif

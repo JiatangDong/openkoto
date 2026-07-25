@@ -138,7 +138,7 @@ public struct ProviderCapability: Sendable {
         .init(id: .anthropic, displayName: "Anthropic", kind: .anthropic,
               defaultEndpoint: "https://api.anthropic.com/v1/messages",
               privacyPolicyURL: "https://www.anthropic.com/legal/privacy"),
-        .init(id: .moonshot, displayName: "Moonshot (Kimi 国内)", kind: .openAICompatible,
+        .init(id: .moonshot, displayName: "Kimi (China)", kind: .openAICompatible,
               defaultEndpoint: "https://api.moonshot.cn/v1/chat/completions",
               forcesTemperatureOne: true,
               privacyPolicyURL: "https://platform.moonshot.cn/docs/agreement/privacy"),

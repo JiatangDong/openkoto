@@ -1,5 +1,5 @@
-import CoreFoundation
 import Foundation
+import OKBooks
 import UniformTypeIdentifiers
 
 /// 文本导入工具：本地文件读取 + 网页抓取正文提取（设计文档 §6.3）。
@@ -19,6 +19,16 @@ enum TextImport {
         return types
     }
 
+    /// 书籍容器类型。刻意**不并入** `readableContentTypes`——
+    /// `readTextFile` 会把 EPUB（ZIP 二进制）按文本解码成乱码。
+    static var bookContentTypes: [UTType] {
+        var types: [UTType] = [.epub]
+        if let epub = UTType(filenameExtension: "epub"), !types.contains(epub) {
+            types.append(epub)
+        }
+        return types
+    }
+
     /// 读取本地文本文件（.txt/.md）。标题取无扩展名的文件名。
     static func readTextFile(at url: URL) throws -> (title: String, content: String) {
         let scoped = url.startAccessingSecurityScopedResource()
@@ -27,15 +37,13 @@ enum TextImport {
         return (url.deletingPathExtension().lastPathComponent, decodeText(data))
     }
 
-    /// 宽松解码：UTF-8 → UTF-16 → GB18030（中文）→ Latin-1，全失败则有损 UTF-8。
+    /// 编码嗅探解码（BOM → UTF-16 → 严格 UTF-8 → 候选打分，见 `EncodingDetector`）。
+    ///
+    /// 旧实现按 `[.utf8, .utf16, gb18030, .isoLatin1]` 取第一个不返回 nil 的结果，
+    /// 而 `.utf16` 接受任意偶数长度字节序列——所有非 UTF-8 文本（含它声称支持的
+    /// GB18030 中文）都会解成乱码。
     static func decodeText(_ data: Data) -> String {
-        let gb18030 = String.Encoding(
-            rawValue: CFStringConvertEncodingToNSStringEncoding(
-                CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
-        for encoding: String.Encoding in [.utf8, .utf16, gb18030, .isoLatin1] {
-            if let text = String(data: data, encoding: encoding) { return text }
-        }
-        return String(decoding: data, as: UTF8.self)
+        EncodingDetector.decode(data).text
     }
 
     struct FetchResult: Equatable {

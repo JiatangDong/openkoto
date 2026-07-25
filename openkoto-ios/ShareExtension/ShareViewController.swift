@@ -22,17 +22,23 @@ final class ShareViewController: SLComposeServiceViewController {
         guard let inbox = ShareInbox() else { return }
         for item in items {
             for provider in item.attachments ?? [] {
-                if let envelope = await envelope(from: provider, note: note) {
+                if let envelope = await envelope(from: provider, note: note, inbox: inbox) {
                     try? inbox.write(envelope)
                 }
             }
         }
     }
 
-    /// 优先识别 URL（网页分享），否则识别纯文本（选中文字分享）。
-    private func envelope(from provider: NSItemProvider, note: String?) async -> ImportEnvelope? {
+    /// 识别顺序：书籍文件 → 网页 URL → 纯文本。
+    ///
+    /// 书籍文件先于 URL 判断——文件分享过来时 provider 同时符合 `public.url`
+    /// （file URL 也是 URL），按 URL 处理会当成网页去抓取。
+    private func envelope(
+        from provider: NSItemProvider, note: String?, inbox: ShareInbox
+    ) async -> ImportEnvelope? {
+        if let envelope = await fileEnvelope(from: provider, inbox: inbox) { return envelope }
         if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier),
-           let url = await loadURL(provider) {
+           let url = await loadURL(provider), !url.isFileURL {
             return ImportEnvelope(
                 payload: .url(url.absoluteString, title: nil, text: note),
                 sourceApp: "share-extension")
@@ -42,6 +48,50 @@ final class ShareViewController: SLComposeServiceViewController {
             return ImportEnvelope(payload: .plainText(text), sourceApp: "share-extension")
         }
         return nil
+    }
+
+    /// 扩展进程结束后临时文件就没了，必须先拷进 App Group 容器。
+    private func fileEnvelope(
+        from provider: NSItemProvider, inbox: ShareInbox
+    ) async -> ImportEnvelope? {
+        let bookTypes = [UTType.epub, UTType.plainText, UTType.text]
+        guard let type = bookTypes.first(where: {
+            provider.hasItemConformingToTypeIdentifier($0.identifier)
+        }),
+            let source = await loadFileURL(provider, type: type),
+            source.isFileURL
+        else { return nil }
+
+        let ext = source.pathExtension.isEmpty ? "txt" : source.pathExtension
+        // EPUB 才值得走文件通道；纯文本仍按文本信封传，省一次拷贝。
+        guard ext.lowercased() == "epub" else { return nil }
+
+        do {
+            let blobs = try inbox.blobsDirectory()
+            let name = "\(UUID().uuidString).\(ext)"
+            let destination = blobs.appendingPathComponent(name)
+            try FileManager.default.copyItem(at: source, to: destination)
+            return ImportEnvelope(
+                payload: .file(
+                    relativePath: "blobs/\(name)",
+                    filename: source.lastPathComponent,
+                    uti: type.identifier),
+                sourceApp: "share-extension")
+        } catch {
+            return nil
+        }
+    }
+
+    private func loadFileURL(_ provider: NSItemProvider, type: UTType) async -> URL? {
+        await withCheckedContinuation { continuation in
+            provider.loadItem(forTypeIdentifier: type.identifier, options: nil) { item, _ in
+                if let url = item as? URL {
+                    continuation.resume(returning: url)
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
     }
 
     private func loadURL(_ provider: NSItemProvider) async -> URL? {

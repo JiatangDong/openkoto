@@ -20,6 +20,15 @@ public struct RootTabView: View {
 
     private enum Tab: Hashable { case library, vocabulary, statistics, settings }
 
+    /// URL 是否落在本 App 的 `Documents/Inbox/` 里（系统为"用 XX 打开"留下的副本）。
+    static func isInDocumentsInbox(_ url: URL) -> Bool {
+        guard let documents = FileManager.default.urls(
+            for: .documentDirectory, in: .userDomainMask).first
+        else { return false }
+        let inbox = documents.appendingPathComponent("Inbox").standardizedFileURL
+        return url.standardizedFileURL.path.hasPrefix(inbox.path + "/")
+    }
+
     // 截图/UI 测试用（-startTab*）：启动直接落在指定页；默认书库。
     // 配合 -app.onboarding.completed YES（NSArgumentDomain）可跳过首启引导。
     @State private var selection: Tab = {
@@ -71,6 +80,10 @@ public struct RootTabView: View {
         }
         // 语言切换时改变身份，强制整棵子树（含各 Feature 视图内部的 L()）按新语言重建。
         .id(interfaceLanguage)
+        // 从设置页重看引导：向导状态是长驻的，不重置会直接落在上次的"完成"页。
+        .onChange(of: onboardingCompleted) {
+            if !onboardingCompleted { onboarding.reset() }
+        }
         .environment(\.locale, activeLocale)
         .environment(store)
         .environment(appConfig)
@@ -93,6 +106,21 @@ public struct RootTabView: View {
         .onChange(of: scenePhase) {
             if scenePhase == .active {
                 Task { await store.importFromInbox() }
+            }
+        }
+        // "用 OpenKoto 打开"：LSSupportsOpeningDocumentsInPlace = NO，
+        // 所以系统把文件拷进 Documents/Inbox 再交给我们。
+        // 必须走 security-scoped 访问，导入完把系统留下的副本删掉。
+        .onOpenURL { url in
+            Task {
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                await store.importFile(at: url)
+                // 只删自己 Inbox 里的副本。万一哪天 plist 那个键被改成 YES，
+                // 这里拿到的就是用户在"文件"App 里的原件——删了就是数据丢失。
+                if Self.isInDocumentsInbox(url) {
+                    try? FileManager.default.removeItem(at: url)
+                }
             }
         }
     }

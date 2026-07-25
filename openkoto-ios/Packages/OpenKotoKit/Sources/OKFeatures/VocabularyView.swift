@@ -32,7 +32,6 @@ struct VocabularyView: View {
                 }
             }
             .background(theme.background)
-            .navigationTitle(L("tab.vocabulary"))
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

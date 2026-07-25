@@ -32,7 +32,6 @@ struct StatisticsView: View {
                 }
             }
             .background(theme.background)
-            .navigationTitle(L("tab.statistics"))
         }
         .task { await store.refreshStatistics() }
     }

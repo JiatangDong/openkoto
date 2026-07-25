@@ -31,6 +31,8 @@ struct ReaderView: View {
     let article: Article
 
     @AppStorage("reader.fontSize") private var fontSize: Double = 18
+    /// 词级读音开关。与三种视图模式正交（哪种模式下都可能想看读音），所以不做成第四种 mode。
+    @AppStorage("reader.showReading") private var showReading = false
     @State private var viewMode: ReaderViewMode = .original
     @State private var selectedSegmentID: UUID?
     /// 本段前台阅读计时起点(阅读时长统计用)。
@@ -40,18 +42,12 @@ struct ReaderView: View {
         store.segments(for: article.id)
     }
 
-    /// 按 isNewParagraph 分组成段落
-    private var paragraphs: [[ArticleSegment]] {
-        var result: [[ArticleSegment]] = []
-        for segment in segments {
-            if segment.isNewParagraph || result.isEmpty {
-                result.append([segment])
-            } else {
-                result[result.count - 1].append(segment)
-            }
-        }
-        return result
+    private var readingRuns: [UUID: [ReadingRun]] {
+        showReading ? store.readingRuns(for: article.id) : [:]
     }
+
+    /// 这篇文章有没有可显示的读音。没有时把开关灰掉并说明，好过让用户点了没反应。
+    private var hasReadings: Bool { !store.readingRuns(for: article.id).isEmpty }
 
     /// 结算本段前台阅读时长：丢弃 <3s(噪声)与 >2h(挂机)，否则落一条阅读会话。
     private func flushReadingSession() {
@@ -65,24 +61,25 @@ struct ReaderView: View {
     }
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: CGFloat(fontSize)) {
-                ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
-                    paragraphView(paragraph)
-                }
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 12)
-        }
+        NativeChapterView(
+            segments: segments,
+            selectedSegmentID: $selectedSegmentID,
+            fontSize: fontSize,
+            viewMode: viewMode,
+            readingRuns: readingRuns
+        )
         .background(theme.background)
         .safeAreaInset(edge: .bottom) { batchBar }
-        .onAppear {
-            readingStart = Date()
-            // 截图/UI 测试用：自动选中第一句（含预置精讲）
+        // 句子按需加载：启动时只查计数，进阅读器才把这篇的句子读进内存。
+        .task(id: article.id) {
+            await store.openArticle(article.id)
+            // 截图/UI 测试用：自动选中第一句（含预置精讲）。
+            // 必须等 openArticle 之后——句子现在是懒加载的，onAppear 时还是空的。
             if ProcessInfo.processInfo.arguments.contains("-prototypeDemo") {
                 selectedSegmentID = segments.first?.id
             }
         }
+        .onAppear { readingStart = Date() }
         .onDisappear { flushReadingSession() }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
@@ -96,6 +93,8 @@ struct ReaderView: View {
         }
         .navigationTitle(article.title)
         .navigationBarTitleDisplayMode(.inline)
+        // 阅读时收起底部 tab 栏：正文多一行，返回上一级会自动恢复。
+        .toolbar(.hidden, for: .tabBar)
         .toolbar { readerToolbar }
         .sheet(
             isPresented: Binding(
@@ -112,69 +111,6 @@ struct ReaderView: View {
                 .presentationDetents([.medium, .large])
                 .presentationBackgroundInteraction(.enabled(upThrough: .medium))
             }
-        }
-    }
-
-    // MARK: - 段落渲染
-
-    @ViewBuilder
-    private func paragraphView(_ paragraph: [ArticleSegment]) -> some View {
-        switch viewMode {
-        case .original:
-            FlowLayout {
-                ForEach(paragraph) { segment in
-                    chip(for: segment)
-                }
-            }
-        case .bilingual:
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(paragraph) { segment in
-                    VStack(alignment: .leading, spacing: 4) {
-                        if let reading = segment.readingText {
-                            Text(reading)
-                                .font(.system(size: fontSize * 0.8).monospaced())
-                                .foregroundStyle(theme.mutedForeground)
-                        }
-                        chip(for: segment)
-                        if let translation = segment.translation {
-                            TranslationBox(translation)
-                                .font(.system(size: fontSize * 0.95))
-                        }
-                    }
-                }
-            }
-        case .translation:
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(paragraph) { segment in
-                    if let translation = segment.translation {
-                        Text(translation)
-                            .font(.system(size: fontSize))
-                            .foregroundStyle(theme.foreground)
-                    } else {
-                        // 未翻译句显示原文占位，不允许“正文消失”（设计文档 §6.4）
-                        Button {
-                            selectedSegmentID = segment.id
-                        } label: {
-                            (Text(segment.text) + Text(" ↻"))
-                                .font(.system(size: fontSize))
-                                .foregroundStyle(theme.mutedForeground)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-    }
-
-    private func chip(for segment: ArticleSegment) -> some View {
-        SentenceChip(
-            text: segment.text,
-            state: segment.explanation != nil ? .explained
-                : segment.translation != nil ? .translated : .plain,
-            isSelected: segment.id == selectedSegmentID,
-            fontSize: fontSize
-        ) {
-            selectedSegmentID = segment.id
         }
     }
 
@@ -213,8 +149,28 @@ struct ReaderView: View {
 
     @ToolbarContentBuilder
     private var readerToolbar: some ToolbarContent {
+        // 常驻按钮：唱歌/跟读时要频繁开关，藏进菜单太深。
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                showReading.toggle()
+            } label: {
+                Image(systemName: "character.phonetic")
+                    .foregroundStyle(showReading ? theme.primary : theme.mutedForeground)
+            }
+            .disabled(!hasReadings)
+            .accessibilityLabel(Text(L("reader.showReading")))
+            .accessibilityAddTraits(showReading ? .isSelected : [])
+        }
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
+                Section {
+                    Toggle(isOn: $showReading) {
+                        Label(L("reader.showReading"), systemImage: "character.phonetic")
+                    }
+                    .disabled(!hasReadings)
+                } header: {
+                    if !hasReadings { Text(L("reader.reading.unavailable")) }
+                }
                 let progress = store.progress(for: article.id)
                 let running = store.isBatchRunning(articleID: article.id)
                 Section {

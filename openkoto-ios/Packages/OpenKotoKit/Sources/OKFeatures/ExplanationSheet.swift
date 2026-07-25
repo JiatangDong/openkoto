@@ -30,9 +30,7 @@ struct ExplanationSheet: View {
     /// 原文源语言提示（BCP-47）。孤立汉字难以自动区分中/日，
     /// 故从整篇正文检测一次，作为词/句发音的语种提示。
     private var articleLanguage: String? {
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(String(article.content.prefix(400)))
-        return recognizer.dominantLanguage?.rawValue
+        ArticleLanguage.detect(article.content)
     }
 
     var body: some View {

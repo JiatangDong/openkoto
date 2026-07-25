@@ -3,6 +3,91 @@ import SwiftUI
 import OKDesignSystem
 import OKLocalization
 
+// MARK: - 界面语言（第一步）
+
+/// 引导的第一屏：先把界面语言定下来，后面的欢迎语才有意义。
+///
+/// 这一屏的文字必须**不依赖用户已经看得懂某种语言**：
+/// 标题三语并列且不本地化，选项用各语言自己的写法（English / 简体中文 / 日本語）。
+/// 系统语言不在这三种里时整个 App 会退回英文——那正是这一屏要解决的场景。
+struct OnboardingAppLanguageStep: View {
+    @Bindable var state: OnboardingState
+    @Environment(\.theme) private var theme
+
+    @AppStorage("app.interfaceLanguage") private var interfaceLanguage = "system"
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    Image(systemName: "globe")
+                        .font(.system(size: 40))
+                        .foregroundStyle(theme.primary)
+                        .frame(width: 80, height: 80)
+                        .background(
+                            theme.primary.opacity(0.12),
+                            in: RoundedRectangle(cornerRadius: OKRadius.sheet))
+                        .padding(.top, 24)
+
+                    // 不本地化：这一屏的读者可能一种都看不懂，只能三语并列。
+                    Text(verbatim: "Language · 语言 · 言語")
+                        .font(.largeTitle.bold())
+                        .foregroundStyle(theme.foreground)
+
+                    VStack(spacing: 0) {
+                        ForEach(Array(LanguageOptions.interface.enumerated()), id: \.element.code) {
+                            index, item in
+                            if index > 0 { Divider() }
+                            languageRow(code: item.code, name: item.name)
+                        }
+                        Divider()
+                        // 「跟随系统」只能用当前 bundle 的语言写，所以排在最后：
+                        // 上面三个看得懂的选项才是主路径。
+                        languageRow(
+                            code: "system", name: L("settings.interfaceLanguage.system"))
+                    }
+                    .background(theme.card, in: RoundedRectangle(cornerRadius: OKRadius.card))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: OKRadius.card)
+                            .strokeBorder(theme.border, lineWidth: 1))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
+            }
+            Button(L("onboarding.step.continue")) {
+                state.advance()
+            }
+            .buttonStyle(.okPrimary)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private func languageRow(code: String, name: String) -> some View {
+        Button {
+            interfaceLanguage = code
+        } label: {
+            HStack {
+                Text(name)
+                    .font(.body)
+                    .foregroundStyle(theme.foreground)
+                Spacer()
+                if interfaceLanguage == code {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(theme.primary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(interfaceLanguage == code ? .isSelected : [])
+    }
+}
+
 // MARK: - 欢迎
 
 struct OnboardingWelcomeStep: View {
@@ -69,9 +154,7 @@ struct OnboardingLanguageStep: View {
     @Environment(\.theme) private var theme
     @Environment(\.locale) private var locale
 
-    // 直接绑持久化 key：改界面语言 → RootTabView 按新语言重建整棵子树，
-    // 步骤进度由 OnboardingState（在 .id 边界之外）保住。
-    @AppStorage("app.interfaceLanguage") private var interfaceLanguage = "system"
+    // 界面语言已在第一步定好，这里只挑讲解语言（AI 用哪种语言给你讲）。
     @AppStorage("learning.targetLanguage") private var targetLanguage = "zh-CN"
 
     var body: some View {
@@ -80,39 +163,21 @@ struct OnboardingLanguageStep: View {
             subtitle: L("onboarding.language.subtitle")
         ) {
             ThemedCard {
-                VStack(spacing: 12) {
-                    HStack {
-                        Text(L("settings.interfaceLanguage"))
-                            .foregroundStyle(theme.foreground)
-                        Spacer()
-                        Picker(L("settings.interfaceLanguage"), selection: $interfaceLanguage) {
-                            Text(L("settings.interfaceLanguage.system")).tag("system")
-                            ForEach(LanguageOptions.interface, id: \.code) { item in
-                                Text(item.name).tag(item.code)
-                            }
+                HStack {
+                    Text(L("settings.explanationLanguage"))
+                        .foregroundStyle(theme.foreground)
+                    Spacer()
+                    Picker(L("settings.explanationLanguage"), selection: $targetLanguage) {
+                        ForEach(LanguageOptions.target, id: \.self) { code in
+                            Text(LanguageOptions.targetDisplayName(code, locale: locale)).tag(code)
                         }
-                        .pickerStyle(.menu)
-                        .tint(theme.primary)
                     }
-                    Divider()
-                    HStack {
-                        Text(L("settings.explanationLanguage"))
-                            .foregroundStyle(theme.foreground)
-                        Spacer()
-                        Picker(L("settings.explanationLanguage"), selection: $targetLanguage) {
-                            ForEach(LanguageOptions.target, id: \.self) { code in
-                                Text(LanguageOptions.targetDisplayName(code, locale: locale)).tag(code)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .tint(theme.primary)
-                    }
+                    .pickerStyle(.menu)
+                    .tint(theme.primary)
                 }
             }
-
-            Text(L("settings.language.footer"))
-                .font(.footnote)
-                .foregroundStyle(theme.mutedForeground)
+            // 不复用 settings.language.footer：那句同时在讲界面语言，
+            // 而界面语言已经在第一步选过了，这里再提只会让人以为漏了什么。
         } footer: {
             Button(L("onboarding.step.continue")) {
                 state.advance()

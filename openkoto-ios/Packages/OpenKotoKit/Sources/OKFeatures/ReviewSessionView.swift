@@ -12,6 +12,10 @@ struct ReviewSessionView: View {
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
 
+    /// 卡牌正面是否显示读音。默认关闭：日语假名/中文拼音直接给出读音,
+    /// 对中文母语者几乎等于给出答案,会让回忆环节失效。翻面后始终显示。
+    @AppStorage("srs.showReadingOnFront") private var showReadingOnFront = false
+
     @State private var speech = SpeechService()
     @State private var queue: [FavoriteVocabulary] = []
     @State private var showAnswer = false
@@ -37,6 +41,14 @@ struct ReviewSessionView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(L("common.close")) { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Toggle(L("review.showReadingOnFront"), isOn: $showReadingOnFront)
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel(Text(L("review.options")))
                 }
             }
             .task {
@@ -111,7 +123,8 @@ struct ReviewSessionView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text(L("explanation.speak")))
                 }
-                if let reading = favorite.reading {
+                // 读音属于答案的一部分:正面按开关决定,翻面后无条件显示。
+                if let reading = favorite.reading, showAnswer || showReadingOnFront {
                     Text(reading)
                         .font(.callout.monospaced())
                         .foregroundStyle(theme.mutedForeground)

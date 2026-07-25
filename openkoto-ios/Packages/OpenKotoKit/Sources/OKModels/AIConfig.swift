@@ -49,7 +49,14 @@ public struct ImportEnvelope: Codable, Identifiable, Sendable {
     public enum Payload: Codable, Sendable {
         case plainText(String)
         case url(String, title: String?, text: String?)
+        /// 文件（EPUB / TXT）。扩展只能写 App Group 容器，所以文件先拷进
+        /// `Inbox/blobs/`，这里只带相对路径。主 App 导入后负责删除。
+        case file(relativePath: String, filename: String, uti: String)
     }
+
+    /// 当前信封版本。加了新的 payload case 就要 +1，
+    /// 老版本 App 见到更高版本会**跳过并保留**（见 `ShareInbox.drain`），不会吃掉用户的书。
+    public static let currentSchemaVersion = 2
 
     public var id: UUID
     public var schemaVersion: Int
@@ -59,7 +66,7 @@ public struct ImportEnvelope: Codable, Identifiable, Sendable {
 
     public init(
         id: UUID = UUID(),
-        schemaVersion: Int = 1,
+        schemaVersion: Int = ImportEnvelope.currentSchemaVersion,
         payload: Payload,
         sourceApp: String? = nil,
         createdAt: Date = .now

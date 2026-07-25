@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  这个文件只放 CFBundleDocumentTypes——它是字典数组，没法用 INFOPLIST_KEY_* 表达。
+	  其余键仍由 GENERATE_INFOPLIST_FILE = YES 生成后合并进来，不要往这里搬。
+	  有了它，EPUB / TXT 才会在“文件”App、邮件附件里出现“用 OpenKoto 打开”。
+
+	  放在工程根目录而不是 App/：App/ 是 PBXFileSystemSynchronizedRootGroup，
+	  放进去会被当成资源自动拷贝，与 INFOPLIST_FILE 撞成
+	  “Multiple commands produce Info.plist”。
+	-->
+	<!--
+	  声明了 CFBundleDocumentTypes 就必须表态"开的是原件还是副本"，
+	  否则 App Store 校验直接打回（Missing Document Configuration）。
+	  这里必须是 NO：我们把书导入到自己的存储后会删掉传进来的 URL
+	  （RootTabView.onOpenURL），NO 时那是 Documents/Inbox 里的系统副本，
+	  删掉正确；YES 时那会是用户在"文件"App 里的原件，删掉就是数据丢失。
+	-->
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<false/>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>EPUB Book</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>org.idpf.epub-container</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Plain Text</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.plain-text</string>
+				<string>net.daringfireball.markdown</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

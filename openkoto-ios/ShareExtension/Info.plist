@@ -36,6 +36,9 @@
 				<integer>1</integer>
 				<key>NSExtensionActivationSupportsWebPageWithMaxCount</key>
 				<integer>1</integer>
+				<!-- 书籍文件（EPUB / TXT）从“文件”App 或其他 App 分享进来 -->
+				<key>NSExtensionActivationSupportsFileWithMaxCount</key>
+				<integer>1</integer>
 			</dict>
 		</dict>
 	</dict>

@@ -73,6 +73,7 @@ private func stubExplanation(for text: String) -> GeneratedExplanation {
         let restarted = ContentStore(repository: repository, defaults: defaults)
         await restarted.load()
         let imported = try #require(restarted.articles.first { $0.title == "新文章" })
+        await restarted.openArticle(imported.id)
         let segments = restarted.segments(for: imported.id)
         #expect(!segments.isEmpty)
         #expect(segments.map(\.order) == Array(0..<segments.count))
@@ -105,6 +106,8 @@ private func stubExplanation(for text: String) -> GeneratedExplanation {
         let (store, _, _) = try makeStore()
         await store.load()
         let article = try #require(store.articles.first)
+        // 句子按需加载：读到正文前必须先 openArticle（对应 ReaderView 的 .task）。
+        await store.openArticle(article.id)
         let plain = try #require(store.segments(for: article.id).first { $0.explanation == nil })
 
         await store.generateExplanation(articleID: article.id, segmentID: plain.id)
@@ -120,6 +123,7 @@ private func stubExplanation(for text: String) -> GeneratedExplanation {
         await store.load()
         store.explanationProvider = { stubExplanation(for: $0) }
         let article = try #require(store.articles.first)
+        await store.openArticle(article.id)
         let plain = try #require(store.segments(for: article.id).first { $0.explanation == nil })
 
         await store.generateExplanation(articleID: article.id, segmentID: plain.id)
@@ -127,6 +131,7 @@ private func stubExplanation(for text: String) -> GeneratedExplanation {
 
         let restarted = ContentStore(repository: repository, defaults: defaults)
         await restarted.load()
+        await restarted.openArticle(article.id)
         let segment = try #require(
             restarted.segments(for: article.id).first { $0.id == plain.id })
         #expect(segment.explanation?.translation == "译:\(plain.text)")

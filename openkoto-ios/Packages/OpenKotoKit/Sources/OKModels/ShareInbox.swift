@@ -44,7 +44,16 @@ public struct ShareInbox: Sendable {
         try data.write(to: url, options: .atomic)
     }
 
-    /// 读取并删除全部信封（主 App 侧），按 `createdAt` 升序返回。坏文件跳过并删除。
+    /// 只探测版本号的信封头——用于判断"这封信我这个版本读不读得懂"。
+    private struct VersionProbe: Decodable {
+        var schemaVersion: Int
+    }
+
+    /// 读取并删除全部信封（主 App 侧），按 `createdAt` 升序返回。
+    ///
+    /// **版本高于本端的信封留在原地**：扩展可能已经升级而主 App 还没有，
+    /// 那封信里可能是一本书。旧实现在解码之前就 `defer` 删除，任何解不开的信封都被静默销毁。
+    /// 真正解不开的坏文件（连版本号都读不出）仍然删掉，否则队列会永久卡死。
     @discardableResult
     public func drain() -> [ImportEnvelope] {
         let fm = FileManager.default
@@ -53,13 +62,35 @@ public struct ShareInbox: Sendable {
         else { return [] }
         var envelopes: [ImportEnvelope] = []
         for file in files where file.pathExtension == "json" {
-            defer { try? fm.removeItem(at: file) }
-            guard let data = try? Data(contentsOf: file),
-                  let envelope = try? Self.decoder.decode(ImportEnvelope.self, from: data)
-            else { continue }
+            guard let data = try? Data(contentsOf: file) else {
+                try? fm.removeItem(at: file)
+                continue
+            }
+            if let probe = try? Self.decoder.decode(VersionProbe.self, from: data),
+                probe.schemaVersion > ImportEnvelope.currentSchemaVersion
+            {
+                continue  // 未来版本：留给升级后的自己
+            }
+            guard let envelope = try? Self.decoder.decode(ImportEnvelope.self, from: data) else {
+                try? fm.removeItem(at: file)
+                continue
+            }
+            try? fm.removeItem(at: file)
             envelopes.append(envelope)
         }
         return envelopes.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// 分享进来的文件落脚点（扩展写、主 App 读完即删）。
+    public func blobsDirectory() throws -> URL {
+        let url = directory.appendingPathComponent("blobs", isDirectory: true)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    /// 把 `.file` 信封里的相对路径还原成绝对 URL。
+    public func fileURL(relativePath: String) -> URL {
+        directory.appendingPathComponent(relativePath)
     }
 
     /// 待处理信封数（不删除；供 UI 徽标，可选）。

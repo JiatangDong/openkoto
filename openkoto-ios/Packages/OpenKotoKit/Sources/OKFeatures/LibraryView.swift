@@ -1,20 +1,50 @@
 #if os(iOS)
 import SwiftUI
 import OKModels
+import OKBooks
 import OKDesignSystem
 import OKLocalization
 
-/// 书库：文章卡片列表 + 导入入口（设计文档 §6.2）。
+/// 书库列表项：单篇文章与整本书混排，按创建时间倒序。
+enum LibraryItem: Identifiable, Hashable {
+    case article(Article)
+    case book(Book)
+
+    var id: UUID {
+        switch self {
+        case .article(let article): article.id
+        case .book(let book): book.id
+        }
+    }
+
+    var createdAt: Date {
+        switch self {
+        case .article(let article): article.createdAt
+        case .book(let book): book.createdAt
+        }
+    }
+}
+
+/// 书库：文章/书籍卡片列表 + 导入入口（设计文档 §6.2）。
 struct LibraryView: View {
     @Environment(ContentStore.self) private var store
     @Environment(\.theme) private var theme
     @State private var showImport = false
-    @State private var path: [Article] = []
+    @State private var path: [LibraryItem] = []
+    @State private var importError: String?
+    @State private var isImportingBook = false
+
+    /// 文章与书籍混排，按创建时间倒序。
+    private var items: [LibraryItem] {
+        let merged = store.articles.map(LibraryItem.article)
+            + store.books.map(LibraryItem.book)
+        return merged.sorted { $0.createdAt > $1.createdAt }
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
             Group {
-                if store.articles.isEmpty {
+                if items.isEmpty {
                     ContentUnavailableView(
                         L("library.empty.title"),
                         systemImage: "book",
@@ -25,11 +55,28 @@ struct LibraryView: View {
                 }
             }
             .background(theme.background)
-            // 从"文件"App 或其他 App 拖入 .txt/.md 文件直接导入
+            // 从"文件"App 或其他 App 拖入 .txt/.md/.epub 文件直接导入
             .dropDestination(for: URL.self) { urls, _ in
                 importDroppedFiles(urls)
             }
-            .navigationTitle("OpenKoto")
+            .overlay {
+                if isImportingBook {
+                    // 解压 + 分章可能要几秒，给个明确的进行态，别让用户以为卡死。
+                    ProgressView(L("import.book.parsing"))
+                        .padding(24)
+                        .background(theme.card, in: RoundedRectangle(cornerRadius: OKRadius.sheet))
+                        .shadow(radius: 12)
+                }
+            }
+            .alert(
+                L("import.book.failed"),
+                isPresented: Binding(
+                    get: { importError != nil }, set: { if !$0 { importError = nil } })
+            ) {
+                Button(L("common.ok"), role: .cancel) {}
+            } message: {
+                if let importError { Text(importError) }
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -42,8 +89,11 @@ struct LibraryView: View {
             .sheet(isPresented: $showImport) {
                 ImportSheet()
             }
-            .navigationDestination(for: Article.self) { article in
-                ReaderView(article: article)
+            .navigationDestination(for: LibraryItem.self) { item in
+                switch item {
+                case .article(let article): ReaderView(article: article)
+                case .book(let book): BookReaderView(book: book)
+                }
             }
         }
         .onAppear { openFirstArticleForDemoIfNeeded() }
@@ -56,34 +106,67 @@ struct LibraryView: View {
         guard ProcessInfo.processInfo.arguments.contains("-prototypeDemo"),
               path.isEmpty, let first = store.articles.first
         else { return }
-        path = [first]
+        path = [.article(first)]
     }
 
-    /// 拖入文件导入：仅取可读文本文件，逐个切分入库；返回是否至少导入一篇。
+    /// 拖入文件导入：按扩展名分流——EPUB 走书籍管线，文本够长也建书，否则单篇文章。
     @discardableResult
     private func importDroppedFiles(_ urls: [URL]) -> Bool {
-        var imported = false
+        var handled = false
         for url in urls {
-            guard let parsed = try? TextImport.readTextFile(at: url),
-                  !parsed.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            else { continue }
-            store.importArticle(title: parsed.title, content: parsed.content)
-            imported = true
+            handled = true
+            Task { await importFile(url) }
         }
-        return imported
+        return handled
+    }
+
+    /// 统一的文件导入入口。
+    /// EPUB 必然走书籍；文本先试书籍（够长且能分章），不成再退回单篇文章。
+    private func importFile(_ url: URL) async {
+        isImportingBook = true
+        defer { isImportingBook = false }
+        do {
+            if try await store.importBook(from: url) != nil { return }
+        } catch {
+            importError = Self.message(for: error)
+            return
+        }
+        // 不够成书：按普通文章导入（与既有行为一致）。
+        guard let parsed = try? TextImport.readTextFile(at: url),
+            !parsed.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
+        store.importArticle(title: parsed.title, content: parsed.content)
+    }
+
+    static func message(for error: Error) -> String {
+        guard let failure = error as? BookImporter.Failure else {
+            return error.localizedDescription
+        }
+        switch failure {
+        case .drmProtected: return L("import.error.drm")
+        case .corruptArchive: return L("import.error.corruptArchive")
+        case .emptyContent: return L("import.error.emptyContent")
+        case .unsupportedFormat: return L("import.error.unsupportedFormat")
+        }
     }
 
     private var articleList: some View {
         ScrollView {
             LazyVStack(spacing: 10) {
-                ForEach(store.articles) { article in
-                    NavigationLink(value: article) {
-                        ArticleCard(article: article)
+                ForEach(items) { item in
+                    NavigationLink(value: item) {
+                        switch item {
+                        case .article(let article): ArticleCard(article: article)
+                        case .book(let book): BookCard(book: book)
+                        }
                     }
                     .buttonStyle(.plain)
                     .contextMenu {
                         Button(role: .destructive) {
-                            store.deleteArticle(article.id)
+                            switch item {
+                            case .article(let article): store.deleteArticle(article.id)
+                            case .book(let book): store.deleteBook(book.id)
+                            }
                         } label: {
                             Label(L("common.delete"), systemImage: "trash")
                         }
@@ -188,7 +271,7 @@ private struct ImportSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .fileImporter(
                 isPresented: $isFileImporterPresented,
-                allowedContentTypes: TextImport.readableContentTypes
+                allowedContentTypes: TextImport.readableContentTypes + TextImport.bookContentTypes
             ) { result in
                 handleFileImport(result)
             }
@@ -217,7 +300,7 @@ private struct ImportSheet: View {
         Button {
             isFileImporterPresented = true
         } label: {
-            Label(L("import.file.button"), systemImage: "doc.badge.plus")
+            Label(L("import.file.bookButton"), systemImage: "doc.badge.plus")
         }
     }
 
@@ -252,16 +335,29 @@ private struct ImportSheet: View {
         }
     }
 
+    /// EPUB 与长文本直接建书（不进编辑区——几十万字没法复核）；
+    /// 短文本仍填入编辑区，保持原有"导入前可改标题正文"的体验。
     private func handleFileImport(_ result: Result<URL, Error>) {
         switch result {
         case .success(let url):
-            do {
-                let parsed = try TextImport.readTextFile(at: url)
-                title = parsed.title
-                content = parsed.content
-                mode = .paste
-            } catch {
-                errorMessage = error.localizedDescription
+            Task {
+                do {
+                    if try await store.importBook(from: url) != nil {
+                        dismiss()
+                        return
+                    }
+                } catch {
+                    errorMessage = LibraryView.message(for: error)
+                    return
+                }
+                do {
+                    let parsed = try TextImport.readTextFile(at: url)
+                    title = parsed.title
+                    content = parsed.content
+                    mode = .paste
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
             }
         case .failure(let error):
             errorMessage = error.localizedDescription

@@ -20,6 +20,7 @@ struct SettingsView: View {
     @AppStorage("srs.dailyNewLimit") private var dailyNewLimit = 20
     @AppStorage("srs.dailyReviewLimit") private var dailyReviewLimit = 100
     @AppStorage("srs.desiredRetention") private var desiredRetention = 0.9
+    @AppStorage(OnboardingGate.completedKey) private var onboardingCompleted = false
 
     @State private var editingConfig: ModelConfig?
     @State private var isAddingConfig = false
@@ -96,6 +97,17 @@ struct SettingsView: View {
                     }
                 }
 
+                Section {
+                    Button {
+                        // RootTabView 监听这个 key：置回 false 即回到引导第一步。
+                        onboardingCompleted = false
+                    } label: {
+                        Label(L("settings.replayOnboarding"), systemImage: "sparkles.rectangle.stack")
+                    }
+                } footer: {
+                    Text(L("settings.replayOnboarding.footer"))
+                }
+
                 Section(L("settings.privacy")) {
                     Text(L("settings.privacy.note"))
                         .font(.footnote)
@@ -122,7 +134,6 @@ struct SettingsView: View {
             }
             .scrollContentBackground(.hidden)
             .background(theme.background)
-            .navigationTitle(L("tab.settings"))
             .sheet(isPresented: $isAddingConfig) {
                 ModelConfigFormView(editing: nil)
             }

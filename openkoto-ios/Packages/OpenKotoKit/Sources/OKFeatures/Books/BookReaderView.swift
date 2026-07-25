@@ -1,0 +1,554 @@
+#if os(iOS)
+import SwiftUI
+import OKModels
+import OKBooks
+import OKDesignSystem
+import OKLocalization
+
+/// 书籍阅读器：按章复用 `NativeChapterView`，另加目录、翻章与续读位置。
+///
+/// 与 `ReaderView` 的分工：单篇文章没有章节和续读概念，这里才有。
+/// 逐句 chip、精讲弹窗、批量任务都走同一套实现，不做第二份。
+struct BookReaderView: View {
+    @Environment(ContentStore.self) private var store
+    @Environment(\.theme) private var theme
+    @Environment(\.scenePhase) private var scenePhase
+
+    let book: Book
+
+    @AppStorage("reader.fontSize") private var fontSize: Double = 18
+    /// 与 ReaderView 共用同一个 key：读音开关是全局阅读偏好，不该按书记忆。
+    @AppStorage("reader.showReading") private var showReading = false
+    @State private var viewMode: ReaderViewMode = .original
+    @State private var selectedSegmentID: UUID?
+    @State private var chapterIndex = 0
+    @State private var showChapters = false
+    @State private var readingStart: Date?
+    /// 本章当前视口顶部的句序，节流后落库。
+    @State private var visibleOrder = 0
+    @State private var restoreOrder: Int?
+    @State private var lastSavedAt: Date?
+    @State private var renderMode: BookRenderMode = .native
+    @State private var scrollFraction: Double = 0
+    @State private var webSelection: OriginalLayoutView.WebSelection?
+    /// 划词收藏时预填到生词编辑表的词形。
+    @State private var pendingWord: String?
+    @State private var showBookmarks = false
+
+    /// 位置写库的最小间隔——翻页时每帧都写没有意义。
+    private static let saveInterval: TimeInterval = 3
+
+    private var chapters: [BookChapterSummary] {
+        store.chapterSummaries(of: book.id)
+    }
+
+    /// 本章有没有可显示的读音（语种不支持 / 全是假名时为空）。
+    private var hasReadings: Bool {
+        guard let chapter = currentChapter else { return false }
+        return !store.readingRuns(for: chapter.articleId).isEmpty
+    }
+
+    private var currentChapter: BookChapterSummary? {
+        guard chapters.indices.contains(chapterIndex) else { return nil }
+        return chapters[chapterIndex]
+    }
+
+    private var currentArticle: Article? {
+        currentChapter.flatMap { store.chapterArticle(id: $0.articleId) }
+    }
+
+    var body: some View {
+        Group {
+            if let chapter = currentChapter {
+                if renderMode == .original, let url = chapterFileURL(chapter) {
+                    originalLayout(chapter: chapter, url: url)
+                } else {
+                    NativeChapterView(
+                        segments: store.segments(for: chapter.articleId),
+                        selectedSegmentID: $selectedSegmentID,
+                        fontSize: fontSize,
+                        viewMode: viewMode,
+                        restoreOrder: restoreOrder,
+                        onVisibleOrderChanged: { order in
+                            visibleOrder = order
+                            saveProgressIfNeeded()
+                        },
+                        markedOrders: markedOrders,
+                        readingRuns: showReading
+                            ? store.readingRuns(for: chapter.articleId) : [:],
+                        onMark: { segment, kind in addMark(segment: segment, kind: kind) }
+                    )
+                }
+            } else {
+                ContentUnavailableView(
+                    L("book.empty.title"), systemImage: "book.closed",
+                    description: Text(L("book.empty.message")))
+            }
+        }
+        .background(theme.background)
+        .safeAreaInset(edge: .bottom) { bottomBar }
+        .task(id: chapterIndex) { await openCurrentChapter() }
+        .onAppear {
+            readingStart = Date()
+            restoreFromProgress()
+        }
+        .onDisappear {
+            flushReadingSession()
+            saveProgress(force: true)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active:
+                if readingStart == nil { readingStart = Date() }
+            case .inactive, .background:
+                flushReadingSession()
+                saveProgress(force: true)
+            @unknown default:
+                break
+            }
+        }
+        .navigationTitle(currentChapter?.title ?? book.title)
+        .navigationBarTitleDisplayMode(.inline)
+        // 阅读时收起底部 tab 栏：翻页条已经占了底部，再叠一层 tab 太挤。
+        .toolbar(.hidden, for: .tabBar)
+        .toolbar { toolbar }
+        .sheet(
+            isPresented: Binding(
+                get: { pendingWord != nil }, set: { if !$0 { pendingWord = nil } })
+        ) {
+            VocabEditSheet(favorite: nil, prefilledWord: pendingWord)
+        }
+        .sheet(isPresented: $showBookmarks) {
+            BookmarksSheet(book: book) { index, order in
+                jump(chapter: index, order: order)
+            }
+        }
+        .sheet(isPresented: $showChapters) {
+            ChapterListSheet(book: book, currentIndex: chapterIndex) { index in
+                goTo(chapter: index)
+            }
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { selectedSegmentID != nil },
+                set: { if !$0 { selectedSegmentID = nil } })
+        ) {
+            if let segmentID = selectedSegmentID, let article = currentArticle {
+                ExplanationSheet(
+                    article: article,
+                    segmentID: segmentID,
+                    onSelectSegment: { selectedSegmentID = $0 }
+                )
+                .presentationDetents([.medium, .large])
+                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+            }
+        }
+    }
+
+    // MARK: - 书签 / 划线
+
+    /// 本章已标记的句序。锚点可能因重新切分而漂移，所以逐条走重锚级联。
+    private var markedOrders: Set<Int> {
+        guard let chapter = currentChapter else { return [] }
+        let segments = store.segments(for: chapter.articleId)
+        guard !segments.isEmpty else { return [] }
+        let marks = store.marks(ofBook: book.id, chapterIndex: chapterIndex)
+        return Set(marks.compactMap { MarkAnchor.resolve($0, in: segments).segmentOrder })
+    }
+
+    private func addMark(segment: ArticleSegment, kind: BookMark.Kind) {
+        guard let chapter = currentChapter else { return }
+        let total = store.progress(for: chapter.articleId).total
+        store.saveMark(
+            BookMark(
+                bookId: book.id,
+                chapterArticleId: chapter.articleId,
+                chapterIndex: chapterIndex,
+                kind: kind,
+                segmentOrder: segment.order,
+                // 两种模式的锚点都填上，切模式后书签仍能定位。
+                scrollFraction: total > 0 ? Double(segment.order) / Double(total) : 0,
+                selectedText: segment.text))
+    }
+
+    /// 原版模式划线：定位符 + 原文都存，重锚时按可靠性依次回退。
+    private func addHighlight(_ selection: OriginalLayoutView.WebSelection) {
+        guard let chapter = currentChapter else { return }
+        let segments = store.segments(for: chapter.articleId)
+        let match = SelectionResolver.resolve(selection: selection.text, in: segments)
+        store.saveMark(
+            BookMark(
+                bookId: book.id,
+                chapterArticleId: chapter.articleId,
+                chapterIndex: chapterIndex,
+                kind: .highlight,
+                segmentOrder: match?.order,
+                charStart: match?.range?.lowerBound,
+                charEnd: match?.range?.upperBound,
+                locator: selection.locator,
+                scrollFraction: scrollFraction,
+                selectedText: selection.text))
+        webSelection = nil
+    }
+
+    /// 从书签面板跳转：先切章，再滚到那一句。
+    private func jump(chapter index: Int, order: Int?) {
+        goTo(chapter: index)
+        guard let order else { return }
+        restoreOrder = order
+        visibleOrder = order
+    }
+
+    // MARK: - 原版模式
+
+    /// 当前章的原始文件是否还在——决定原版模式能不能用。
+    private var canUseOriginalMode: Bool {
+        currentChapter.flatMap(chapterFileURL) != nil
+    }
+
+    /// 章节原始文件在书籍目录里的位置。文件不在（换机恢复后 Books/ 没回来）时返回 nil，
+    /// 原版模式随之不可用，但原生模式仍能读——正文另存在 article.content 里。
+    private func chapterFileURL(_ chapter: BookChapterSummary) -> URL? {
+        guard let href = store.chapterSourceHref(articleID: chapter.articleId),
+            let root = store.bookDirectory(for: book.id)
+        else { return nil }
+        let url = root.appendingPathComponent(href)
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    @ViewBuilder
+    private func originalLayout(chapter: BookChapterSummary, url: URL) -> some View {
+        ZStack(alignment: .topLeading) {
+            OriginalLayoutView(
+                chapterURL: url,
+                bookDirectory: store.bookDirectory(for: book.id) ?? url,
+                fontScale: fontSize / 18,
+                restoreFraction: scrollFraction,
+                highlights: store.marks(ofBook: book.id, chapterIndex: chapterIndex)
+                    .filter { $0.kind == .highlight }
+                    .map { (locator: $0.locator, text: $0.selectedText) },
+                onScroll: { fraction in
+                    scrollFraction = fraction
+                    saveProgressIfNeeded()
+                },
+                onSelection: { webSelection = $0 },
+                onNavigate: { target in
+                    // 站内链接：换算成章节索引后走正常翻章路径。
+                    guard let index = store.chapterIndex(of: book.id, fileURL: target) else {
+                        return
+                    }
+                    goTo(chapter: index)
+                }
+            )
+            if let selection = webSelection, let rect = selection.rects.first {
+                SelectionActionBar(
+                    anchor: rect,
+                    canExplain: !book.originalOnly,
+                    onExplain: { explainSelection(selection) },
+                    onFavorite: { favoriteSelection(selection) },
+                    onHighlight: { addHighlight(selection) },
+                    onCopy: {
+                        UIPasteboard.general.string = selection.text
+                        webSelection = nil
+                    }
+                )
+                // 浮在选区上方，贴边时下移，避免顶出屏幕。
+                .offset(
+                    x: max(rect.minX, 8),
+                    y: rect.minY > 60 ? rect.minY - 52 : rect.maxY + 8)
+            }
+        }
+    }
+
+    /// 划词 → 精讲：把选区映射回本章的某一句，然后复用**未经修改**的 ExplanationSheet。
+    /// 两种模式的文本出自同一个抽取器，所以这个映射几乎总能命中。
+    private func explainSelection(_ selection: OriginalLayoutView.WebSelection) {
+        guard let chapter = currentChapter else { return }
+        let segments = store.segments(for: chapter.articleId)
+        guard let match = SelectionResolver.resolve(selection: selection.text, in: segments)
+        else { return }
+        webSelection = nil
+        selectedSegmentID = match.segmentID
+    }
+
+    /// 划词收藏：打开生词编辑表并预填词形。
+    /// 不直接建卡——没有释义的 SRS 卡片复习时毫无用处。
+    private func favoriteSelection(_ selection: OriginalLayoutView.WebSelection) {
+        let word = selection.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !word.isEmpty else { return }
+        pendingWord = word
+        webSelection = nil
+    }
+
+    // MARK: - 章节切换
+
+    private func openCurrentChapter() async {
+        guard let chapter = currentChapter else { return }
+        // 首开该章时在这里延迟切分（导入时不切句）。
+        await store.openArticle(chapter.articleId)
+    }
+
+    private func goTo(chapter index: Int) {
+        guard chapters.indices.contains(index) else { return }
+        saveProgress(force: true)
+        chapterIndex = index
+        visibleOrder = 0
+        restoreOrder = nil
+        selectedSegmentID = nil
+    }
+
+    // MARK: - 续读位置
+
+    private func restoreFromProgress() {
+        guard let progress = store.progress(ofBook: book.id) else {
+            renderMode = book.originalOnly ? .original : book.defaultMode
+            return
+        }
+        if chapters.indices.contains(progress.chapterIndex) {
+            chapterIndex = progress.chapterIndex
+        }
+        renderMode = book.originalOnly ? .original : progress.mode
+        let count = currentChapter.map { store.progress(for: $0.articleId).total } ?? 0
+        restoreOrder = progress.resolvedSegmentOrder(segmentCount: max(count, 1))
+        visibleOrder = restoreOrder ?? 0
+        scrollFraction = progress.resolvedFraction(segmentCount: max(count, 1))
+    }
+
+    /// 切模式时把位置换算过去，落点不会回到章首。
+    /// 两个锚点一直同时维护，所以任一方向都有值可用。
+    private func switchMode(to mode: BookRenderMode) {
+        guard mode != renderMode, let chapter = currentChapter else { return }
+        saveProgress(force: true)
+        let total = store.progress(for: chapter.articleId).total
+        switch mode {
+        case .native:
+            restoreOrder = total > 0 ? Int((scrollFraction * Double(total)).rounded()) : 0
+            visibleOrder = restoreOrder ?? 0
+        case .original:
+            scrollFraction = total > 0 ? Double(visibleOrder) / Double(total) : 0
+        }
+        webSelection = nil
+        renderMode = mode
+    }
+
+    private func saveProgressIfNeeded() {
+        guard let lastSavedAt else {
+            saveProgress(force: true)
+            return
+        }
+        guard Date().timeIntervalSince(lastSavedAt) >= Self.saveInterval else { return }
+        saveProgress(force: false)
+    }
+
+    private func saveProgress(force: Bool) {
+        guard let chapter = currentChapter else { return }
+        let total = store.progress(for: chapter.articleId).total
+        // 两个锚点始终同时写：当前模式的那个是实测值，另一个按比例换算，
+        // 这样任何时候切模式都有落点，不会掉回章首。
+        let order: Int
+        let fraction: Double
+        switch renderMode {
+        case .native:
+            order = visibleOrder
+            fraction = total > 0 ? Double(visibleOrder) / Double(total) : 0
+        case .original:
+            fraction = scrollFraction
+            order = total > 0 ? Int((scrollFraction * Double(total)).rounded()) : 0
+        }
+        lastSavedAt = Date()
+        store.saveBookProgress(
+            BookProgress(
+                bookId: book.id,
+                chapterArticleId: chapter.articleId,
+                chapterIndex: chapterIndex,
+                segmentOrder: order,
+                scrollFraction: fraction,
+                mode: renderMode))
+    }
+
+    /// 结算本段前台阅读时长：丢弃 <3s(噪声)与 >2h(挂机)。
+    private func flushReadingSession() {
+        guard let start = readingStart, let chapter = currentChapter else { return }
+        readingStart = nil
+        let elapsed = Int(Date().timeIntervalSince(start))
+        guard elapsed >= 3, elapsed <= 2 * 60 * 60 else { return }
+        let articleID = chapter.articleId
+        Task {
+            await store.recordReadingSession(
+                articleId: articleID, seconds: elapsed, startedAt: start)
+        }
+    }
+
+    // MARK: - 底部翻章条
+
+    @ViewBuilder
+    private var bottomBar: some View {
+        VStack(spacing: 0) {
+            if let chapter = currentChapter,
+                let state = store.batchByArticle[chapter.articleId]
+            {
+                batchProgress(state)
+            }
+            HStack {
+                Button {
+                    goTo(chapter: chapterIndex - 1)
+                } label: {
+                    Label(L("book.chapter.previous"), systemImage: "chevron.left")
+                        .labelStyle(.iconOnly)
+                }
+                .disabled(chapterIndex <= 0)
+
+                Spacer()
+                Button {
+                    showChapters = true
+                } label: {
+                    Text(verbatim: "\(chapterIndex + 1) / \(chapters.count)")
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(theme.mutedForeground)
+                }
+                Spacer()
+
+                Button {
+                    goTo(chapter: chapterIndex + 1)
+                } label: {
+                    Label(L("book.chapter.next"), systemImage: "chevron.right")
+                        .labelStyle(.iconOnly)
+                }
+                .disabled(chapterIndex >= chapters.count - 1)
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
+        .background(.bar)
+    }
+
+    private func batchProgress(_ state: ContentStore.BatchState) -> some View {
+        let fraction = state.total > 0 ? Double(state.completed) / Double(state.total) : 0
+        return VStack(spacing: 6) {
+            HStack {
+                Text(L(state.kind == .explain
+                    ? "reader.batch.explaining" : "reader.batch.translating"))
+                    .font(.footnote.weight(.medium))
+                Spacer()
+                Text(verbatim: "\(state.completed)/\(state.total)")
+                    .font(.footnote.monospacedDigit())
+                    .foregroundStyle(theme.mutedForeground)
+                if let chapter = currentChapter {
+                    Button(L("reader.batch.cancel")) {
+                        store.cancelBatch(articleID: chapter.articleId)
+                    }
+                    .font(.footnote)
+                }
+            }
+            ProgressView(value: fraction).tint(theme.primary)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - 工具栏
+
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                showChapters = true
+            } label: {
+                Image(systemName: "list.bullet")
+            }
+            .accessibilityLabel(Text(L("book.toc")))
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                showBookmarks = true
+            } label: {
+                Image(systemName: "bookmark")
+            }
+            .accessibilityLabel(Text(L("bookmark.title")))
+        }
+        // 原版模式由 WebView 排版，原书自带的 <ruby> 本来就会渲染，无需这个开关。
+        if renderMode == .native {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showReading.toggle()
+                } label: {
+                    Image(systemName: "character.phonetic")
+                        .foregroundStyle(showReading ? theme.primary : theme.mutedForeground)
+                }
+                .disabled(!hasReadings)
+                .accessibilityLabel(Text(L("reader.showReading")))
+                .accessibilityAddTraits(showReading ? .isSelected : [])
+            }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                if let chapter = currentChapter {
+                    let progress = store.progress(for: chapter.articleId)
+                    let running = store.isBatchRunning(articleID: chapter.articleId)
+                    // 批量任务按章进行：整本书上万句，一次全精讲不是功能是事故。
+                    Section(L("book.batch.chapterScope")) {
+                        Button {
+                            store.batchExplainAll(articleID: chapter.articleId)
+                        } label: {
+                            Label(L("reader.batch.explainAll"), systemImage: "sparkles")
+                        }
+                        .disabled(running || progress.explained >= progress.total)
+                        Button {
+                            store.batchTranslateAll(articleID: chapter.articleId)
+                        } label: {
+                            Label(
+                                L("reader.batch.translateAll"),
+                                systemImage: "character.book.closed")
+                        }
+                        .disabled(running)
+                    }
+                }
+                Section {
+                    Button {
+                        switchMode(to: renderMode == .native ? .original : .native)
+                    } label: {
+                        Label(
+                            L(renderMode == .native
+                                ? "book.mode.original" : "book.mode.native"),
+                            systemImage: renderMode == .native
+                                ? "doc.richtext" : "text.alignleft")
+                    }
+                    // 固定版式书抽不出正文，原生模式无意义；
+                    // 书籍文件丢了则反过来，原版模式无从加载。
+                    .disabled(
+                        (book.originalOnly && renderMode == .original) || !canUseOriginalMode)
+                } footer: {
+                    if book.originalOnly {
+                        Text(L("book.mode.originalOnly.hint"))
+                    } else if !canUseOriginalMode {
+                        // 换机恢复后 Books/ 没随备份回来：原版模式不可用，但正文还在。
+                        Text(L("book.originalFilesMissing"))
+                    }
+                }
+                if renderMode == .native {
+                    Picker(selection: $viewMode, label: Text("")) {
+                        ForEach(ReaderViewMode.allCases) { mode in
+                            Text(L(mode.titleKey)).tag(mode)
+                        }
+                    }
+                    Section {
+                        Toggle(isOn: $showReading) {
+                            Label(L("reader.showReading"), systemImage: "character.phonetic")
+                        }
+                        .disabled(!hasReadings)
+                    } header: {
+                        if !hasReadings { Text(L("reader.reading.unavailable")) }
+                    }
+                }
+                Section(L("reader.fontSize")) {
+                    Stepper(value: $fontSize, in: 12...32, step: 2) {
+                        Text(verbatim: "\(Int(fontSize)) pt")
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+        }
+    }
+}
+#endif

@@ -17,6 +17,18 @@ struct OnboardingModelStep: View {
         state.selectedProviderID != nil
             && !state.modelName.trimmingCharacters(in: .whitespaces).isEmpty
             && !state.apiKeyInput.trimmingCharacters(in: .whitespaces).isEmpty
+            && (!needsBaseURL || !trimmedBaseURL.isEmpty)
+    }
+
+    private var needsBaseURL: Bool { state.selectedProvider?.needsBaseURL ?? false }
+
+    private var trimmedBaseURL: String {
+        state.baseURLInput.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// 明文 HTTP 且非本地 Provider → 告警（对齐设置页完整表单）。
+    private var insecureBaseURL: Bool {
+        trimmedBaseURL.lowercased().hasPrefix("http://")
     }
 
     var body: some View {
@@ -52,6 +64,7 @@ struct OnboardingModelStep: View {
         }
         .onChange(of: state.modelName) { state.testState = .idle }
         .onChange(of: state.apiKeyInput) { state.testState = .idle }
+        .onChange(of: state.baseURLInput) { state.testState = .idle }
     }
 
     // MARK: - Provider 精选
@@ -92,6 +105,26 @@ struct OnboardingModelStep: View {
     private var configCard: some View {
         ThemedCard {
             VStack(spacing: 12) {
+                // Base URL 放在最前：兼容服务商的模型名依赖于选了哪家，先填地址更顺。
+                if needsBaseURL {
+                    VStack(alignment: .leading, spacing: 4) {
+                        // prompt 用 verbatim：否则 SwiftUI 把裸 URL 当 Markdown 自动链接，
+                        // 占位符会渲染成蓝色链接，看着像已经填好了值。
+                        TextField(
+                            L("model.form.baseURL"), text: $state.baseURLInput,
+                            prompt: Text(verbatim: "https://api.example.com/v1")
+                        )
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        if insecureBaseURL {
+                            Label(L("model.form.http.warning"), systemImage: "exclamationmark.triangle")
+                                .font(.caption2)
+                                .foregroundStyle(theme.destructive)
+                        }
+                    }
+                    Divider()
+                }
                 HStack {
                     Text(L("model.form.model"))
                         .foregroundStyle(theme.mutedForeground)
@@ -152,9 +185,16 @@ struct OnboardingModelStep: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(theme.foreground)
 
-                guideStep(1, String(format: L("onboarding.model.guide.step1"), provider.capability.displayName))
-                guideStep(2, L("onboarding.model.guide.step2"))
-                guideStep(3, L("onboarding.model.guide.step3"))
+                // 自带服务商没有"官网控制台"可跳，三步换成填地址/模型/Key。
+                if provider.needsBaseURL {
+                    guideStep(1, L("onboarding.model.guide.compat.step1"))
+                    guideStep(2, L("onboarding.model.guide.compat.step2"))
+                    guideStep(3, L("onboarding.model.guide.compat.step3"))
+                } else {
+                    guideStep(1, String(format: L("onboarding.model.guide.step1"), provider.capability.displayName))
+                    guideStep(2, L("onboarding.model.guide.step2"))
+                    guideStep(3, L("onboarding.model.guide.step3"))
+                }
 
                 if let noteKey = provider.noteKey {
                     Label(L(String.LocalizationValue(noteKey)), systemImage: "lightbulb")
@@ -162,11 +202,13 @@ struct OnboardingModelStep: View {
                         .foregroundStyle(theme.primary)
                 }
 
-                Link(destination: provider.keyConsoleURL) {
-                    Label(L("onboarding.model.guide.openConsole"), systemImage: "arrow.up.right.square")
-                        .font(.callout.weight(.medium))
+                if let console = provider.keyConsoleURL {
+                    Link(destination: console) {
+                        Label(L("onboarding.model.guide.openConsole"), systemImage: "arrow.up.right.square")
+                            .font(.callout.weight(.medium))
+                    }
+                    .tint(theme.primary)
                 }
-                .tint(theme.primary)
 
                 if let policy = provider.capability.privacyPolicyURL {
                     Link(destination: policy) {
@@ -202,7 +244,8 @@ struct OnboardingModelStep: View {
             name: capability.displayName,
             apiProvider: capability.id,
             model: state.modelName.trimmingCharacters(in: .whitespaces),
-            baseURL: nil,
+            // 只有兼容项才带 Base URL；其余用能力表里的官方端点。
+            baseURL: capability.requiresCustomBaseURL ? URL(string: trimmedBaseURL) : nil,
             isDefault: true
         )
     }

@@ -28,7 +28,7 @@ struct OnboardingView: View {
         ZStack {
             progressDots
             HStack {
-                if state.step != .welcome {
+                if state.step != .first {
                     Button {
                         state.goBack()
                     } label: {
@@ -67,6 +67,8 @@ struct OnboardingView: View {
     @ViewBuilder
     private var stepContent: some View {
         switch state.step {
+        case .appLanguage:
+            OnboardingAppLanguageStep(state: state)
         case .welcome:
             OnboardingWelcomeStep(state: state)
         case .language:

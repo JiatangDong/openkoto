@@ -49,6 +49,7 @@ import OKPersistence
         await store.flushPersistence()
         let restarted = ContentStore(repository: repository, defaults: defaults)
         await restarted.load()
+        await restarted.openArticle(articleID)
         #expect(restarted.segments(for: articleID).first { $0.id == segmentID }?.translation
             == "T:一句目。")
     }

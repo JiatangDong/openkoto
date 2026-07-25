@@ -39,6 +39,7 @@ import OKModels
         for expected in [
             "article", "segment", "favorite_vocabulary", "word_pack",
             "word_pack_membership", "review_log",
+            "book", "book_chapter", "book_progress", "book_mark",
         ] {
             #expect(tables.contains(expected))
         }
@@ -54,7 +55,9 @@ import OKModels
         #expect(snapshot.articles.map(\.id) == [article.id])
         #expect(snapshot.articles[0].title == article.title)
         #expect(snapshot.articles[0].sourceType == .article)
-        let loaded = try #require(snapshot.segmentsByArticle[article.id])
+        // 句子不再随 loadAll 预载，按需读取；快照只带计数。
+        #expect(snapshot.segmentCounts[article.id] == .init(total: 3, explained: 0))
+        let loaded = try await repository.loadSegments(articleID: article.id)
         #expect(loaded.map(\.text) == ["一句目。", "二句目。", "三句目。"])
         #expect(loaded.map(\.order) == [0, 1, 2])
         #expect(loaded[0].isNewParagraph)
@@ -83,7 +86,8 @@ import OKModels
         }
         let snapshot = try await repository.loadAll()
         #expect(snapshot.articles.isEmpty)
-        #expect(snapshot.segmentsByArticle.isEmpty)
+        #expect(snapshot.segmentCounts.isEmpty)
+        #expect(try await repository.loadSegments(articleID: article.id).isEmpty)
     }
 
     // MARK: - 删除级联
@@ -160,8 +164,8 @@ import OKModels
             explanation: SegmentExplanation(translation: "覆盖", explanation: "覆盖"),
             meta: nil)
         #expect(!overwritten)
-        let reloaded = try await repository.loadAll()
-        let segment = try #require(reloaded.segmentsByArticle[article.id]?.first)
+        let reloaded = try await repository.loadSegments(articleID: article.id)
+        let segment = try #require(reloaded.first)
         #expect(segment.explanation == explanation)
         #expect(segment.translation == "我做了这样一个梦。")
     }
@@ -450,6 +454,6 @@ import OKModels
 
         let snapshot = try await repository.loadAll()
         #expect(snapshot.articles.count == 1)
-        #expect(snapshot.segmentsByArticle[article.id]?.count == 1)
+        #expect(snapshot.segmentCounts[article.id]?.total == 1)
     }
 }

@@ -12,6 +12,8 @@ struct VocabEditSheet: View {
 
     /// 编辑既有卡片时传入;新增为 nil
     let favorite: FavoriteVocabulary?
+    /// 新增时预填的词形（原版模式划词收藏走这条路）。
+    var prefilledWord: String?
 
     @State private var word = ""
     @State private var meaning = ""
@@ -66,6 +68,7 @@ struct VocabEditSheet: View {
                     example = favorite.example ?? ""
                     selectedPackIds = Set(favorite.packIds)
                 } else {
+                    if let prefilledWord { word = prefilledWord }
                     // 新增默认归入当前选中的合集(未选中时归"未分组")
                     selectedPackIds = [store.activePackId ?? WordPack.systemUngroupedID]
                 }

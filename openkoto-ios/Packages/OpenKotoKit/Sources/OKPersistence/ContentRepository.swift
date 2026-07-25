@@ -5,20 +5,34 @@ import OKModels
 /// 内容仓库：文章 / 逐句 / 生词收藏的单一读写入口（设计文档 §3.2）。
 /// 每个写方法都是一个事务；调用方（ContentStore）负责串行化提交顺序。
 public struct ContentRepository: Sendable {
+    /// 某篇/某章的句子统计。启动只查计数不读正文——一本 50 万字小说约 1.5 万句，
+    /// 全量载入内存是撑不住的。
+    public struct SegmentCounts: Sendable, Equatable {
+        public var total: Int
+        public var explained: Int
+
+        public init(total: Int = 0, explained: Int = 0) {
+            self.total = total
+            self.explained = explained
+        }
+    }
+
     public struct LibrarySnapshot: Sendable {
+        /// 只含顶层文章：书籍章节虽然也是 article 行，但不该出现在书库列表里。
         public var articles: [Article]
-        public var segmentsByArticle: [UUID: [ArticleSegment]]
+        /// 全部 article（含章节）的句子计数，供进度徽章使用。
+        public var segmentCounts: [UUID: SegmentCounts]
         public var favorites: [FavoriteVocabulary]
         public var packs: [WordPack]
 
         public init(
             articles: [Article] = [],
-            segmentsByArticle: [UUID: [ArticleSegment]] = [:],
+            segmentCounts: [UUID: SegmentCounts] = [:],
             favorites: [FavoriteVocabulary] = [],
             packs: [WordPack] = []
         ) {
             self.articles = articles
-            self.segmentsByArticle = segmentsByArticle
+            self.segmentCounts = segmentCounts
             self.favorites = favorites
             self.packs = packs
         }
@@ -32,18 +46,20 @@ public struct ContentRepository: Sendable {
 
     // MARK: - 读
 
-    /// 一期数据量（本地个人库）一次性全量加载；分页/搜索按需再加。
+    /// 启动加载：文章元数据 + 生词 + 词包，**不含任何句子**。
+    ///
+    /// 句子改为逐篇按需加载（`loadSegments`）——书籍章节动辄上万句，
+    /// 预加载会让启动内存与耗时随书库线性膨胀；普通文章同样受益。
+    /// 进度徽章所需的计数走两条 index-only 聚合查询，不触碰正文页。
     public func loadAll() async throws -> LibrarySnapshot {
         try await database.writer.read { db in
+            // 书籍章节也是 article 行，但归 book 管，不进书库顶层列表。
             let articles = try ArticleRecord
+                .filter(
+                    sql: "id NOT IN (SELECT article_id FROM book_chapter)")
                 .order(Column("created_at").desc, Column("id"))
                 .fetchAll(db)
                 .map { try $0.domainModel() }
-            var segmentsByArticle: [UUID: [ArticleSegment]] = [:]
-            for record in try SegmentRecord.order(Column("order_index")).fetchAll(db) {
-                let segment = try record.domainModel()
-                segmentsByArticle[segment.articleId, default: []].append(segment)
-            }
             let favorites = try Self.fetchFavorites(db)
             let packs = try WordPackRecord
                 .order(Column("created_at"))
@@ -51,10 +67,62 @@ public struct ContentRepository: Sendable {
                 .map { try $0.domainModel() }
             return LibrarySnapshot(
                 articles: articles,
-                segmentsByArticle: segmentsByArticle,
+                segmentCounts: try Self.fetchSegmentCounts(db),
                 favorites: favorites,
                 packs: packs
             )
+        }
+    }
+
+    /// 逐篇/逐章的句子计数。两条聚合都只扫索引：
+    /// 总数走 v1 建的 `segment(article_id)`，已精讲数走 v3 建的部分索引。
+    static func fetchSegmentCounts(_ db: Database) throws -> [UUID: SegmentCounts] {
+        var counts: [UUID: SegmentCounts] = [:]
+        for row in try Row.fetchAll(
+            db, sql: "SELECT article_id, COUNT(*) AS n FROM segment GROUP BY article_id")
+        {
+            let id = try parseUUID(row["article_id"], table: "segment")
+            counts[id, default: SegmentCounts()].total = row["n"]
+        }
+        for row in try Row.fetchAll(
+            db,
+            sql: """
+                SELECT article_id, COUNT(*) AS n FROM segment
+                WHERE explanation_json IS NOT NULL GROUP BY article_id
+                """)
+        {
+            let id = try parseUUID(row["article_id"], table: "segment")
+            counts[id, default: SegmentCounts()].explained = row["n"]
+        }
+        return counts
+    }
+
+    /// 打开某篇/某章时才载入它的句子。
+    public func loadSegments(articleID: UUID) async throws -> [ArticleSegment] {
+        try await database.writer.read { db in
+            try SegmentRecord
+                .filter(Column("article_id") == uuidString(articleID))
+                .order(Column("order_index"))
+                .fetchAll(db)
+                .map { try $0.domainModel() }
+        }
+    }
+
+    /// 延迟切分后写入：同一事务里删旧句、插新句、标记该章已切分。
+    /// 旧句一并删除是为了让重切分幂等（首开时若中途失败，重来一次即可）。
+    public func replaceSegments(
+        articleID: UUID, segments: [ArticleSegment], now: Date = .now
+    ) async throws {
+        try await database.writer.write { db in
+            try db.execute(
+                sql: "DELETE FROM segment WHERE article_id = ?",
+                arguments: [uuidString(articleID)])
+            for segment in segments {
+                try SegmentRecord(segment, meta: nil, now: now).insert(db)
+            }
+            try db.execute(
+                sql: "UPDATE book_chapter SET is_segmented = 1 WHERE article_id = ?",
+                arguments: [uuidString(articleID)])
         }
     }
 
@@ -82,6 +150,13 @@ public struct ContentRepository: Sendable {
             for segment in segments {
                 try SegmentRecord(segment, meta: nil, now: now).insert(db)
             }
+        }
+    }
+
+    /// 取单篇文章（延迟切分时要读章节正文）。
+    public func article(id: UUID) async throws -> Article? {
+        try await database.writer.read { db in
+            try ArticleRecord.fetchOne(db, key: uuidString(id))?.domainModel()
         }
     }
 
