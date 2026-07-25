@@ -13,7 +13,7 @@
 
 ## Keywords
 
-language learning,reader,translation,vocabulary,SRS,Japanese,English,AI,study
+language learning,reader,translation,vocabulary,SRS,Japanese,furigana,ebook,EPUB,study
 
 ## Description
 
@@ -22,7 +22,9 @@ OpenKoto is an open-source, privacy-first language-learning reader. Turn article
 Key features:
 
 • Paste text or import TXT, Markdown, and web content
-• Read sentence by sentence and track your progress
+• Import TXT and EPUB books with automatic chapter splitting, in either a sentence-by-sentence view or the book's original layout
+• Read sentence by sentence, resume where you left off, and add bookmarks and highlights
+• Show word-level readings above Japanese and Chinese text (furigana / pinyin), generated entirely on device
 • Save vocabulary, organize word packs, and use spaced-repetition review
 • View reading and review statistics
 • Use the app in English, Simplified Chinese, or Japanese
@@ -34,6 +36,15 @@ Optional AI features use a bring-your-own-key model. Configure a compatible prov
 No account is required. Sample articles are included, so reading, vocabulary, and review features work without configuring an AI provider.
 
 OpenKoto is free and open source.
+
+## What's new in 0.2.5
+
+• Books: import TXT and EPUB files with automatic chapter splitting, resume position, bookmarks, and highlights, plus an original-layout reading mode
+• Word-level readings: show furigana above Japanese kanji and pinyin above Chinese words, generated entirely on device with no network or AI usage, toggled from the reader toolbar
+• Flashcards now hide the reading on the front by default, with a toggle in the card menu
+• First launch now starts with a language picker before the introduction
+• Settings gains a "Replay Welcome Guide" entry
+• Fixed non-UTF-8 text files (such as GB18030 Chinese TXT) being imported as garbled text
 
 ## First release notes
 
