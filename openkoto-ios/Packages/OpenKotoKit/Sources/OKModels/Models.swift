@@ -50,6 +50,12 @@ public struct ArticleSegment: Codable, Identifiable, Sendable, Hashable {
     public var translation: String?
     public var explanation: SegmentExplanation?
     public var isNewParagraph: Bool
+    /// 在媒体中的起止时刻（秒）。只有视频/音频的文稿句子有值，文章与书籍章节恒为 nil。
+    ///
+    /// **这是学习层的时间轴**：一句话对应一个区间，由词级/cue 级时间戳对齐得出。
+    /// 播放同步一律以它为准；更细的词级时间戳不进库（见 `OKMedia.TranscriptAligner`）。
+    public var startTime: Double?
+    public var endTime: Double?
     public var createdAt: Date
 
     public init(
@@ -61,6 +67,8 @@ public struct ArticleSegment: Codable, Identifiable, Sendable, Hashable {
         translation: String? = nil,
         explanation: SegmentExplanation? = nil,
         isNewParagraph: Bool = false,
+        startTime: Double? = nil,
+        endTime: Double? = nil,
         createdAt: Date = .now
     ) {
         self.id = id
@@ -71,6 +79,8 @@ public struct ArticleSegment: Codable, Identifiable, Sendable, Hashable {
         self.translation = translation
         self.explanation = explanation
         self.isNewParagraph = isNewParagraph
+        self.startTime = startTime
+        self.endTime = endTime
         self.createdAt = createdAt
     }
 }
@@ -185,6 +195,9 @@ public struct FavoriteVocabulary: Codable, Identifiable, Sendable, Hashable {
     public var reading: String?
     public var sourceArticleId: UUID?
     public var sourceArticleTitle: String?
+    /// 收藏时所在的句子。媒体字幕句带 `startTime`，所以有了它就能一路跳回
+    /// "原视频的那一秒"。不建外键：句子被重新切分后卡片仍应存活。
+    public var sourceSegmentId: UUID?
     public var packIds: [UUID]
 
     // FSRS 状态(引擎 OKSRS/FSRS.swift,规范 docs/specs/vocabulary-srs-spec.md §1.1)
@@ -214,6 +227,7 @@ public struct FavoriteVocabulary: Codable, Identifiable, Sendable, Hashable {
         reading: String? = nil,
         sourceArticleId: UUID? = nil,
         sourceArticleTitle: String? = nil,
+        sourceSegmentId: UUID? = nil,
         packIds: [UUID] = [],
         srsState: SRSState = .new,
         stability: Double = 0,
@@ -235,6 +249,7 @@ public struct FavoriteVocabulary: Codable, Identifiable, Sendable, Hashable {
         self.reading = reading
         self.sourceArticleId = sourceArticleId
         self.sourceArticleTitle = sourceArticleTitle
+        self.sourceSegmentId = sourceSegmentId
         self.packIds = packIds
         self.srsState = srsState
         self.stability = stability

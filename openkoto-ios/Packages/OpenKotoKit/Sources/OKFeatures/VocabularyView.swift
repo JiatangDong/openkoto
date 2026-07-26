@@ -43,7 +43,12 @@ struct VocabularyView: View {
                 }
             }
             .sheet(isPresented: $isReviewPresented) {
-                ReviewSessionView()
+                // 关 sheet 与置跳转在同一次状态更新里完成：SwiftUI 一个事务处理完，
+                // 视觉上是"卡片消失，人已经在原文里了"，不会先看到 sheet 落下再跳一次。
+                ReviewSessionView { jump in
+                    isReviewPresented = false
+                    store.pendingJump = jump
+                }
             }
             .sheet(isPresented: $isAddPresented) {
                 VocabEditSheet(favorite: nil)
@@ -139,6 +144,9 @@ struct VocabularyView: View {
                         .onTapGesture { editingFavorite = favorite }
                         .swipeActions(edge: .leading) {
                             suspendButton(favorite)
+                            if favorite.sourceArticleId != nil {
+                                backToSourceButton(favorite)
+                            }
                         }
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
@@ -155,6 +163,21 @@ struct VocabularyView: View {
         .safeAreaInset(edge: .bottom) {
             reviewButton
         }
+    }
+
+    /// 回到原句：把跳转请求放进 store，由 RootTabView 切 tab、LibraryView 落点。
+    ///
+    /// 只在有出处时出现——存量卡片（v5 之前收藏的）没有 `sourceSegmentId`，
+    /// 那就退化成跳到文章开头，总比给一个点了没反应的按钮好。
+    private func backToSourceButton(_ favorite: FavoriteVocabulary) -> some View {
+        Button {
+            guard let articleID = favorite.sourceArticleId else { return }
+            store.pendingJump = .init(
+                articleID: articleID, segmentID: favorite.sourceSegmentId)
+        } label: {
+            Label(L("vocab.backToSource"), systemImage: "text.viewfinder")
+        }
+        .tint(theme.primary)
     }
 
     private var statsHeader: some View {

@@ -129,6 +129,9 @@ struct SegmentRecord: Codable, FetchableRecord, PersistableRecord {
     var translation: String?
     var explanationJson: String?
     var isNewParagraph: Bool
+    /// 媒体文稿的句级时间轴（秒）。文章与书籍章节恒为 nil。
+    var startTime: Double?
+    var endTime: Double?
     var createdAt: Date
     var updatedAt: Date
 
@@ -139,6 +142,8 @@ struct SegmentRecord: Codable, FetchableRecord, PersistableRecord {
         case readingText = "reading_text"
         case explanationJson = "explanation_json"
         case isNewParagraph = "is_new_paragraph"
+        case startTime = "start_time"
+        case endTime = "end_time"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -158,6 +163,8 @@ struct SegmentRecord: Codable, FetchableRecord, PersistableRecord {
             explanationJson = nil
         }
         isNewParagraph = segment.isNewParagraph
+        startTime = segment.startTime
+        endTime = segment.endTime
         createdAt = segment.createdAt
         updatedAt = now
     }
@@ -182,6 +189,8 @@ struct SegmentRecord: Codable, FetchableRecord, PersistableRecord {
             translation: translation,
             explanation: explanation,
             isNewParagraph: isNewParagraph,
+            startTime: startTime,
+            endTime: endTime,
             createdAt: createdAt
         )
     }
@@ -202,6 +211,7 @@ struct FavoriteVocabularyRecord: Codable, FetchableRecord, PersistableRecord {
     var reading: String?
     var sourceArticleId: String?
     var sourceArticleTitle: String?
+    var sourceSegmentId: String?
     var srsState: String
     var stability: Double
     var difficulty: Double
@@ -218,6 +228,7 @@ struct FavoriteVocabularyRecord: Codable, FetchableRecord, PersistableRecord {
         case normalizedWord = "normalized_word"
         case sourceArticleId = "source_article_id"
         case sourceArticleTitle = "source_article_title"
+        case sourceSegmentId = "source_segment_id"
         case srsState = "srs_state"
         case schedulerVersion = "scheduler_version"
         case suspendedAt = "suspended_at"
@@ -239,6 +250,7 @@ struct FavoriteVocabularyRecord: Codable, FetchableRecord, PersistableRecord {
         reading = favorite.reading
         sourceArticleId = favorite.sourceArticleId.map(uuidString)
         sourceArticleTitle = favorite.sourceArticleTitle
+        sourceSegmentId = favorite.sourceSegmentId.map(uuidString)
         srsState = favorite.srsState.rawValue
         stability = favorite.stability
         difficulty = favorite.difficulty
@@ -269,6 +281,9 @@ struct FavoriteVocabularyRecord: Codable, FetchableRecord, PersistableRecord {
                 try parseUUID($0, table: Self.databaseTableName)
             },
             sourceArticleTitle: sourceArticleTitle,
+            sourceSegmentId: try sourceSegmentId.map {
+                try parseUUID($0, table: Self.databaseTableName)
+            },
             packIds: packIds,
             srsState: state,
             stability: stability,

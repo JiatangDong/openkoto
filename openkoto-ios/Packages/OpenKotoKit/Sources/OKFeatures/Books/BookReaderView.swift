@@ -15,6 +15,10 @@ struct BookReaderView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     let book: Book
+    /// 从搜索结果进来时的落点（章 + 句序）。有值时压过续读位置——
+    /// 用户点的是"这一句"，不是"上次读到哪"。
+    var initialChapterIndex: Int?
+    var initialSegmentOrder: Int?
 
     @AppStorage("reader.fontSize") private var fontSize: Double = 18
     /// 与 ReaderView 共用同一个 key：读音开关是全局阅读偏好，不该按书记忆。
@@ -33,6 +37,8 @@ struct BookReaderView: View {
     @State private var webSelection: OriginalLayoutView.WebSelection?
     /// 划词收藏时预填到生词编辑表的词形。
     @State private var pendingWord: String?
+    /// 划词所在的句子——走的是 `addHighlight` 同一套重锚，不写第二份定位。
+    @State private var pendingSegmentID: UUID?
     @State private var showBookmarks = false
 
     /// 位置写库的最小间隔——翻页时每帧都写没有意义。
@@ -91,6 +97,7 @@ struct BookReaderView: View {
         .onAppear {
             readingStart = Date()
             restoreFromProgress()
+            jumpToInitialLocationIfNeeded()
         }
         .onDisappear {
             flushReadingSession()
@@ -116,7 +123,9 @@ struct BookReaderView: View {
             isPresented: Binding(
                 get: { pendingWord != nil }, set: { if !$0 { pendingWord = nil } })
         ) {
-            VocabEditSheet(favorite: nil, prefilledWord: pendingWord)
+            VocabEditSheet(
+                favorite: nil, prefilledWord: pendingWord,
+                sourceArticle: currentArticle, sourceSegmentID: pendingSegmentID)
         }
         .sheet(isPresented: $showBookmarks) {
             BookmarksSheet(book: book) { index, order in
@@ -189,6 +198,14 @@ struct BookReaderView: View {
                 scrollFraction: scrollFraction,
                 selectedText: selection.text))
         webSelection = nil
+    }
+
+    /// 搜索结果落点：走的还是书签那条路（切章 + restoreOrder），不写第二套定位。
+    private func jumpToInitialLocationIfNeeded() {
+        guard let order = initialSegmentOrder else { return }
+        let index = initialChapterIndex ?? chapterIndex
+        guard chapters.indices.contains(index) else { return }
+        jump(chapter: index, order: order)
     }
 
     /// 从书签面板跳转：先切章，再滚到那一句。
@@ -277,6 +294,11 @@ struct BookReaderView: View {
         let word = selection.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !word.isEmpty else { return }
         pendingWord = word
+        if let chapter = currentChapter {
+            let segments = store.segments(for: chapter.articleId)
+            pendingSegmentID = SelectionResolver.resolve(
+                selection: selection.text, in: segments)?.segmentID
+        }
         webSelection = nil
     }
 
@@ -384,10 +406,9 @@ struct BookReaderView: View {
     @ViewBuilder
     private var bottomBar: some View {
         VStack(spacing: 0) {
-            if let chapter = currentChapter,
-                let state = store.batchByArticle[chapter.articleId]
-            {
-                batchProgress(state)
+            if let chapter = currentChapter {
+                // 跑完之后若有可重试的失败句，这里会自动变成重试入口
+                batchProgress(articleID: chapter.articleId)
             }
             HStack {
                 Button {
@@ -422,28 +443,8 @@ struct BookReaderView: View {
         .background(.bar)
     }
 
-    private func batchProgress(_ state: ContentStore.BatchState) -> some View {
-        let fraction = state.total > 0 ? Double(state.completed) / Double(state.total) : 0
-        return VStack(spacing: 6) {
-            HStack {
-                Text(L(state.kind == .explain
-                    ? "reader.batch.explaining" : "reader.batch.translating"))
-                    .font(.footnote.weight(.medium))
-                Spacer()
-                Text(verbatim: "\(state.completed)/\(state.total)")
-                    .font(.footnote.monospacedDigit())
-                    .foregroundStyle(theme.mutedForeground)
-                if let chapter = currentChapter {
-                    Button(L("reader.batch.cancel")) {
-                        store.cancelBatch(articleID: chapter.articleId)
-                    }
-                    .font(.footnote)
-                }
-            }
-            ProgressView(value: fraction).tint(theme.primary)
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
+    private func batchProgress(articleID: UUID) -> some View {
+        BatchProgressBar(articleID: articleID)
     }
 
     // MARK: - 工具栏

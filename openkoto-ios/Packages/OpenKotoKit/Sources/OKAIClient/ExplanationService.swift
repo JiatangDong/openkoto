@@ -48,6 +48,35 @@ public struct ExplanationService: Sendable {
         return content.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// 查一个词在**当前句子里**的意思。
+    ///
+    /// 与 `explain` 的区别不只是"少要点东西"：精讲一次要吐 600–1200 token，
+    /// 而阅读时最高频的动作只是"这个词啥意思"。这条路径的 schema 与输出都压到极小，
+    /// 便宜一个数量级。返回 `VocabularyItem` 而不是新类型——它能直接进生词本。
+    public func gloss(
+        word: String,
+        sentence: String,
+        targetLanguage: String,
+        config: ModelConfig,
+        apiKey: String?
+    ) async throws -> VocabularyItem {
+        let request = ChatRequest(
+            purpose: .wordGloss,
+            systemPrompt: PromptLibrary.wordGlossSystemPrompt(targetLanguage: targetLanguage),
+            userMessage: PromptLibrary.wordGlossUserMessage(word: word, sentence: sentence),
+            temperature: 0.2,
+            maxOutputTokens: 300,
+            timeout: 30
+        )
+        let content = try await transport.complete(request, config: config, apiKey: apiKey)
+        var item = try LLMJSONExtractor.parse(
+            VocabularyItem.self, from: content, requestID: request.requestID)
+        // 模型偶尔会把 word 改写成别的形态；保底用用户点的那个词，
+        // 否则收藏进生词本后与原文对不上。
+        if item.word.trimmingCharacters(in: .whitespaces).isEmpty { item.word = word }
+        return item
+    }
+
     /// 设置页“测试连接”：发一条最小 chat 请求，成功即返回，失败抛 `AIClientError`。
     public func testConnection(config: ModelConfig, apiKey: String?) async throws {
         let request = ChatRequest(

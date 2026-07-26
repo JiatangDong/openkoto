@@ -211,6 +211,147 @@ public struct AppDatabase: Sendable {
                 columns: ["article_id"],
                 condition: Column("explanation_json") != nil)
         }
+
+        // v4：视频/音频。转写文稿复用 article/segment 表——理由同 v3 的书籍。
+        //
+        // 时间轴只落到**句级**（segment.start_time/end_time）。词级时间戳不进库：
+        // 它的格式还会随来源演进（端上给 CMTimeRange、SRT 根本给不了），
+        // 且只在播放时需要，可从源文件重推——同 reading runs 的既有判断。
+        migrator.registerMigration("v4") { db in
+            // 对文章与书籍章节的 segment 行恒为 NULL，无副作用。
+            try db.alter(table: "segment") { t in
+                t.add(column: "start_time", .double)
+                t.add(column: "end_time", .double)
+            }
+            try db.create(table: "media") { t in
+                t.primaryKey("id", .text)
+                t.column("title", .text).notNull()
+                t.column("kind", .text).notNull()  // "video" | "audio"
+                // Media/<dir_name>；绝对路径随重装变化，只存相对名
+                t.column("dir_name", .text).notNull()
+                // 目录内的媒体文件名；NULL = 引用外部文件（见 bookmark_data）
+                t.column("file_name", .text)
+                t.column("bookmark_data", .blob)
+                t.column("source_label", .text)
+                t.column("duration", .double).notNull().defaults(to: 0)
+                t.column("language", .text)
+                t.column("transcript_source", .text).notNull()
+                t.column("has_word_timing", .boolean).notNull().defaults(to: false)
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+            // 文稿 = article 行。article_id 既是主键也是外键（同 book_chapter）。
+            // media → article 的级联无法用外键表达，由 MediaRepository.deleteMedia 显式完成。
+            try db.create(table: "media_part") { t in
+                t.primaryKey("article_id", .text).references("article", onDelete: .cascade)
+                t.column("media_id", .text).notNull().indexed()
+                    .references("media", onDelete: .cascade)
+                t.column("part_index", .integer).notNull().defaults(to: 0)
+                t.uniqueKey(["media_id", "part_index"])
+            }
+            try db.create(table: "media_progress") { t in
+                t.primaryKey("media_id", .text).references("media", onDelete: .cascade)
+                t.column("position", .double).notNull().defaults(to: 0)
+                t.column("rate", .double).notNull().defaults(to: 1)
+                t.column("updated_at", .datetime).notNull()
+            }
+        }
+
+        // v5：精讲复用。
+        //
+        // `explanation_json` 里一直存着 `source_text_hash`，但从来没人读过——
+        // 于是同一句话在别处（重新导入的书、被分享两次的文章、与文稿重叠的字幕）
+        // 要重新付一次钱。这里把它变成可查的：**虚拟生成列**（值直接从既有 JSON 取，
+        // 不重写任何一行数据）+ **只覆盖已精讲行的部分索引**。
+        //
+        // 已实测查询计划确实走这条索引（1 万行中查一条 0.09ms），
+        // 且未精讲行的生成列为 NULL，不会误命中。
+        migrator.registerMigration("v5") { db in
+            try db.alter(table: "segment") { t in
+                t.add(column: "source_text_hash", .text)
+                    .generatedAs(sql: "json_extract(explanation_json, '$.source_text_hash')")
+            }
+            try db.create(
+                index: "segment_on_source_hash", on: "segment",
+                columns: ["source_text_hash"],
+                condition: Column("explanation_json") != nil)
+
+            // 生词卡回跳到"原句"（媒体字幕句带 start_time，可直接跳到那一秒）。
+            // 不建外键：句子被重新切分后卡片仍应存活，同 reading_session 的既定判断。
+            try db.alter(table: "favorite_vocabulary") { t in
+                t.add(column: "source_segment_id", .text)
+            }
+        }
+
+        // v6：全库搜索。
+        //
+        // **索引建在 `article.content` 而不是 `segment.text`**，这一点很关键：
+        // `BookRepository.insertBook` 导入时不写 segment（切分推迟到首次打开该章），
+        // 建 segment 索引会让新导入的书全部搜不到。而 article.content 天然覆盖
+        // 文章 + 书籍章节 + 媒体文稿三类。附带好处：`saveExplanation`/`saveTranslation`
+        // 只 UPDATE segment 从不碰 article，所以批量精讲一次都不会触发 FTS 重索引。
+        //
+        // tokenizer 用 **trigram**：unicode61（默认）对中日文完全无效——整句会被当成
+        // 一个 token，`MATCH '日本語'` 查不到任何东西。代价是查询串必须 ≥3 字符，
+        // 两字词由上层的 LIKE 兜底（见 `ContentRepository.search`）。
+        //
+        // **只建表建触发器，不回填**：GRDB 的 `synchronize(withTable:)` 会在 migration
+        // 内部同步跑全量 rebuild，而 migration 在 `AppDatabase.init` 同步执行、
+        // `ContentStore.live()` 又在主线程构造 —— 老用户升级首启会卡住数秒。
+        // 改成把待办 rowid 记进 `fts_backfill`，交给 `SearchIndexer` 在后台分批消化。
+        migrator.registerMigration("v6") { db in
+            try db.create(
+                virtualTable: "article_fts", using: FTS5()
+            ) { t in
+                t.column("title")
+                t.column("content")
+                t.content = "article"
+                t.contentRowID = "rowid"
+                // GRDB 没有 trigram 工厂（只有 ascii/porter/unicode61），用通用构造器
+                t.tokenizer = FTS5TokenizerDescriptor(components: ["trigram"])
+            }
+
+            // 待办表要先于触发器建出来：触发器会查它。
+            //
+            // 这张表**永不删除**。它空了只表示索引已建完，而不是可以丢——
+            // 触发器引用了它，删掉会让之后每一次文章写入都失败。
+            try db.create(table: "fts_backfill") { t in
+                t.primaryKey("rowid", .integer)
+            }
+            try db.execute(sql: "INSERT INTO fts_backfill (rowid) SELECT rowid FROM article")
+
+            // 手写触发器而不是 synchronize(withTable:)：后者生成的 UPDATE 触发器
+            // 没有 WHEN 过滤，任何一列的改动都会重索引一次。
+            //
+            // 每条改动索引的语句都带 `NOT EXISTS (SELECT 1 FROM fts_backfill …)`：
+            // **还在待办里的行根本没进过索引**，对它发 'delete' 会写进一笔负的词频，
+            // SQLite 随即把整个库判为 malformed——升级后回填还没跑完时删掉一篇文章，
+            // 那次删除会直接报 "database disk image is malformed" 而失败。
+            // 待办中的行交给回填器处理即可，它读的是当前值，改了也不会丢。
+            try db.execute(
+                sql: """
+                    CREATE TRIGGER article_fts_ai AFTER INSERT ON article BEGIN
+                        INSERT INTO article_fts(rowid, title, content)
+                        VALUES (new.rowid, new.title, new.content);
+                    END;
+                    CREATE TRIGGER article_fts_ad AFTER DELETE ON article BEGIN
+                        INSERT INTO article_fts(article_fts, rowid, title, content)
+                        SELECT 'delete', old.rowid, old.title, old.content
+                        WHERE NOT EXISTS (SELECT 1 FROM fts_backfill WHERE rowid = old.rowid);
+                        DELETE FROM fts_backfill WHERE rowid = old.rowid;
+                    END;
+                    CREATE TRIGGER article_fts_au AFTER UPDATE ON article
+                    WHEN old.content IS NOT new.content OR old.title IS NOT new.title
+                    BEGIN
+                        INSERT INTO article_fts(article_fts, rowid, title, content)
+                        SELECT 'delete', old.rowid, old.title, old.content
+                        WHERE NOT EXISTS (SELECT 1 FROM fts_backfill WHERE rowid = old.rowid);
+                        INSERT INTO article_fts(rowid, title, content)
+                        SELECT new.rowid, new.title, new.content
+                        WHERE NOT EXISTS (SELECT 1 FROM fts_backfill WHERE rowid = old.rowid);
+                    END;
+                    """)
+        }
         return migrator
     }
 }

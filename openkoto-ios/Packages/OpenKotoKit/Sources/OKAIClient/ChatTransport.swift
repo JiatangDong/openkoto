@@ -10,6 +10,9 @@ public struct ChatRequest: Sendable {
         case connectionTest
         case translate
         case explain
+        /// 单词释义。目前所有 purpose 都走同一个模型；带上它是为了将来真要按用途
+        /// 路由到不同模型时，调用点不必回头改。
+        case wordGloss
     }
 
     public var purpose: Purpose
@@ -44,8 +47,15 @@ public struct ChatRequest: Sendable {
 public enum AIClientError: Error, Sendable, Equatable {
     case notConfigured           // 尚未配置可用模型（应用层）
     case networkUnreachable
+    /// 请求超时。与 `.networkUnreachable` 分开：用户据此采取的行动不同
+    /// （超时 → 重试或换更快的模型；没网 → 检查网络）。
+    case timeout
     case unauthorized            // 401 / 403
     case rateLimited             // 429
+    /// 额度/余额耗尽。与 `.rateLimited` 分开是**必须**的：限流等一会儿就好，
+    /// 余额不足重试多少次都不会好。OpenAI 的 insufficient_quota 恰好也走 429，
+    /// 混为一谈会让用户一直重试一个永远不会好的状态。
+    case insufficientBalance
     case serverError(status: Int)
     case malformedResponse(requestID: UUID)
     case contentBlocked
@@ -54,9 +64,10 @@ public enum AIClientError: Error, Sendable, Equatable {
     /// 是否适合自动重试（安全幂等）。
     public var isRetryable: Bool {
         switch self {
-        case .networkUnreachable, .rateLimited, .serverError:
+        case .networkUnreachable, .timeout, .rateLimited, .serverError:
             return true
-        case .notConfigured, .unauthorized, .malformedResponse, .contentBlocked, .cancelled:
+        case .notConfigured, .unauthorized, .insufficientBalance, .malformedResponse,
+            .contentBlocked, .cancelled:
             return false
         }
     }

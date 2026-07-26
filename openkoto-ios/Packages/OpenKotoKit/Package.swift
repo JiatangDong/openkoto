@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "OKAIClient", targets: ["OKAIClient"]),
         .library(name: "OKSegmentation", targets: ["OKSegmentation"]),
         .library(name: "OKBooks", targets: ["OKBooks"]),
+        .library(name: "OKMedia", targets: ["OKMedia"]),
         .library(name: "OKDesignSystem", targets: ["OKDesignSystem"]),
         .library(name: "OKLocalization", targets: ["OKLocalization"]),
         .library(name: "OKFeatures", targets: ["OKFeatures"]),
@@ -27,6 +28,9 @@ let package = Package(
         // 书籍解析：编码嗅探 / ZIP / EPUB / TXT 分章。
         // 只依赖 Foundation + Compression，不碰 UIKit/WebKit——解析器在 macOS 上 swift test 全覆盖。
         .target(name: "OKBooks", dependencies: ["OKModels", "OKSegmentation"]),
+        // 字幕解析与时间轴对齐。同样只依赖 Foundation——
+        // AVFoundation/Speech 隔离在 OKFeatures，好让对齐算法在 macOS 上全量单测。
+        .target(name: "OKMedia", dependencies: ["OKModels", "OKSegmentation"]),
         // FSRS-6 调度引擎：1:1 移植桌面 src-tauri/src/fsrs.rs
         // (规范 docs/specs/vocabulary-srs-spec.md,黄金用例与 Rust 共享)
         .target(name: "OKSRS", dependencies: ["OKModels"]),
@@ -54,7 +58,7 @@ let package = Package(
         .target(
             name: "OKFeatures",
             dependencies: [
-                "OKModels", "OKDesignSystem", "OKSegmentation", "OKBooks",
+                "OKModels", "OKDesignSystem", "OKSegmentation", "OKBooks", "OKMedia",
                 "OKAIClient", "OKPersistence", "OKLocalization", "OKSRS",
             ],
             // 原版模式注入 WKWebView 的 JS 桥
@@ -79,6 +83,7 @@ let package = Package(
         .testTarget(
             name: "OKBooksTests",
             dependencies: ["OKBooks", "OKSegmentation", "OKTestSupport"]),
+        .testTarget(name: "OKMediaTests", dependencies: ["OKMedia", "OKModels"]),
         // CoreText 振假名排版的度量契约（CoreText 在 macOS 上同样可用，无需模拟器）
         .testTarget(name: "OKDesignSystemTests", dependencies: ["OKDesignSystem"]),
         .testTarget(name: "OKAIClientTests", dependencies: ["OKAIClient", "OKModels"]),

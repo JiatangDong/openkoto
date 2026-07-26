@@ -4,16 +4,19 @@ import OKModels
 import OKBooks
 import OKDesignSystem
 import OKLocalization
+import PhotosUI
 
 /// 书库列表项：单篇文章与整本书混排，按创建时间倒序。
 enum LibraryItem: Identifiable, Hashable {
     case article(Article)
     case book(Book)
+    case media(Media)
 
     var id: UUID {
         switch self {
         case .article(let article): article.id
         case .book(let book): book.id
+        case .media(let media): media.id
         }
     }
 
@@ -21,7 +24,52 @@ enum LibraryItem: Identifiable, Hashable {
         switch self {
         case .article(let article): article.createdAt
         case .book(let book): book.createdAt
+        case .media(let media): media.createdAt
         }
+    }
+
+    var title: String {
+        switch self {
+        case .article(let article): article.title
+        case .book(let book): book.title
+        case .media(let media): media.title
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .article: "doc.text"
+        case .book: "book"
+        case .media: "play.rectangle"
+        }
+    }
+}
+
+/// 书库导航目标。
+///
+/// 包一层枚举而不是换成 `NavigationPath`：后者是类型擦除，会牵动三个 destination
+/// 的注册、`openFirstArticleForDemoIfNeeded` 以及依赖 `-prototypeDemo` 的截图/UI 测试。
+/// 这样类型安全没丢，改动面小一半。
+enum LibraryRoute: Hashable {
+    case item(LibraryItem)
+    /// 从搜索结果跳到某篇的某一句；书籍还要带章号。
+    case jump(LibraryItem, chapter: Int?, order: Int)
+
+    var item: LibraryItem {
+        switch self {
+        case .item(let item): item
+        case .jump(let item, _, _): item
+        }
+    }
+
+    var order: Int? {
+        if case .jump(_, _, let order) = self { return order }
+        return nil
+    }
+
+    var chapter: Int? {
+        if case .jump(_, let chapter, _) = self { return chapter }
+        return nil
     }
 }
 
@@ -30,21 +78,32 @@ struct LibraryView: View {
     @Environment(ContentStore.self) private var store
     @Environment(\.theme) private var theme
     @State private var showImport = false
-    @State private var path: [LibraryItem] = []
+    @State private var path: [LibraryRoute] = []
     @State private var importError: String?
     @State private var isImportingBook = false
+    @State private var searchQuery = ""
+
+    private var isSearching: Bool {
+        !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     /// 文章与书籍混排，按创建时间倒序。
     private var items: [LibraryItem] {
         let merged = store.articles.map(LibraryItem.article)
             + store.books.map(LibraryItem.book)
+            + store.medias.map(LibraryItem.media)
         return merged.sorted { $0.createdAt > $1.createdAt }
     }
 
     var body: some View {
         NavigationStack(path: $path) {
             Group {
-                if items.isEmpty {
+                if isSearching {
+                    LibrarySearchResults(
+                        query: searchQuery.trimmingCharacters(in: .whitespacesAndNewlines),
+                        items: items,
+                        onOpen: openSearchHit)
+                } else if items.isEmpty {
                     ContentUnavailableView(
                         L("library.empty.title"),
                         systemImage: "book",
@@ -55,6 +114,10 @@ struct LibraryView: View {
                 }
             }
             .background(theme.background)
+            .searchable(
+                text: $searchQuery,
+                placement: .navigationBarDrawer(displayMode: .automatic),
+                prompt: L("search.prompt"))
             // 从"文件"App 或其他 App 拖入 .txt/.md/.epub 文件直接导入
             .dropDestination(for: URL.self) { urls, _ in
                 importDroppedFiles(urls)
@@ -89,16 +152,66 @@ struct LibraryView: View {
             .sheet(isPresented: $showImport) {
                 ImportSheet()
             }
-            .navigationDestination(for: LibraryItem.self) { item in
-                switch item {
-                case .article(let article): ReaderView(article: article)
-                case .book(let book): BookReaderView(book: book)
+            .navigationDestination(for: LibraryRoute.self) { route in
+                switch route.item {
+                case .article(let article):
+                    ReaderView(article: article, initialSegmentOrder: route.order)
+                case .book(let book):
+                    BookReaderView(
+                        book: book,
+                        initialChapterIndex: route.chapter,
+                        initialSegmentOrder: route.order)
+                case .media(let media):
+                    MediaPlayerView(media: media, initialSegmentOrder: route.order)
                 }
             }
         }
+        .task(id: store.pendingJump) { await consumePendingJump() }
         .onAppear { openFirstArticleForDemoIfNeeded() }
         // 数据经 GRDB 异步加载，onAppear 时可能尚未就绪，加载完成后再试一次
         .onChange(of: store.articles.first?.id) { openFirstArticleForDemoIfNeeded() }
+    }
+
+    /// 消费「回到原句」：与搜索走同一条落点逻辑，只是句序来自 segment 而非查询词。
+    private func consumePendingJump() async {
+        guard let jump = store.pendingJump else { return }
+        // 清标志放在最后：它是 `.task(id:)` 的 id，提前清会让 SwiftUI
+        // 把这条正在跑的任务取消在 await 上。用 defer 是为了连 `.unknown`
+        // 那条早退路径也清掉——否则标志永远留着，同一张卡再点就没反应了。
+        defer { store.pendingJump = nil }
+        await store.openArticle(jump.articleID)
+        let order =
+            jump.segmentID
+            .flatMap { id in store.segments(for: jump.articleID).first { $0.id == id } }?.order ?? 0
+        switch store.container(forArticle: jump.articleID) {
+        case .article(let article):
+            path = [.jump(.article(article), chapter: nil, order: order)]
+        case .book(let book, let chapterIndex):
+            path = [.jump(.book(book), chapter: chapterIndex, order: order)]
+        case .media(let media):
+            path = [.jump(.media(media), chapter: nil, order: order)]
+        case .unknown:
+            break
+        }
+    }
+
+    /// 点开一条全文命中：定位到那一句再推导航。
+    ///
+    /// 句序解析放在推导航**之前**——先推再滚会看到一次明显的跳动，
+    /// 而定位只要小几百毫秒（懒切分），期间那条结果上有转圈。
+    private func openSearchHit(_ hit: ContentStore.SearchHit) async {
+        let needle = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let order = await store.locateSegmentOrder(articleID: hit.articleID, matching: needle)
+        switch store.container(forArticle: hit.articleID) {
+        case .article(let article):
+            path = [.jump(.article(article), chapter: nil, order: order ?? 0)]
+        case .book(let book, let chapterIndex):
+            path = [.jump(.book(book), chapter: chapterIndex, order: order ?? 0)]
+        case .media(let media):
+            path = [.jump(.media(media), chapter: nil, order: order ?? 0)]
+        case .unknown:
+            break
+        }
     }
 
     /// 截图/UI 测试用（-prototypeDemo）：直接打开第一篇示例文章
@@ -106,7 +219,7 @@ struct LibraryView: View {
         guard ProcessInfo.processInfo.arguments.contains("-prototypeDemo"),
               path.isEmpty, let first = store.articles.first
         else { return }
-        path = [.article(first)]
+        path = [.item(.article(first))]
     }
 
     /// 拖入文件导入：按扩展名分流——EPUB 走书籍管线，文本够长也建书，否则单篇文章。
@@ -154,10 +267,11 @@ struct LibraryView: View {
         ScrollView {
             LazyVStack(spacing: 10) {
                 ForEach(items) { item in
-                    NavigationLink(value: item) {
+                    NavigationLink(value: LibraryRoute.item(item)) {
                         switch item {
                         case .article(let article): ArticleCard(article: article)
                         case .book(let book): BookCard(book: book)
+                        case .media(let media): MediaCard(media: media)
                         }
                     }
                     .buttonStyle(.plain)
@@ -166,6 +280,7 @@ struct LibraryView: View {
                             switch item {
                             case .article(let article): store.deleteArticle(article.id)
                             case .book(let book): store.deleteBook(book.id)
+                            case .media(let media): store.deleteMedia(media.id)
                             }
                         } label: {
                             Label(L("common.delete"), systemImage: "trash")
@@ -231,13 +346,14 @@ private struct ImportSheet: View {
     @Environment(\.theme) private var theme
 
     private enum Mode: String, CaseIterable, Identifiable {
-        case paste, file, url
+        case paste, file, url, media
         var id: String { rawValue }
         var titleKey: String.LocalizationValue {
             switch self {
             case .paste: "import.method.paste"
             case .file: "import.method.file"
             case .url: "import.method.url"
+            case .media: "import.method.media"
             }
         }
     }
@@ -249,6 +365,15 @@ private struct ImportSheet: View {
     @State private var isFileImporterPresented = false
     @State private var isFetching = false
     @State private var errorMessage: String?
+    /// 视频/音频模式：字幕必选，媒体文件可选（只导字幕就是纯文稿，当文章读）。
+    @State private var subtitleURL: URL?
+    @State private var mediaURL: URL?
+    @State private var isSubtitleImporterPresented = false
+    @State private var isMediaImporterPresented = false
+    /// 相册选中的视频。相册资源不能长期引用，取出来即拷贝，落地时走 copying 分支。
+    @State private var photoItem: PhotosPickerItem?
+    @State private var photoURL: URL?
+    @State private var isLoadingPhoto = false
 
     var body: some View {
         NavigationStack {
@@ -263,9 +388,10 @@ private struct ImportSheet: View {
                 case .file: fileSection
                 case .url: urlSection
                 case .paste: EmptyView()
+                case .media: mediaSection
                 }
 
-                editorSection
+                if mode != .media { editorSection }
             }
             .navigationTitle(L("import.title"))
             .navigationBarTitleDisplayMode(.inline)
@@ -275,13 +401,32 @@ private struct ImportSheet: View {
             ) { result in
                 handleFileImport(result)
             }
+            .fileImporter(
+                isPresented: $isSubtitleImporterPresented,
+                allowedContentTypes: TextImport.subtitleContentTypes
+            ) { result in
+                if case .success(let url) = result { subtitleURL = url }
+            }
+            .fileImporter(
+                isPresented: $isMediaImporterPresented,
+                allowedContentTypes: TextImport.mediaContentTypes
+            ) { result in
+                if case .success(let url) = result {
+                    mediaURL = url
+                    photoURL = nil
+                }
+            }
+            .onChange(of: photoItem) { _, item in
+                guard let item else { return }
+                loadPhotoVideo(item)
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(L("common.cancel")) { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L("common.save")) { save() }
-                        .disabled(content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(!canSave)
                 }
             }
             .alert(
@@ -380,13 +525,111 @@ private struct ImportSheet: View {
         }
     }
 
+    /// 字幕必选，媒体文件可选：只导字幕也成立——那就是一篇带时间轴的文稿。
+    private var mediaSection: some View {
+        Section {
+            Button {
+                isSubtitleImporterPresented = true
+            } label: {
+                LabeledContent {
+                    Text(subtitleURL?.lastPathComponent ?? L(canTranscribeOnDevice ? "import.media.optional" : "import.media.required"))
+                        .foregroundStyle(
+                            subtitleURL == nil ? theme.mutedForeground : theme.foreground)
+                        .lineLimit(1)
+                } label: {
+                    Label(L("import.media.subtitle"), systemImage: "captions.bubble")
+                }
+            }
+            Button {
+                isMediaImporterPresented = true
+            } label: {
+                LabeledContent {
+                    Text(pickedMediaName ?? L("import.media.optional"))
+                        .foregroundStyle(theme.mutedForeground)
+                        .lineLimit(1)
+                } label: {
+                    Label(L("import.media.file"), systemImage: "film")
+                }
+            }
+            PhotosPicker(selection: $photoItem, matching: .videos) {
+                LabeledContent {
+                    if isLoadingPhoto { ProgressView() }
+                } label: {
+                    Label(L("import.media.photoLibrary"), systemImage: "photo.on.rectangle")
+                }
+            }
+        } footer: {
+            Text(L(canTranscribeOnDevice ? "import.media.footer.asr" : "import.media.footer"))
+        }
+    }
+
+    /// iOS 26 能端上转写，所以「只选媒体、稍后生成字幕」也成立；
+    /// 旧系统上转不了，必须有现成字幕才有意义。
+    private var canTranscribeOnDevice: Bool {
+        if #available(iOS 26, *) { true } else { false }
+    }
+
+    /// 相册取出的文件优先——两个来源只认最后选的那个。
+    private var pickedMedia: URL? { photoURL ?? mediaURL }
+    private var pickedMediaName: String? { pickedMedia?.lastPathComponent }
+
+    private var canSave: Bool {
+        mode == .media
+            ? (subtitleURL != nil || (canTranscribeOnDevice && pickedMedia != nil))
+            : !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private func save() {
+        if mode == .media {
+            saveMedia()
+            return
+        }
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalTitle = title.isEmpty
             ? String(trimmed.prefix(while: { !$0.isNewline }).prefix(40))
             : title
         store.importArticle(title: finalTitle, content: trimmed)
         dismiss()
+    }
+
+    private func loadPhotoVideo(_ item: PhotosPickerItem) {
+        isLoadingPhoto = true
+        Task {
+            defer { isLoadingPhoto = false }
+            do {
+                let video = try await item.loadTransferable(type: PhotoLibraryVideo.self)
+                photoURL = video?.url
+                if photoURL != nil { mediaURL = nil }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func saveMedia() {
+        let name = title.isEmpty ? nil : title
+        // 相册那份是我们自己的临时副本，必须拷进 App 目录；
+        // 「文件」那份是 security-scoped URL，存 bookmark 零拷贝即可。
+        let copying = photoURL != nil
+        let media = pickedMedia
+        Task {
+            do {
+                if let subtitleURL {
+                    try await store.importMedia(
+                        mediaURL: media, subtitleURL: subtitleURL, title: name,
+                        copyingMedia: copying)
+                } else if let media {
+                    // 没字幕：先建占位，进播放页再用端上转写生成
+                    try await store.importMediaForTranscription(
+                        mediaURL: media, title: name, copyingMedia: copying)
+                } else {
+                    return
+                }
+                dismiss()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 }
 #endif

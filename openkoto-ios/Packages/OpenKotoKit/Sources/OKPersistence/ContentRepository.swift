@@ -53,10 +53,14 @@ public struct ContentRepository: Sendable {
     /// 进度徽章所需的计数走两条 index-only 聚合查询，不触碰正文页。
     public func loadAll() async throws -> LibrarySnapshot {
         try await database.writer.read { db in
-            // 书籍章节也是 article 行，但归 book 管，不进书库顶层列表。
+            // 书籍章节与媒体文稿也是 article 行，但各归 book / media 管，
+            // 在书库顶层列表里以书/视频卡片出现，不重复成一条文章。
             let articles = try ArticleRecord
                 .filter(
-                    sql: "id NOT IN (SELECT article_id FROM book_chapter)")
+                    sql: """
+                        id NOT IN (SELECT article_id FROM book_chapter)
+                        AND id NOT IN (SELECT article_id FROM media_part)
+                        """)
                 .order(Column("created_at").desc, Column("id"))
                 .fetchAll(db)
                 .map { try $0.domainModel() }
@@ -105,6 +109,18 @@ public struct ContentRepository: Sendable {
                 .order(Column("order_index"))
                 .fetchAll(db)
                 .map { try $0.domainModel() }
+        }
+    }
+
+    /// 单句正文——生词卡显示「出处原句」用。
+    ///
+    /// 刻意**不走 `loadSegments`**：那会把整章上万句读进来，还会挤掉
+    /// `ContentStore` 里正在读的那几章（LRU 只留 3 篇）。复习二十张卡就能把
+    /// 用户翻到一半的章节反复顶出内存。这里只取一行，不碰任何缓存。
+    public func segmentText(id: UUID) async throws -> String? {
+        try await database.writer.read { db in
+            try String.fetchOne(
+                db, sql: "SELECT text FROM segment WHERE id = ?", arguments: [uuidString(id)])
         }
     }
 
@@ -198,6 +214,161 @@ public struct ContentRepository: Sendable {
                     "id": uuidString(segmentID),
                 ])
             return db.changesCount > 0
+        }
+    }
+
+    // MARK: - 全库搜索
+
+    /// 一条搜索结果：命中的容器 + 带高亮标记的片段。
+    public struct SearchHit: Sendable, Equatable, Identifiable {
+        public var articleID: UUID
+        public var title: String
+        /// 命中处的上下文，命中词用 `\u{2}`…`\u{3}` 包起来（不可见控制符，
+        /// 避免与正文里可能出现的任何标记冲突，由 UI 转成高亮）。
+        public var snippet: String
+        public var id: UUID { articleID }
+
+        public static let highlightStart = "\u{2}"
+        public static let highlightEnd = "\u{3}"
+    }
+
+    /// trigram 的硬约束：查询串短于这个长度就查不出任何东西。
+    public static let minimumFTSQueryLength = 3
+
+    /// 全库搜索。
+    ///
+    /// **两条路**：≥3 字符走 FTS5（trigram，有 snippet 与 bm25 排序）；
+    /// 更短的走 LIKE 全表扫。后者是必需的——中文两字词（"日本""文法"）是最高频查询，
+    /// 而 trigram 根本查不到它们。书库是"几十本"量级不是"几十万文档"，加了 LIMIT
+    /// 之后全表扫的代价可以接受，比为此上自定义 tokenizer 便宜两个数量级。
+    public func search(_ rawQuery: String, limit: Int = 50) async throws -> [SearchHit] {
+        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        return query.unicodeScalars.count >= Self.minimumFTSQueryLength
+            ? try await ftsSearch(query, limit: limit)
+            : try await likeSearch(query, limit: limit)
+    }
+
+    private func ftsSearch(_ query: String, limit: Int) async throws -> [SearchHit] {
+        try await database.writer.read { db in
+            // 用短语匹配：trigram 上前缀查询（`词*`）永远返回空，别用 GRDB 的
+            // `matchingAllPrefixesIn`。整串当一个短语查才是 trigram 的正确用法。
+            let pattern = FTS5Pattern(matchingPhrase: query)
+            guard let pattern else { return [] }
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT a.id AS id, a.title AS title,
+                           snippet(article_fts, 1, ?, ?, '…', 12) AS snip
+                    FROM article_fts
+                    JOIN article a ON a.rowid = article_fts.rowid
+                    WHERE article_fts MATCH ?
+                    ORDER BY bm25(article_fts)
+                    LIMIT ?
+                    """,
+                arguments: [
+                    SearchHit.highlightStart, SearchHit.highlightEnd, pattern, limit,
+                ])
+            return try rows.map { row in
+                SearchHit(
+                    articleID: try parseUUID(row["id"], table: "article"),
+                    title: row["title"],
+                    snippet: row["snip"] ?? "")
+            }
+        }
+    }
+
+    /// 两字查询的兜底。没有 snippet，自己截一段上下文出来。
+    private func likeSearch(_ query: String, limit: Int) async throws -> [SearchHit] {
+        try await database.writer.read { db in
+            let rows = try Row.fetchAll(
+                db,
+                sql: """
+                    SELECT id, title, content FROM article
+                    WHERE content LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'
+                    LIMIT ?
+                    """,
+                arguments: ["%\(escapeLike(query))%", "%\(escapeLike(query))%", limit])
+            return try rows.map { row in
+                SearchHit(
+                    articleID: try parseUUID(row["id"], table: "article"),
+                    title: row["title"],
+                    snippet: Self.excerpt(from: row["content"] ?? "", around: query))
+            }
+        }
+    }
+
+    /// 在正文里截出命中处前后各若干字，并打上高亮标记。
+    static func excerpt(from content: String, around query: String, radius: Int = 24) -> String {
+        guard let range = content.range(of: query) else {
+            return String(content.prefix(radius * 2))
+        }
+        let scalars = Array(content.unicodeScalars)
+        let hitStart = content.unicodeScalars.distance(
+            from: content.unicodeScalars.startIndex, to: range.lowerBound)
+        let hitEnd = content.unicodeScalars.distance(
+            from: content.unicodeScalars.startIndex, to: range.upperBound)
+        let from = max(0, hitStart - radius)
+        let to = min(scalars.count, hitEnd + radius)
+
+        func text(_ r: Range<Int>) -> String {
+            var view = String.UnicodeScalarView()
+            view.append(contentsOf: scalars[r])
+            return String(view)
+        }
+        let prefix = from > 0 ? "…" : ""
+        let suffix = to < scalars.count ? "…" : ""
+        return prefix + text(from..<hitStart) + SearchHit.highlightStart
+            + text(hitStart..<hitEnd) + SearchHit.highlightEnd + text(hitEnd..<to) + suffix
+    }
+
+    private func escapeLike(_ text: String) -> String {
+        text.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+    }
+
+    /// 还有多少篇没进索引（UI 用它显示"正在建立索引"）。
+    public func pendingIndexCount() async throws -> Int {
+        try await database.writer.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM fts_backfill") ?? 0
+        }
+    }
+
+    /// 库里有没有同一句原文已经精讲过的结果——有就不必再向 AI 付一次钱。
+    ///
+    /// 命中的主场景不是"同一句出现在两篇文章里"，而是：
+    /// 同一本书重新导入（切分后 segment 全换新 UUID，精讲全丢）、同一篇文章被分享两次、
+    /// 视频字幕与它的文稿章节重叠。
+    ///
+    /// 走 `segment_on_source_hash` 部分索引（v5 的虚拟生成列，实测查询计划确实用它）。
+    /// `promptVersion` 用**兼容集合**判而不是等值——将来 prompt 改版时，
+    /// 旧结果只要语义仍兼容就该继续可用，不该一改版全部作废。
+    public func existingExplanation(
+        sourceTextHash: String, targetLanguage: String, compatiblePromptVersions: Set<String>
+    ) async throws -> ExplanationEnvelope? {
+        try await database.writer.read { db in
+            let rows = try String.fetchAll(
+                db,
+                sql: """
+                    SELECT explanation_json FROM segment
+                    WHERE source_text_hash = ? AND explanation_json IS NOT NULL
+                    LIMIT 8
+                    """,
+                arguments: [sourceTextHash])
+            for json in rows {
+                guard
+                    let envelope = try? WireJSON.decoder.decode(
+                        ExplanationEnvelope.self, from: Data(json.utf8))
+                else { continue }
+                // 目标语言必须一致：讲解语言不同的结果对用户毫无意义
+                guard envelope.targetLanguage == targetLanguage else { continue }
+                guard let version = envelope.promptVersion,
+                    compatiblePromptVersions.contains(version)
+                else { continue }
+                return envelope
+            }
+            return nil
         }
     }
 

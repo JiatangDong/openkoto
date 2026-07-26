@@ -72,6 +72,11 @@ public struct RootTabView: View {
                         .tabItem { Label(L("tab.settings"), systemImage: "gearshape") }
                         .tag(Tab.settings)
                 }
+                // 生词卡「回到原句」发起的跳转：先把 tab 切过去，
+                // 落到哪一句由 LibraryView 消费同一个请求决定。
+                .onChange(of: store.pendingJump) {
+                    if store.pendingJump != nil { selection = .library }
+                }
             } else {
                 OnboardingView(state: onboarding) {
                     withAnimation { onboardingCompleted = true }
@@ -98,6 +103,9 @@ public struct RootTabView: View {
             }
             store.translationProvider = { [appConfig] text in
                 try await appConfig.translate(text: text)
+            }
+            store.glossProvider = { [appConfig] word, sentence in
+                try await appConfig.gloss(word: word, sentence: sentence)
             }
             await store.load()
             await store.importFromInbox()

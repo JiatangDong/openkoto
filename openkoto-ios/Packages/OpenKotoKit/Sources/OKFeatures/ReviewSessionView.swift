@@ -8,6 +8,10 @@ import OKSRS
 /// 闪卡复习页(规范 §2.5:三档评分映射 FSRS Again/Hard/Good)。
 /// 顶部显示今日进度(新词 x/上限 · 复习 y/上限)。
 struct ReviewSessionView: View {
+    /// 点「出处」时交回给呈现方——复习页是 sheet，得由持有 binding 的那一侧
+    /// 先关掉它再跳，否则 tab 在 sheet 底下切走，用户眼前什么都没发生。
+    var onOpenSource: (ContentStore.PendingJump) -> Void
+
     @Environment(ContentStore.self) private var store
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
@@ -20,6 +24,9 @@ struct ReviewSessionView: View {
     @State private var queue: [FavoriteVocabulary] = []
     @State private var showAnswer = false
     @State private var isLoading = true
+    /// 当前卡的出处。正面就开始查，翻面时已经在手上了——查库虽然只要几毫秒，
+    /// 但翻面是这个界面唯一的关键动作，不该有任何一帧的空档。
+    @State private var source: ContentStore.FavoriteSource?
 
     private var current: FavoriteVocabulary? { queue.first }
 
@@ -54,6 +61,11 @@ struct ReviewSessionView: View {
             .task {
                 queue = await store.dueQueue()
                 isLoading = false
+            }
+            .task(id: current?.id) {
+                source = nil
+                guard let current else { return }
+                source = await store.resolveSource(for: current)
             }
         }
     }
@@ -152,6 +164,11 @@ struct ReviewSessionView: View {
                         .foregroundStyle(theme.mutedForeground)
                         .padding(.top, 4)
                 }
+                // 出处只在背面出现：原句里就含着这个词，放正面等于直接给答案。
+                if showAnswer, let source {
+                    Divider().padding(.vertical, 2)
+                    sourceSection(source, word: favorite.word)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(24)
@@ -181,6 +198,53 @@ struct ReviewSessionView: View {
             .padding(.horizontal)
             .padding(.bottom, 12)
         }
+    }
+
+    /// 出处：来源名 + 收藏时所在的那一句，整块可点，点了跳回原文。
+    ///
+    /// 「这词我在哪见过来着」才是用户翻到背面时真正想起的问题，所以句子本身
+    /// 就是主要价值——跳转是第二层。跳走会结束本轮复习，但不丢进度：
+    /// 评过分的卡片当场就落库了，重进复习时 `dueQueue()` 不会再把它们排进来。
+    private func sourceSection(_ source: ContentStore.FavoriteSource, word: String) -> some View {
+        Button {
+            onOpenSource(source.jump)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 4) {
+                    Image(systemName: "text.viewfinder")
+                    Text(source.label)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                }
+                .font(.caption)
+                .foregroundStyle(theme.mutedForeground)
+                if let sentence = source.sentence {
+                    Text(highlighted(sentence, word: word))
+                        .font(.subheadline)
+                        .foregroundStyle(theme.foreground)
+                        .multilineTextAlignment(.leading)
+                        // 3 行封顶：卡片本身没有滚动，长句加上 usage/example 在 SE 上会顶出去。
+                        .lineLimit(3)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(source.sentence.map { "\(source.label)。\($0)" } ?? source.label))
+        .accessibilityHint(Text(L("vocab.backToSource")))
+    }
+
+    /// 把这个词在原句里标出来。找不到就整句原样显示——卡片是「勉強する」而原句写作
+    /// 「勉強しています」这类活用差异很常见，为了标个色去做词形还原不划算。
+    private func highlighted(_ sentence: String, word: String) -> AttributedString {
+        var result = AttributedString(sentence)
+        guard !word.isEmpty, let range = result.range(of: word) else { return result }
+        result[range].font = .subheadline.bold()
+        result[range].foregroundColor = theme.primary
+        return result
     }
 
     private var doneView: some View {

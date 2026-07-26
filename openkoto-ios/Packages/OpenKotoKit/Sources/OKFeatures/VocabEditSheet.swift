@@ -14,6 +14,9 @@ struct VocabEditSheet: View {
     let favorite: FavoriteVocabulary?
     /// 新增时预填的词形（原版模式划词收藏走这条路）。
     var prefilledWord: String?
+    /// 划词建卡时的出处。手工新建（生词本里点「+」）没有出处，两者共用这张表。
+    var sourceArticle: Article?
+    var sourceSegmentID: UUID?
 
     @State private var word = ""
     @State private var meaning = ""
@@ -109,7 +112,8 @@ struct VocabEditSheet: View {
             succeeded = store.addManualWord(
                 word: word, meaning: meaning,
                 reading: reading, usage: usage, example: example,
-                packIds: Array(selectedPackIds))
+                packIds: Array(selectedPackIds),
+                source: sourceArticle, segmentID: sourceSegmentID)
         }
         if succeeded {
             dismiss()

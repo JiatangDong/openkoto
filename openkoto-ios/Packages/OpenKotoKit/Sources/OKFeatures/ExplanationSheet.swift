@@ -33,6 +33,21 @@ struct ExplanationSheet: View {
         ArticleLanguage.detect(article.content)
     }
 
+    /// 详情面的两种用法：整句精讲，或只查其中一个词。
+    enum Mode: String, CaseIterable, Identifiable {
+        case explain, words
+        var id: String { rawValue }
+        var titleKey: String.LocalizationValue {
+            switch self {
+            case .explain: "explanation.mode.explain"
+            case .words: "explanation.mode.words"
+            }
+        }
+    }
+
+    /// 记住上次用哪种。偏好查词的用户从此不再被自动扣一次整句精讲的钱。
+    @AppStorage("explanation.mode") private var mode: Mode = .explain
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -43,10 +58,16 @@ struct ExplanationSheet: View {
             }
             .background(theme.background)
             .safeAreaInset(edge: .bottom) { bottomBar }
-            .task(id: segmentID) {
-                await store.generateExplanation(articleID: article.id, segmentID: segmentID)
-            }
+            // ⚠️ 只在「精讲」页自动生成。以前不管三七二十一先发一次整句精讲，
+            // 于是"我只想查一个词"也要付整句的钱——那正是这一版要解决的问题。
+            .task(id: segmentID) { await generateIfNeeded() }
+            .onChange(of: mode) { Task { await generateIfNeeded() } }
         }
+    }
+
+    private func generateIfNeeded() async {
+        guard mode == .explain else { return }
+        await store.generateExplanation(articleID: article.id, segmentID: segmentID)
     }
 
     // MARK: - 内容
@@ -64,15 +85,34 @@ struct ExplanationSheet: View {
                 }
             }
 
-            if let explanation = segment.explanation {
-                explanationSections(explanation)
-            } else if store.generatingSegmentIDs.contains(segment.id) {
-                loadingView
-            } else if let error = store.generationErrors[segment.id] {
-                errorView(error, segmentID: segment.id)
+            Picker("", selection: $mode) {
+                ForEach(Mode.allCases) { Text(L($0.titleKey)).tag($0) }
+            }
+            .pickerStyle(.segmented)
+
+            switch mode {
+            case .explain:
+                if let explanation = segment.explanation {
+                    explanationSections(explanation)
+                } else if store.generatingSegmentIDs.contains(segment.id) {
+                    loadingView
+                } else if let error = store.generationErrors[segment.id] {
+                    errorView(error, segmentID: segment.id)
+                }
+            case .words:
+                WordListPane(
+                    sentence: segment.text, language: articleLanguage, article: article,
+                    segmentID: segment.id)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // 精讲里的生词已经付过钱，直接进查词缓存，别让用户为同一个词付两次
+        .onChange(of: segment.explanation) {
+            if let explanation = segment.explanation { store.warmGlossCache(from: explanation) }
+        }
+        .onAppear {
+            if let explanation = segment.explanation { store.warmGlossCache(from: explanation) }
+        }
     }
 
     private func errorView(_ error: AIClientError, segmentID: UUID) -> some View {
@@ -111,7 +151,7 @@ struct ExplanationSheet: View {
                                 speech.speak(item.word, reading: item.reading, language: articleLanguage)
                             },
                             onToggleFavorite: {
-                                store.toggleFavorite(item, source: article)
+                                store.toggleFavorite(item, source: article, segmentID: segmentID)
                             }
                         )
                     }

@@ -29,6 +29,9 @@ struct ReaderView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     let article: Article
+    /// 从搜索结果进来时定位到的句序。`NativeChapterView.restoreOrder` 已支持滚到指定句，
+    /// 这里只是把值传下去。
+    var initialSegmentOrder: Int?
 
     @AppStorage("reader.fontSize") private var fontSize: Double = 18
     /// 词级读音开关。与三种视图模式正交（哪种模式下都可能想看读音），所以不做成第四种 mode。
@@ -66,6 +69,7 @@ struct ReaderView: View {
             selectedSegmentID: $selectedSegmentID,
             fontSize: fontSize,
             viewMode: viewMode,
+            restoreOrder: initialSegmentOrder,
             readingRuns: readingRuns
         )
         .background(theme.background)
@@ -116,33 +120,8 @@ struct ReaderView: View {
 
     // MARK: - 批量任务进度条
 
-    @ViewBuilder
     private var batchBar: some View {
-        if let state = store.batchByArticle[article.id] {
-            let fraction = state.total > 0
-                ? Double(state.completed) / Double(state.total) : 0
-            VStack(spacing: 6) {
-                HStack {
-                    Text(L(state.kind == .explain
-                        ? "reader.batch.explaining" : "reader.batch.translating"))
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(theme.foreground)
-                    Spacer()
-                    Text(verbatim: "\(state.completed)/\(state.total)")
-                        .font(.footnote.monospacedDigit())
-                        .foregroundStyle(theme.mutedForeground)
-                    Button(L("reader.batch.cancel")) {
-                        store.cancelBatch(articleID: article.id)
-                    }
-                    .font(.footnote)
-                }
-                ProgressView(value: fraction)
-                    .tint(theme.primary)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 10)
-            .background(.bar)
-        }
+        BatchProgressBar(articleID: article.id)
     }
 
     // MARK: - 工具栏

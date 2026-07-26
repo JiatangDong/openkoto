@@ -94,41 +94,117 @@ struct OnboardingWelcomeStep: View {
     @Bindable var state: OnboardingState
     @Environment(\.theme) private var theme
 
+    /// 一页 = 一个主题 + 三条。图标与文案 key 放在一起，加页就是加一条数组元素。
+    private struct Page: Identifiable {
+        let id: Int
+        let symbol: String
+        let titleKey: String.LocalizationValue
+        let points: [(symbol: String, key: String.LocalizationValue)]
+    }
+
+    private static let pages: [Page] = [
+        Page(
+            id: 0, symbol: "books.vertical", titleKey: "onboarding.welcome.page1.title",
+            points: [
+                ("text.book.closed", "onboarding.welcome.page1.point1"),
+                ("play.rectangle", "onboarding.welcome.page1.point2"),
+                ("square.and.arrow.up", "onboarding.welcome.page1.point3"),
+                ("magnifyingglass", "onboarding.welcome.page1.point4"),
+            ]),
+        Page(
+            id: 1, symbol: "text.magnifyingglass", titleKey: "onboarding.welcome.page2.title",
+            points: [
+                ("text.line.first.and.arrowtriangle.forward", "onboarding.welcome.page2.point1"),
+                ("character.phonetic", "onboarding.welcome.page2.point2"),
+                ("rectangle.on.rectangle", "onboarding.welcome.page2.point3"),
+            ]),
+        Page(
+            id: 2, symbol: "sparkles", titleKey: "onboarding.welcome.page3.title",
+            points: [
+                ("text.bubble", "onboarding.welcome.page3.point1"),
+                ("character.book.closed", "onboarding.welcome.page3.point2"),
+                ("hand.tap", "onboarding.welcome.page3.point3"),
+                ("lock.shield", "onboarding.welcome.page3.point4"),
+            ]),
+        Page(
+            id: 3, symbol: "brain.head.profile", titleKey: "onboarding.welcome.page4.title",
+            points: [
+                ("square.stack.3d.up", "onboarding.welcome.page4.point1"),
+                ("repeat.circle", "onboarding.welcome.page4.point2"),
+                ("chart.bar.xaxis", "onboarding.welcome.page4.point3"),
+            ]),
+    ]
+
+    @State private var page = 0
+
+    /// 功能全列出来，但**流程不变长**：仍然是同一个步骤，赶时间的人看完第一页直接点继续，
+    /// 好奇的人左滑看完四页。新增点击次数为 0。
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    Image(systemName: "book.pages")
-                        .font(.system(size: 44))
-                        .foregroundStyle(theme.primary)
-                        .frame(width: 88, height: 88)
-                        .background(theme.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: OKRadius.sheet))
-                        .padding(.top, 32)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(L("onboarding.welcome.title"))
-                            .font(.largeTitle.bold())
-                            .foregroundStyle(theme.foreground)
-                        Text(L("onboarding.welcome.subtitle"))
-                            .font(.title3)
-                            .foregroundStyle(theme.mutedForeground)
-                    }
-
-                    VStack(alignment: .leading, spacing: 16) {
-                        welcomePoint("text.book.closed", L("onboarding.welcome.point1"))
-                        welcomePoint("sparkles", L("onboarding.welcome.point2"))
-                        welcomePoint("square.stack.3d.up", L("onboarding.welcome.point3"))
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 24)
+            TabView(selection: $page) {
+                ForEach(Self.pages) { pageContent($0).tag($0.id) }
             }
-            Button(L("onboarding.welcome.cta")) {
-                state.advance()
+            .tabViewStyle(.page(indexDisplayMode: .never))
+
+            // 自己画页码点：系统那套在浅色主题背景上对比度极低，几乎看不见。
+            HStack(spacing: 7) {
+                ForEach(Self.pages) { item in
+                    Capsule()
+                        .fill(item.id == page ? theme.primary : theme.border)
+                        .frame(width: item.id == page ? 18 : 7, height: 7)
+                        .animation(.snappy, value: page)
+                }
+            }
+            .padding(.bottom, 12)
+
+            Button(L(page == Self.pages.count - 1
+                ? "onboarding.welcome.cta" : "onboarding.step.continue")) {
+                if page < Self.pages.count - 1 {
+                    withAnimation { page += 1 }
+                } else {
+                    state.advance()
+                }
             }
             .buttonStyle(.okPrimary)
             .padding(.horizontal, 24)
             .padding(.vertical, 8)
+        }
+    }
+
+    private func pageContent(_ content: Page) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Image(systemName: content.symbol)
+                    .font(.system(size: 40))
+                    .foregroundStyle(theme.primary)
+                    .frame(width: 80, height: 80)
+                    .background(
+                        theme.primary.opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: OKRadius.sheet))
+                    .padding(.top, 24)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    // 第一页保留原来的欢迎语，后三页只有主题标题
+                    if content.id == 0 {
+                        Text(L("onboarding.welcome.title"))
+                            .font(.largeTitle.bold())
+                            .foregroundStyle(theme.foreground)
+                    }
+                    Text(L(content.titleKey))
+                        .font(content.id == 0 ? .title3 : .largeTitle.bold())
+                        .foregroundStyle(
+                            content.id == 0 ? theme.mutedForeground : theme.foreground)
+                }
+
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(content.points, id: \.symbol) { point in
+                        welcomePoint(point.symbol, L(point.key))
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 32)
         }
     }
 

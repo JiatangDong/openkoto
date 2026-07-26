@@ -123,13 +123,21 @@ public final class AppConfigStore {
             modelId: config.model,
             promptVersion: PromptLibrary.segmentExplainVersion,
             generatedAt: .now,
-            sourceTextHash: Self.sha256Hex(text)
+            sourceTextHash: SourceTextHash.of(text)
         )
         return GeneratedExplanation(explanation: explanation, meta: meta)
     }
 
-    private static func sha256Hex(_ text: String) -> String {
-        SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+    /// 查一个词在所在句子里的意思。比整句精讲便宜一个数量级。
+    ///
+    /// 与精讲共用同一个 `activeConfig`：省钱靠的是 schema 与输出都极短，
+    /// 与模型选型无关，所以不值得为它引入第二个模型配置（多一个 picker、
+    /// 多一个可能失败的 Key、以及"为什么查词失败但精讲正常"这种新困惑）。
+    public func gloss(word: String, sentence: String) async throws -> VocabularyItem {
+        guard let config = activeConfig else { throw AIClientError.notConfigured }
+        return try await explanationService.gloss(
+            word: word, sentence: sentence, targetLanguage: targetLanguage,
+            config: config, apiKey: apiKey(for: config.id))
     }
 
     /// 用当前生效模型对一句原文只做翻译（快翻/全文翻译）。未配置模型抛 `.notConfigured`。

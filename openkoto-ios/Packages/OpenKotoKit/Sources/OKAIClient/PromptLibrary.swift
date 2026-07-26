@@ -12,6 +12,9 @@ public enum PromptLibrary {
     /// 纯翻译 Prompt 版本（快翻/全文翻译，无精讲）。
     public static let segmentTranslateVersion = "translate-v1"
 
+    /// 单词释义 Prompt 版本。
+    public static let wordGlossVersion = "gloss-v1"
+
     /// 目标语言代码 → prompt 内使用的母语名（对齐 `segment_translate_explain` 映射表）。
     public static func nativeLanguageName(for targetLanguage: String) -> String {
         switch targetLanguage {
@@ -83,5 +86,38 @@ public enum PromptLibrary {
         let lang = nativeLanguageName(for: targetLanguage)
         return "You are a professional translator. Translate the following text to \(lang). "
             + "Preserve the original meaning and tone. Only return the translated text without any explanations."
+    }
+
+    /// 单词释义 system prompt。
+    ///
+    /// 与精讲**刻意保持极简**：schema 只有 5 个键、要求简短、不要 markdown。
+    /// 精讲一次要吐 600–1200 token（翻译+讲解+词表+语法+文化背景+学习建议），
+    /// 而用户最高频的动作只是"这个词啥意思"。这条路径把输出压到 80–150 token，
+    /// 便宜一个数量级——**省钱靠的是输出短，与用哪个模型无关**。
+    ///
+    /// 输出 schema 与 `VocabularyItem` 对齐，解出来能直接进生词本。
+    public static func wordGlossSystemPrompt(targetLanguage: String) -> String {
+        let lang = nativeLanguageName(for: targetLanguage)
+        return """
+            You are a bilingual dictionary. The user's native language is \(lang).
+            Given a word and the sentence it appears in, explain that word **as used in \
+            that sentence**. Return ONLY this JSON, with no markdown fences and no extra text:
+
+            {
+              "word": "the dictionary form of the word",
+              "reading": "Pronunciation (Hiragana for Japanese, Pinyin for Chinese, IPA for \
+            English); omit if not applicable",
+              "meaning": "A concise meaning in \(lang), one line",
+              "usage": "Part of speech and a short note on how it is used here, in \(lang)",
+              "example": "One short example sentence using the word"
+            }
+
+            Keep every field short. Write meaning and usage in \(lang).
+            """
+    }
+
+    /// 单词释义的 user message：词 + 它所在的句子（上下文决定义项）。
+    public static func wordGlossUserMessage(word: String, sentence: String) -> String {
+        "Word: \(word)\nSentence: \(sentence)"
     }
 }

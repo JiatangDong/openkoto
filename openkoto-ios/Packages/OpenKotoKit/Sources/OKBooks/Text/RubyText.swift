@@ -1,5 +1,6 @@
 import Foundation
 import OKModels
+import OKSegmentation
 
 /// 带注音的文本：`runs` 顺序拼接即纯文本，`reading` 非空的 run 是被 ruby / 《》 标注的部分。
 ///
@@ -38,31 +39,12 @@ public struct RubyText: Sendable, Equatable {
     /// 因此可以用一个前向游标依次定位，不会错位。
     public func readingLines(forSentencesIn sentences: [String]) -> [String?] {
         guard hasReadings else { return Array(repeating: nil, count: sentences.count) }
-
-        let plain = Array(plainText.unicodeScalars)
-        var bounds: [(start: Int, end: Int, reading: String?)] = []
-        var offset = 0
-        for run in runs {
-            let count = run.text.unicodeScalars.count
-            bounds.append((offset, offset + count, run.reading))
-            offset += count
+        let (plain, bounds) = flattened()
+        return SentenceLocator.scalarRanges(of: sentences, in: plain).map { range in
+            guard let range else { return nil }
+            return Self.readingLine(
+                from: range.lowerBound, to: range.upperBound, bounds: bounds, plain: plain)
         }
-
-        var lines: [String?] = []
-        lines.reserveCapacity(sentences.count)
-        var cursor = 0
-
-        for sentence in sentences {
-            let needle = Array(sentence.unicodeScalars)
-            guard let start = Self.firstIndex(of: needle, in: plain, from: cursor) else {
-                lines.append(nil)
-                continue
-            }
-            let end = start + needle.count
-            cursor = end
-            lines.append(Self.readingLine(from: start, to: end, bounds: bounds, plain: plain))
-        }
-        return lines
     }
 
     /// 同 `readingLines`，但**保留 run 边界**——阅读页的词级注音要靠它把
@@ -71,31 +53,24 @@ public struct RubyText: Sendable, Equatable {
     /// 句子里没有任何注音时返回 nil（与 `readingLines` 一致）。
     public func runs(forSentencesIn sentences: [String]) -> [[Run]?] {
         guard hasReadings else { return Array(repeating: nil, count: sentences.count) }
+        let (plain, bounds) = flattened()
+        return SentenceLocator.scalarRanges(of: sentences, in: plain).map { range in
+            guard let range else { return nil }
+            return Self.sentenceRuns(
+                from: range.lowerBound, to: range.upperBound, bounds: bounds, plain: plain)
+        }
+    }
 
-        let plain = Array(plainText.unicodeScalars)
+    /// 展平成「纯文本标量数组 + 每个 run 的标量区间」，两个查询方法共用。
+    private func flattened() -> ([Unicode.Scalar], [(start: Int, end: Int, reading: String?)]) {
+        var plain: [Unicode.Scalar] = []
         var bounds: [(start: Int, end: Int, reading: String?)] = []
-        var offset = 0
         for run in runs {
-            let count = run.text.unicodeScalars.count
-            bounds.append((offset, offset + count, run.reading))
-            offset += count
+            let start = plain.count
+            plain.append(contentsOf: run.text.unicodeScalars)
+            bounds.append((start, plain.count, run.reading))
         }
-
-        var result: [[Run]?] = []
-        result.reserveCapacity(sentences.count)
-        var cursor = 0
-
-        for sentence in sentences {
-            let needle = Array(sentence.unicodeScalars)
-            guard let start = Self.firstIndex(of: needle, in: plain, from: cursor) else {
-                result.append(nil)
-                continue
-            }
-            let end = start + needle.count
-            cursor = end
-            result.append(Self.sentenceRuns(from: start, to: end, bounds: bounds, plain: plain))
-        }
-        return result
+        return (plain, bounds)
     }
 
     private static func sentenceRuns(
@@ -144,24 +119,4 @@ public struct RubyText: Sendable, Equatable {
         return annotated ? String(line) : nil
     }
 
-    /// 朴素前向子序列查找。句子几乎总是紧跟游标出现，实际是常数级。
-    private static func firstIndex(
-        of needle: [Unicode.Scalar], in haystack: [Unicode.Scalar], from start: Int
-    ) -> Int? {
-        guard !needle.isEmpty, start >= 0, needle.count <= haystack.count - start else {
-            return nil
-        }
-        let last = haystack.count - needle.count
-        var index = start
-        while index <= last {
-            var matched = true
-            for offset in 0..<needle.count where haystack[index + offset] != needle[offset] {
-                matched = false
-                break
-            }
-            if matched { return index }
-            index += 1
-        }
-        return nil
-    }
 }

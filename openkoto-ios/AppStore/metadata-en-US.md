@@ -13,19 +13,22 @@
 
 ## Keywords
 
-language learning,reader,translation,vocabulary,SRS,Japanese,furigana,ebook,EPUB,study
+language learning,reader,translation,vocabulary,SRS,Japanese,furigana,ebook,subtitles,video
 
 ## Description
 
-OpenKoto is an open-source, privacy-first language-learning reader. Turn articles and text you genuinely care about into study material, understand sentences in context, collect vocabulary, and review it on a schedule.
+OpenKoto is an open-source, privacy-first language-learning app. Turn the articles, books, and videos you genuinely care about into study material, understand sentences in context, collect vocabulary, and review it on a schedule.
 
 Key features:
 
 • Paste text or import TXT, Markdown, and web content
 • Import TXT and EPUB books with automatic chapter splitting, in either a sentence-by-sentence view or the book's original layout
+• Import video and audio with SRT / VTT subtitles — or generate subtitles on device when you have none (requires iOS 26)
+• Subtitles follow playback sentence by sentence; tap a line to jump to it, loop a single sentence, change speed without changing pitch, and hide the text to shadow by ear
 • Read sentence by sentence, resume where you left off, and add bookmarks and highlights
 • Show word-level readings above Japanese and Chinese text (furigana / pinyin), generated entirely on device
-• Save vocabulary, organize word packs, and use spaced-repetition review
+• Search the full text of everything you have imported — articles, book chapters, and media transcripts — and jump straight to the sentence
+• Save vocabulary, organize word packs, and use spaced-repetition review; jump from any card back to the sentence it came from
 • View reading and review statistics
 • Use the app in English, Simplified Chinese, or Japanese
 • Choose light, dark, and multiple visual themes
@@ -36,6 +39,20 @@ Optional AI features use a bring-your-own-key model. Configure a compatible prov
 No account is required. Sample articles are included, so reading, vocabulary, and review features work without configuring an AI provider.
 
 OpenKoto is free and open source.
+
+## What's new in 0.3.1
+
+• Video and audio study: import a video or audio file (or pick one from Photos), pair it with SRT / VTT subtitles, or generate subtitles on device (requires iOS 26). Subtitles follow playback sentence by sentence, and the transcript can also be read as a plain article
+• Shadowing mode: loop one sentence at 0.75× with pitch preserved and the text hidden — listen first, reveal only when you need to
+• Full-library search: search the full text of articles, book chapters, and media transcripts at once, then jump straight to the matching sentence. The index is built locally on device
+• Word lookup: look up a single word with its sentence as context instead of paying for a full sentence explanation
+• Explanations are now reused automatically — re-import a book you have already studied and its explanations come back without another AI call
+• Batch explanation now lets you pick a sentence range and shows how many sentences will be processed
+• Vocabulary cards gain "Go to sentence": flip a review card and it shows which article or book chapter the word came from, along with the sentence you saved it from — tap to jump back to it (media jumps to the timestamp too). The same action is available by swiping a row in the vocabulary list
+• The introduction is now a four-page tour covering the main features, with no extra steps
+• Fixed: AI requests did not actually carry an output-length limit, so "Test connection" produced a full generation
+• Fixed: cancelling a batch left in-flight requests running and billable, and restarting immediately could run two batches at once
+• Fixed: an insufficient balance was reported as rate limiting, so users kept retrying an error that would never clear
 
 ## What's new in 0.2.5
 

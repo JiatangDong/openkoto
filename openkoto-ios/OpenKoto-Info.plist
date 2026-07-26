@@ -47,6 +47,44 @@
 				<string>net.daringfireball.markdown</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Subtitle</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>org.openkoto.subrip</string>
+				<string>org.w3.webvtt</string>
+			</array>
+		</dict>
+	</array>
+	<!--
+	  .srt 没有系统 UTType（只会落到 dyn.* 动态类型），不声明的话在文件选择器里
+	  是灰的、根本选不中。.vtt 系统自带 org.w3.webvtt，无需声明。
+	  Imported 而非 Exported：这两种格式不是我们定义的，我们只是识别它们。
+	-->
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.openkoto.subrip</string>
+			<key>UTTypeDescription</key>
+			<string>SubRip Subtitle</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.plain-text</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>srt</string>
+				</array>
+			</dict>
+		</dict>
 	</array>
 </dict>
 </plist>

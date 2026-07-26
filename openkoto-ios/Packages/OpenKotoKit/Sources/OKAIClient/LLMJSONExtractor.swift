@@ -134,22 +134,32 @@ public enum LLMJSONExtractor {
     /// 提取 → 解析 → 修复 → 再解析；两次失败抛带 requestID 的脱敏错误
     /// （对齐 `segment_translate_explain` 的解析回退管线）。
     /// 原始模型响应只允许出现在用户主动开启的诊断导出，不进入常规日志（设计文档 §4.4）。
-    public static func parseSegmentExplanation(
-        from content: String, requestID: UUID
-    ) throws -> SegmentExplanation {
+    ///
+    /// 泛型化是为了让单词释义复用同一条回退管线——JSON 修复逻辑只该有一份。
+    public static func parse<T: Decodable>(
+        _ type: T.Type, from content: String, requestID: UUID
+    ) throws -> T {
         let candidate = extractJSON(content)
 
         if let data = candidate.data(using: .utf8),
-           let explanation = try? decoder.decode(SegmentExplanation.self, from: data) {
-            return explanation
+            let value = try? decoder.decode(type, from: data)
+        {
+            return value
         }
 
         let repaired = repairJSON(candidate)
         if let data = repaired.data(using: .utf8),
-           let explanation = try? decoder.decode(SegmentExplanation.self, from: data) {
-            return explanation
+            let value = try? decoder.decode(type, from: data)
+        {
+            return value
         }
 
         throw AIClientError.malformedResponse(requestID: requestID)
+    }
+
+    public static func parseSegmentExplanation(
+        from content: String, requestID: UUID
+    ) throws -> SegmentExplanation {
+        try parse(SegmentExplanation.self, from: content, requestID: requestID)
     }
 }

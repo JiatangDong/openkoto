@@ -29,6 +29,28 @@ enum TextImport {
         return types
     }
 
+    /// 字幕文件类型。`.vtt` 系统自带 `org.w3.webvtt`；
+    /// `.srt` **没有**系统 UTType（只会落到动态类型），必须在
+    /// `OpenKoto-Info.plist` 的 `UTImportedTypeDeclarations` 里自己声明。
+    static var subtitleContentTypes: [UTType] {
+        var types: [UTType] = []
+        if let vtt = UTType("org.w3.webvtt") { types.append(vtt) }
+        for identifier in ["org.openkoto.subrip"] {
+            if let declared = UTType(identifier) { types.append(declared) }
+        }
+        if let srt = UTType(filenameExtension: "srt"), !types.contains(srt) {
+            types.append(srt)
+        }
+        // 兜底：未声明时 .srt 会被识别成纯文本
+        types.append(.plainText)
+        return types
+    }
+
+    /// 视频/音频类型。系统 UTType 齐全，不需要自己声明。
+    static var mediaContentTypes: [UTType] {
+        [.movie, .video, .audio, .mpeg4Movie, .quickTimeMovie, .mp3, .mpeg4Audio]
+    }
+
     /// 读取本地文本文件（.txt/.md）。标题取无扩展名的文件名。
     static func readTextFile(at url: URL) throws -> (title: String, content: String) {
         let scoped = url.startAccessingSecurityScopedResource()

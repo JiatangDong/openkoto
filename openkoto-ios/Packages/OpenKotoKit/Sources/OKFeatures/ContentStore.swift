@@ -5,6 +5,7 @@ import OKModels
 import OKSegmentation
 import OKAIClient
 import OKBooks
+import OKMedia
 import OKPersistence
 import OKSRS
 
@@ -20,10 +21,16 @@ import OKSRS
 public final class ContentStore {
     public private(set) var articles: [Article] = []
     /// 只保留**已打开**的文章/章节的句子（见 `openArticle`）。
-    public private(set) var segmentsByArticle: [UUID: [ArticleSegment]] = [:]
+    public internal(set) var segmentsByArticle: [UUID: [ArticleSegment]] = [:]
     /// 全部文章/章节的句子计数：进度徽章不需要正文，启动时只查计数。
-    public private(set) var segmentCounts: [UUID: ContentRepository.SegmentCounts] = [:]
+    public internal(set) var segmentCounts: [UUID: ContentRepository.SegmentCounts] = [:]
     public private(set) var books: [Book] = []
+    /// 视频/音频。转写文稿是 article 行，字幕句是 segment 行——
+    /// 精讲、生词、SRS、统计因此一行不改即对媒体生效。
+    public private(set) var medias: [Media] = []
+    public private(set) var progressByMedia: [UUID: MediaProgress] = [:]
+    /// articleID → mediaID，反查「这篇文稿属于哪个媒体」。
+    public private(set) var mediaIDByArticle: [UUID: UUID] = [:]
     /// 章节摘要（不含正文），整本一次性加载，供目录与阅读器翻章使用。
     public private(set) var chapterSummariesByBook: [UUID: [BookChapterSummary]] = [:]
     public private(set) var progressByBook: [UUID: BookProgress] = [:]
@@ -56,17 +63,21 @@ public final class ContentStore {
         return value == 0 ? FSRS.defaultDesiredRetention : value
     }
     /// 逐句精讲失败原因（供 ExplanationSheet 展示 + 重试）。
-    public private(set) var generationErrors: [UUID: AIClientError] = [:]
+    /// `internal(set)`：批量任务（ContentStore+Batch）要清掉重试项的旧错因。
+    public internal(set) var generationErrors: [UUID: AIClientError] = [:]
     public private(set) var lastPersistenceFailure: String?
 
     /// 真实精讲入口（App 壳注入）。签名：原文 → 结构化精讲 + 溯源元数据。
     @ObservationIgnored public var explanationProvider:
         ((String) async throws -> GeneratedExplanation)?
 
-    @ObservationIgnored private let repository: ContentRepository
+    @ObservationIgnored let repository: ContentRepository
     @ObservationIgnored private let bookRepository: BookRepository?
     @ObservationIgnored private let bookStorage: BookStorage?
-    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let mediaRepository: MediaRepository?
+    @ObservationIgnored private let mediaStorage: MediaStorage?
+    @ObservationIgnored private let searchIndexer: SearchIndexer?
+    @ObservationIgnored let defaults: UserDefaults
     /// 已载入句子的文章 LRU 顺序（尾部最新）。
     @ObservationIgnored private var loadedOrder: [UUID] = []
     /// 已打开章节的 Article 缓存（章节不在 `articles` 里）。
@@ -75,17 +86,23 @@ public final class ContentStore {
     @ObservationIgnored private var persistChain: Task<Void, Never>?
 
     private static let didSeedSamplesKey = "content.didSeedSamples.v1"
-    private static let logger = Logger(subsystem: "app.openkoto", category: "ContentStore")
+    static let logger = Logger(subsystem: "app.openkoto", category: "ContentStore")
 
     public init(
         repository: ContentRepository,
         bookRepository: BookRepository? = nil,
         bookStorage: BookStorage? = nil,
+        mediaRepository: MediaRepository? = nil,
+        mediaStorage: MediaStorage? = nil,
+        searchIndexer: SearchIndexer? = nil,
         defaults: UserDefaults = .standard
     ) {
         self.repository = repository
         self.bookRepository = bookRepository
         self.bookStorage = bookStorage
+        self.mediaRepository = mediaRepository
+        self.mediaStorage = mediaStorage
+        self.searchIndexer = searchIndexer
         self.defaults = defaults
     }
 
@@ -103,10 +120,15 @@ public final class ContentStore {
                 at: directory.appendingPathComponent("openkoto.sqlite"))
             let storage = try? BookStorage.applicationSupport()
             try? storage?.prepare()
+            let media = try? MediaStorage.applicationSupport()
+            try? media?.prepare()
             return ContentStore(
                 repository: ContentRepository(database: database),
                 bookRepository: BookRepository(database: database),
-                bookStorage: storage)
+                bookStorage: storage,
+                mediaRepository: MediaRepository(database: database),
+                mediaStorage: media,
+                searchIndexer: SearchIndexer(database: database))
         } catch {
             logger.error("open on-disk database failed, falling back to in-memory: \(error)")
             let database = try! AppDatabase.inMemory()
@@ -134,7 +156,12 @@ public final class ContentStore {
             favorites = snapshot.favorites
             packs = snapshot.packs
             await loadBooks()
+            await loadMedia()
             await refreshStats()
+            // 全文索引在后台补齐：一本 50 万字的书建索引是秒级的事，
+            // 不该发生在启动的同步路径上。进度就是待办表本身，可中断可续跑。
+            await refreshIndexingProgress()
+            if let searchIndexer { await searchIndexer.start() }
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-seedStatsDemo") {
                 await seedStatsDemo()
@@ -164,6 +191,15 @@ public final class ContentStore {
             let date = utc.date(byAdding: .day, value: offset, to: todayUTC) ?? todayUTC
             let c = utc.dateComponents([.year, .month, .day], from: date)
             return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+        }
+
+        // 给一部分卡片安上真实的出处，好让复习页的「出处」那一块在截图/QA 里出得来。
+        // 真实用户的卡片是从句子上收藏的，天然带出处；合成数据不补上就永远看不到这块 UI。
+        var demoSource: (article: Article, segments: [ArticleSegment])?
+        if let article = articles.first {
+            await openArticle(article.id)
+            let segments = segments(for: article.id)
+            if !segments.isEmpty { demoSource = (article, segments) }
         }
 
         var demoFavorites: [FavoriteVocabulary] = []
@@ -197,8 +233,13 @@ public final class ContentStore {
                 stability = Double(30 + i)
                 last = utc.date(byAdding: .day, value: -(i % 15), to: now)
             }
+            // 每三张里有一张带出处——混着才看得出"有出处"和"没出处"两种卡都排得对。
+            let source = i % 3 == 0 ? demoSource : nil
             demoFavorites.append(FavoriteVocabulary(
                 word: "デモ\(i)", meaning: "demo meaning \(i)", reading: "でも\(i)",
+                sourceArticleId: source?.article.id,
+                sourceArticleTitle: source?.article.title,
+                sourceSegmentId: source.map { $0.segments[i % $0.segments.count].id },
                 srsState: state, stability: stability, difficulty: Double(3 + i % 6),
                 suspendedAt: suspended, dueDate: due, lastReviewedAt: last,
                 reviewCount: i % 7))
@@ -281,6 +322,34 @@ public final class ContentStore {
         }
     }
 
+    /// 媒体元数据 + 归属映射 + 播放位置。都不含文稿正文，整体很小。
+    /// 顺带清理孤儿目录（导入中途崩溃/取消留下的残留）。
+    private func loadMedia() async {
+        guard let mediaRepository else { return }
+        do {
+            let loaded = try await mediaRepository.loadMedia()
+            medias = loaded
+            progressByMedia = try await mediaRepository.loadProgress()
+            var byArticle: [UUID: UUID] = [:]
+            for media in loaded {
+                for part in try await mediaRepository.parts(mediaID: media.id) {
+                    byArticle[part.articleId] = media.id
+                }
+            }
+            mediaIDByArticle = byArticle
+
+            if let mediaStorage {
+                let knownIDs = Set(loaded.map(\.id))
+                Task.detached(priority: .background) {
+                    mediaStorage.sweepOrphans(knownIDs: knownIDs)
+                }
+            }
+        } catch {
+            Self.logger.error("loadMedia failed: \(error)")
+            lastPersistenceFailure = "loadMedia failed: \(error)"
+        }
+    }
+
     // MARK: - 查询
 
     public func segments(for articleID: UUID) -> [ArticleSegment] {
@@ -309,8 +378,10 @@ public final class ContentStore {
     public func openArticle(_ articleID: UUID) async {
         touch(articleID)
         guard segmentsByArticle[articleID] == nil else {
-            // 刚导入的文章句子已在内存里，但还没注音（导入路径不做注音）。
+            // 刚导入的文章句子已在内存里，但导入路径既不注音也不回填精讲，
+            // 两件事都得在这条分支上补做——否则"刚导入就打开"会两样都拿不到。
             await annotateReadings(articleID: articleID)
+            await backfillReusableExplanations(articleID: articleID)
             return
         }
         do {
@@ -343,6 +414,9 @@ public final class ContentStore {
             evictIfNeeded()
             // 正文已可显示，注音在后台补上——不要让它挡住首屏。
             await annotateReadings(articleID: articleID)
+            // 章节刚切完时批量回填已有精讲：重新导入一本读过的书，
+            // 打开章节就全回来了，一次 API 调用都不用。
+            await backfillReusableExplanations(articleID: articleID)
         } catch {
             Self.logger.error("openArticle failed: \(error)")
             lastPersistenceFailure = "openArticle failed: \(error)"
@@ -605,6 +679,299 @@ public final class ContentStore {
         return book
     }
 
+    // MARK: - 视频 / 音频
+
+    /// 导入一段媒体 + 它的字幕。
+    ///
+    /// 媒体文件**默认不拷贝**：从「文件」App 选来的 URL 是 security-scoped 的，
+    /// 存 bookmark 即可，几十上百 MB 的视频拷一份就是双倍占盘。
+    /// 文件后来失效（被删/移动/iCloud 未下载）时只有播放不可用——
+    /// 文稿与精讲都在库里，降级形状与书籍「原始文件丢了但正文还在」一致。
+    ///
+    /// - Parameters:
+    ///   - mediaURL: 视频/音频文件。nil 表示只导入字幕（纯文稿，当文章读）。
+    ///   - subtitleURL: SRT / VTT 字幕文件。
+    /// - Parameter copyingMedia: 媒体文件是否必须拷进 App 目录。
+    ///   相册（`PhotosPicker`）给的是临时文件、URL 不能长期持有，只能拷；
+    ///   「文件」App 给的是 security-scoped URL，存 bookmark 引用即可，别白白占双倍盘。
+    @discardableResult
+    public func importMedia(
+        mediaURL: URL?, subtitleURL: URL, title: String? = nil, language: String? = nil,
+        copyingMedia: Bool = false
+    ) async throws -> Media? {
+        guard let mediaRepository, let mediaStorage else { return nil }
+
+        let subtitleScoped = subtitleURL.startAccessingSecurityScopedResource()
+        defer { if subtitleScoped { subtitleURL.stopAccessingSecurityScopedResource() } }
+        guard
+            let format = SubtitleParser.Format.infer(
+                fromExtension: subtitleURL.pathExtension)
+        else {
+            throw MediaImporter.Failure.unsupportedSubtitleFormat(subtitleURL.pathExtension)
+        }
+        // 字幕文件常见 GB18030 / UTF-16，走与书籍同一套编码嗅探
+        let subtitleText = EncodingDetector.decode(try Data(contentsOf: subtitleURL)).text
+
+        let mediaID = UUID()
+        // 目录留给端上转写的音轨与词级时间戳；没有媒体文件时也建，成本只是一个空目录。
+        try? mediaStorage.createDirectory(for: mediaID)
+
+        var kind = MediaKind.audio
+        var staged: (fileName: String?, bookmark: Data?) = (nil, nil)
+        if let mediaURL {
+            kind = Self.mediaKind(for: mediaURL)
+            staged = stageMediaFile(
+                mediaURL, mediaID: mediaID, copying: copyingMedia, storage: mediaStorage)
+        }
+
+        let resolvedTitle =
+            title ?? (mediaURL ?? subtitleURL).deletingPathExtension().lastPathComponent
+        let imported = try MediaImporter().makeImport(
+            title: resolvedTitle,
+            kind: kind,
+            subtitle: subtitleText,
+            format: format,
+            dirName: mediaStorage.directoryName(for: mediaID),
+            fileName: staged.fileName,
+            bookmarkData: staged.bookmark,
+            sourceLabel: mediaURL?.lastPathComponent ?? subtitleURL.lastPathComponent,
+            language: language,
+            mediaID: mediaID)
+
+        medias.insert(imported.media, at: 0)
+        mediaIDByArticle[imported.article.id] = imported.media.id
+        segmentsByArticle[imported.article.id] = imported.segments
+        segmentCounts[imported.article.id] = .init(total: imported.segments.count)
+        chapterArticleCache[imported.article.id] = imported.article
+        touch(imported.article.id)
+        evictIfNeeded()
+
+        Self.logger.info(
+            """
+            imported media: \(imported.segments.count) sentences, \
+            unlocated=\(imported.diagnostics.unlocatedCount), \
+            repaired=\(imported.diagnostics.repairedCount), \
+            maxPerParagraph=\(imported.diagnostics.maxSentencesPerParagraph)
+            """)
+
+        persist("importMedia") { [mediaRepository] in
+            try await mediaRepository.insertMedia(
+                imported.media, article: imported.article, part: imported.part,
+                segments: imported.segments)
+        }
+        return imported.media
+    }
+
+    /// 只导入媒体，文稿留空等端上转写填。
+    ///
+    /// iOS 26 才有转写能力；旧系统上 UI 不该给出这个入口（导进来也转不了）。
+    @discardableResult
+    public func importMediaForTranscription(
+        mediaURL: URL, title: String? = nil, language: String? = nil,
+        copyingMedia: Bool = false
+    ) async throws -> Media? {
+        guard let mediaRepository, let mediaStorage else { return nil }
+
+        let mediaID = UUID()
+        try? mediaStorage.createDirectory(for: mediaID)
+        let staged = stageMediaFile(
+            mediaURL, mediaID: mediaID, copying: copyingMedia, storage: mediaStorage)
+
+        let imported = MediaImporter().makePlaceholder(
+            title: title ?? mediaURL.deletingPathExtension().lastPathComponent,
+            kind: Self.mediaKind(for: mediaURL),
+            dirName: mediaStorage.directoryName(for: mediaID),
+            fileName: staged.fileName,
+            bookmarkData: staged.bookmark,
+            sourceLabel: mediaURL.lastPathComponent,
+            language: language,
+            mediaID: mediaID)
+
+        medias.insert(imported.media, at: 0)
+        mediaIDByArticle[imported.article.id] = imported.media.id
+        segmentsByArticle[imported.article.id] = []
+        segmentCounts[imported.article.id] = .init()
+        chapterArticleCache[imported.article.id] = imported.article
+        touch(imported.article.id)
+
+        persist("importMediaForTranscription") { [mediaRepository] in
+            try await mediaRepository.insertMedia(
+                imported.media, article: imported.article, part: imported.part, segments: [])
+        }
+        return imported.media
+    }
+
+    #if os(iOS)
+    /// 端上转写并替换文稿。**已有的精讲按原文文本继承**，不会被一次重转写清空。
+    ///
+    /// 转写本身在 `SpeechTranscriberService` 里单遍走完整个文件，不分片——
+    /// 桌面端「分片边界把句子劈成两半」的根因由构造消失。
+    ///
+    /// `@available` 只是运行时门控；`SpeechTranscriberService` 整体在 `#if os(iOS)` 里，
+    /// 所以这里还需要平台条件，否则 macOS 上 `swift test` 编不过。
+    @available(iOS 26, *)
+    @discardableResult
+    public func transcribe(
+        mediaID: UUID, locale: Locale,
+        onPhase: @Sendable @escaping (SpeechTranscriberService.Phase) -> Void = { _ in }
+    ) async throws -> Int {
+        guard let mediaRepository, let mediaStorage,
+            let media = medias.first(where: { $0.id == mediaID }),
+            let articleID = mediaArticleID(for: mediaID)
+        else { return 0 }
+        guard let mediaURL = mediaFileURL(for: media) else {
+            throw SpeechTranscriberService.Failure.transcriptionFailed("media file unavailable")
+        }
+
+        let scoped = mediaURL.startAccessingSecurityScopedResource()
+        defer { if scoped { mediaURL.stopAccessingSecurityScopedResource() } }
+
+        let audioURL = mediaStorage.directory(for: mediaID)
+            .appendingPathComponent(MediaStorage.extractedAudioName)
+        let tokens = try await SpeechTranscriberService().transcribe(
+            mediaURL: mediaURL, audioDestination: audioURL, locale: locale, onPhase: onPhase)
+
+        let existing = segmentsByArticle[articleID] ?? []
+        let realigned = try MediaImporter().realign(
+            tokens: tokens, articleID: articleID, inheritingFrom: existing)
+
+        segmentsByArticle[articleID] = realigned.segments
+        segmentCounts[articleID] = .init(
+            total: realigned.segments.count,
+            explained: realigned.segments.count(where: { $0.explanation != nil }))
+        if let index = medias.firstIndex(where: { $0.id == mediaID }) {
+            medias[index].transcriptSource = .onDeviceSpeech
+            medias[index].hasWordTiming = true
+            medias[index].duration = max(medias[index].duration, tokens.last?.end ?? 0)
+        }
+        if let article = chapterArticleCache[articleID] {
+            var updated = article
+            updated.content = realigned.text
+            chapterArticleCache[articleID] = updated
+        }
+        // 文稿换了，注音要重算
+        readingRunsByArticle[articleID] = nil
+        await annotateReadings(articleID: articleID)
+
+        Self.logger.info(
+            """
+            transcribed media: \(realigned.segments.count) sentences, \
+            unlocated=\(realigned.diagnostics.unlocatedCount), \
+            repaired=\(realigned.diagnostics.repairedCount), \
+            maxPerParagraph=\(realigned.diagnostics.maxSentencesPerParagraph)
+            """)
+
+        let snapshot = realigned
+        let duration = medias.first(where: { $0.id == mediaID })?.duration ?? 0
+        persist("replaceTranscript") { [mediaRepository] in
+            try await mediaRepository.replaceTranscript(
+                mediaID: mediaID, articleID: articleID, segments: snapshot.segments,
+                content: snapshot.text, source: .onDeviceSpeech, hasWordTiming: true,
+                duration: duration)
+        }
+        return realigned.segments.count
+    }
+    #endif
+
+    /// 把媒体文件安置好：拷进 App 目录，或只记一个 security-scoped bookmark。
+    ///
+    /// 拷贝路径**移动而不是复制**（源本来就是系统给的临时副本，留着只是垃圾）；
+    /// 移动失败再退回复制，跨卷时会走到这一步。
+    private func stageMediaFile(
+        _ url: URL, mediaID: UUID, copying: Bool, storage: MediaStorage
+    ) -> (fileName: String?, bookmark: Data?) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+
+        guard copying else { return (nil, try? url.bookmarkData()) }
+
+        let fileName = url.lastPathComponent
+        let destination = storage.directory(for: mediaID).appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: destination)
+        do {
+            try FileManager.default.moveItem(at: url, to: destination)
+        } catch {
+            guard (try? FileManager.default.copyItem(at: url, to: destination)) != nil else {
+                Self.logger.error("stage media failed: \(error)")
+                return (nil, nil)
+            }
+        }
+        return (fileName, nil)
+    }
+
+    private static func mediaKind(for url: URL) -> MediaKind {
+        switch url.pathExtension.lowercased() {
+        case "mp3", "m4a", "aac", "wav", "aiff", "caf", "flac": .audio
+        default: .video
+        }
+    }
+
+    /// 媒体的文稿 article。
+    public func mediaArticleID(for mediaID: UUID) -> UUID? {
+        mediaIDByArticle.first { $0.value == mediaID }?.key
+    }
+
+    /// 反查：这篇文稿属于哪个媒体（阅读器据此决定要不要显示播放器）。
+    public func media(forArticle articleID: UUID) -> Media? {
+        guard let mediaID = mediaIDByArticle[articleID] else { return nil }
+        return medias.first { $0.id == mediaID }
+    }
+
+    public func progress(ofMedia mediaID: UUID) -> MediaProgress? {
+        progressByMedia[mediaID]
+    }
+
+    public func saveMediaProgress(_ progress: MediaProgress) {
+        guard let mediaRepository else { return }
+        progressByMedia[progress.mediaId] = progress
+        persist("saveMediaProgress") { [mediaRepository] in
+            try await mediaRepository.saveProgress(progress)
+        }
+    }
+
+    /// 媒体文件的实际位置。引用模式下解析 bookmark；文件失效返回 nil（只影响播放）。
+    public func mediaFileURL(for media: Media) -> URL? {
+        if let fileName = media.fileName, let mediaStorage {
+            let url = mediaStorage.directory(for: media.id).appendingPathComponent(fileName)
+            return FileManager.default.fileExists(atPath: url.path) ? url : nil
+        }
+        guard let bookmarkData = media.bookmarkData else { return nil }
+        var isStale = false
+        guard
+            let url = try? URL(
+                resolvingBookmarkData: bookmarkData, bookmarkDataIsStale: &isStale)
+        else { return nil }
+        if isStale, let refreshed = try? url.bookmarkData(), let mediaRepository {
+            let mediaID = media.id
+            persist("refreshBookmark") { [mediaRepository] in
+                try await mediaRepository.updateBookmark(mediaID: mediaID, data: refreshed)
+            }
+        }
+        return url
+    }
+
+    public func deleteMedia(_ mediaID: UUID) {
+        guard let mediaRepository else { return }
+        guard let index = medias.firstIndex(where: { $0.id == mediaID }) else { return }
+        let media = medias.remove(at: index)
+        if let articleID = mediaIDByArticle.first(where: { $0.value == mediaID })?.key {
+            mediaIDByArticle[articleID] = nil
+            segmentsByArticle[articleID] = nil
+            segmentCounts[articleID] = nil
+            chapterArticleCache[articleID] = nil
+            readingRunsByArticle[articleID] = nil
+            loadedOrder.removeAll { $0 == articleID }
+        }
+        progressByMedia[mediaID] = nil
+
+        persist("deleteMedia") { [mediaRepository] in
+            try await mediaRepository.deleteMedia(id: mediaID)
+        }
+        if let mediaStorage {
+            Task.detached(priority: .background) { try? mediaStorage.remove(id: media.id) }
+        }
+    }
+
     public func chapterSummaries(of bookID: UUID) -> [BookChapterSummary] {
         chapterSummariesByBook[bookID] ?? []
     }
@@ -793,6 +1160,23 @@ public final class ContentStore {
     /// 真实翻译入口（App 壳注入）。签名：原文 → 纯译文。未注入时报 `.notConfigured`。
     @ObservationIgnored public var translationProvider: ((String) async throws -> String)?
 
+    /// 单词释义入口（App 壳注入）。签名：(词, 所在句) → 词条。
+    @ObservationIgnored public var glossProvider:
+        ((String, String) async throws -> VocabularyItem)?
+
+    /// 查词结果缓存，键是归一化后的词。**只在会话内有效**（见 ContentStore+Gloss 的说明）。
+    public internal(set) var glossStates: [String: GlossState] = [:]
+
+    /// 还有多少篇没进全文索引。> 0 时搜索结果可能不全，UI 要如实告知。
+    public internal(set) var pendingIndexCount = 0
+    /// 待处理的跨 tab 跳转（生词卡「回到原句」）。消费方取走后置 nil。
+    public var pendingJump: PendingJump?
+
+    /// 出处原句的会话内缓存，键是 segmentID（见 `ContentStore+Source`）。
+    /// 存 `String?` 而非 `String`：查不到（句子被重新切分过）也要记下来，
+    /// 否则每次翻面都会为同一张必然落空的卡再查一次库。
+    @ObservationIgnored var sourceSentenceCache: [UUID: String?] = [:]
+
     /// - Returns: 是否成功产出精讲（供批量任务统计）。
     @discardableResult
     public func generateExplanation(articleID: UUID, segmentID: UUID) async -> Bool {
@@ -812,6 +1196,13 @@ public final class ContentStore {
         generationErrors[segmentID] = nil
         defer { generatingSegmentIDs.remove(segmentID) }
 
+        // 发请求之前先看库里有没有同一句原文已经精讲过的结果。
+        // 重新导入一本已精讲过的书时，这一步能把整本的费用降到零。
+        if let reused = await reusableExplanation(for: text) {
+            applyExplanation(reused, articleID: articleID, segmentID: segmentID, meta: nil)
+            return true
+        }
+
         let generated: GeneratedExplanation
         do {
             generated = try await provider(text)
@@ -825,29 +1216,9 @@ public final class ContentStore {
             return false
         }
 
-        // 写回前重新校验：防止用户切换文章/重切分后旧请求覆盖新数据（设计文档 §4.6）。
-        guard var segments = segmentsByArticle[articleID],
-              let index = segments.firstIndex(where: { $0.id == segmentID }),
-              segments[index].explanation == nil
-        else { return false }
-        segments[index].explanation = generated.explanation
-        segments[index].translation = generated.explanation.translation
-        if let reading = generated.explanation.readingText {
-            segments[index].readingText = reading
-        }
-        segmentsByArticle[articleID] = segments
-        // 计数同步递增：文章被 LRU 卸载后进度徽章仍要正确。
-        segmentCounts[articleID, default: .init(total: segments.count)].explained += 1
-        // 精讲带回了生词读音，比离线注音准——立刻盖上去。
-        refreshReadings(articleID: articleID, segmentID: segmentID)
-
-        let explanation = generated.explanation
-        let meta = generated.meta
-        persist("saveExplanation") { [repository] in
-            try await repository.saveExplanation(
-                segmentID: segmentID, explanation: explanation, meta: meta)
-        }
-        return true
+        return applyExplanation(
+            generated.explanation, articleID: articleID, segmentID: segmentID,
+            meta: generated.meta)
     }
 
     /// 只翻译一句（快翻）：产生 `.translated` chip 态，不做精讲。
@@ -899,96 +1270,27 @@ public final class ContentStore {
     }
 
     // MARK: - 全文批量任务（精讲 / 翻译）
+    //
+    // 实现在 ContentStore+Batch.swift —— 取消语义足够绕，单独一个文件说清楚。
 
-    /// 批量任务进度（供阅读器进度条 + 取消）。
-    public struct BatchState: Sendable, Equatable {
-        public enum Kind: Sendable, Equatable { case explain, translate }
-        public var kind: Kind
-        public var completed: Int
-        public var total: Int
-        public var failed: Int
-    }
-
-    public private(set) var batchByArticle: [UUID: BatchState] = [:]
-    @ObservationIgnored private var batchTasks: [UUID: Task<Void, Never>] = [:]
+    public internal(set) var batchByArticle: [UUID: BatchState] = [:]
+    @ObservationIgnored var batchTasks: [UUID: Task<Void, Never>] = [:]
+    /// 上一批的失败句，批次状态清空后仍保留，供"重试失败项"。
+    @ObservationIgnored var lastBatchFailures: [UUID: BatchFailures] = [:]
 
     /// 并发度（设置页可改，默认 3，钳制 1...6）。
-    private var batchConcurrency: Int {
+    var batchConcurrency: Int {
         let value = defaults.integer(forKey: "ai.batchConcurrency")
         return value == 0 ? 3 : min(max(value, 1), 6)
     }
 
-    public func isBatchRunning(articleID: UUID) -> Bool { batchTasks[articleID] != nil }
-
-    public func batchExplainAll(articleID: UUID) { startBatch(articleID, kind: .explain) }
-    public func batchTranslateAll(articleID: UUID) { startBatch(articleID, kind: .translate) }
-
-    public func cancelBatch(articleID: UUID) {
-        batchTasks[articleID]?.cancel()
-        batchTasks[articleID] = nil
-        batchByArticle[articleID] = nil
-    }
-
-    private func startBatch(_ articleID: UUID, kind: BatchState.Kind) {
-        guard batchTasks[articleID] == nil else { return }
-        let pending = segments(for: articleID).filter { segment in
-            switch kind {
-            case .explain: return segment.explanation == nil
-            case .translate: return segment.explanation == nil && segment.translation == nil
-            }
-        }.map(\.id)
-        guard !pending.isEmpty else { return }
-
-        // 无对应 provider 时不启动，直接把首句错误暴露给用户（设置未配模型）。
-        let hasProvider = kind == .explain ? explanationProvider != nil : translationProvider != nil
-        guard hasProvider else {
-            if let first = pending.first { generationErrors[first] = .notConfigured }
-            return
-        }
-
-        batchByArticle[articleID] = BatchState(
-            kind: kind, completed: 0, total: pending.count, failed: 0)
-        let concurrency = batchConcurrency
-        batchTasks[articleID] = Task { [weak self] in
-            await self?.runBatch(
-                articleID: articleID, kind: kind, ids: pending, concurrency: concurrency)
-        }
-    }
-
-    /// 分批并发：每批最多 `concurrency` 句同时在飞（各自在 await 网络时让出主线程）。
-    /// 用非结构化 `Task { @MainActor }` 避免 TaskGroup 的 sending 约束（Swift 6）。
-    private func runBatch(
-        articleID: UUID, kind: BatchState.Kind, ids: [UUID], concurrency: Int
-    ) async {
-        var index = 0
-        while index < ids.count {
-            if Task.isCancelled { break }
-            let chunk = ids[index..<min(index + concurrency, ids.count)]
-            index += concurrency
-            let tasks = chunk.map { segmentID in
-                Task { @MainActor [weak self] () -> Bool in
-                    guard let self, !Task.isCancelled else { return false }
-                    return kind == .explain
-                        ? await self.generateExplanation(articleID: articleID, segmentID: segmentID)
-                        : await self.generateTranslation(articleID: articleID, segmentID: segmentID)
-                }
-            }
-            for task in tasks {
-                let ok = await task.value
-                if var state = batchByArticle[articleID] {
-                    state.completed += 1
-                    if !ok { state.failed += 1 }
-                    batchByArticle[articleID] = state
-                }
-            }
-        }
-        batchTasks[articleID] = nil
-        batchByArticle[articleID] = nil
-    }
-
     // MARK: - 生词收藏
 
-    public func toggleFavorite(_ item: VocabularyItem, source article: Article) {
+    /// - Parameter segmentID: 收藏时所在的那一句。有它生词卡才能"回到原句"——
+    ///   媒体字幕句自带 `startTime`，跳回去就是跳到那一秒。
+    public func toggleFavorite(
+        _ item: VocabularyItem, source article: Article, segmentID: UUID? = nil
+    ) {
         if let index = favorites.firstIndex(where: { $0.word == item.word }) {
             let removed = favorites.remove(at: index)
             persist("removeFavorite") { [repository] in
@@ -1003,6 +1305,7 @@ public final class ContentStore {
                 reading: item.reading,
                 sourceArticleId: article.id,
                 sourceArticleTitle: article.title,
+                sourceSegmentId: segmentID,
                 packIds: [WordPack.systemUngroupedID],
                 dueDate: Self.localDateString()
             )
@@ -1025,7 +1328,7 @@ public final class ContentStore {
     @discardableResult
     public func addManualWord(
         word: String, meaning: String, reading: String?, usage: String?, example: String?,
-        packIds: [UUID] = []
+        packIds: [UUID] = [], source: Article? = nil, segmentID: UUID? = nil
     ) -> Bool {
         let normalized = normalizedWord(word)
         guard !normalized.isEmpty, !meaning.trimmingCharacters(in: .whitespaces).isEmpty else {
@@ -1040,6 +1343,10 @@ public final class ContentStore {
             usage: usage?.nilIfBlank,
             example: example?.nilIfBlank,
             reading: reading?.nilIfBlank,
+            // 划词收藏此前丢来源：卡片上既没有出处也回不去原句。
+            sourceArticleId: source?.id,
+            sourceArticleTitle: source?.title,
+            sourceSegmentId: segmentID,
             packIds: sanitizedPackIds(packIds),
             dueDate: Self.localDateString()
         )
@@ -1287,7 +1594,7 @@ public final class ContentStore {
 
     // MARK: - 落库串行链
 
-    private func persist(
+    func persist(
         _ label: String, _ operation: @escaping @Sendable () async throws -> Void
     ) {
         let previous = persistChain
