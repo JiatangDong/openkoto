@@ -5958,6 +5958,121 @@
         }
       }
     },
+    "source.notExplained": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This sentence has not been explained yet. Open it in the text to explain it."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "この文はまだ解説されていません。本文で開くと解説できます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这一句还没有精讲。回到原文即可精讲它。"
+          }
+        }
+      }
+    },
+    "source.openInText": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open in text"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本文で開く"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在原文中查看"
+          }
+        }
+      }
+    },
+    "source.sentenceUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The original sentence can no longer be located — this chapter has been re-split since. You can still open the text."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "元の文が見つかりません。この章は再分割されています。本文を開くことはできます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "找不到当时那一句了——这一章之后被重新切分过。仍然可以打开原文。"
+          }
+        }
+      }
+    },
+    "source.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Source"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "出典"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "出处"
+          }
+        }
+      }
+    },
+    "source.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This card has no source. Words saved from a sentence remember where they came from."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このカードには出典がありません。文から保存した単語には出典が記録されます。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这张卡片没有出处。从句子里收藏的词会记住它出自哪里。"
+          }
+        }
+      }
+    },
     "stats.empty.activity": {
       "extractionState": "manual",
       "localizations": {

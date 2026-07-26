@@ -112,15 +112,20 @@ public struct ContentRepository: Sendable {
         }
     }
 
-    /// 单句正文——生词卡显示「出处原句」用。
+    /// 取单独一句——生词卡的「出处」弹窗用。
+    ///
+    /// 连译文和精讲一起带回来：出处弹窗要在不进阅读器的前提下把这一句讲清楚，
+    /// 而这些都已经躺在同一行里了，分两次查没有意义。
     ///
     /// 刻意**不走 `loadSegments`**：那会把整章上万句读进来，还会挤掉
     /// `ContentStore` 里正在读的那几章（LRU 只留 3 篇）。复习二十张卡就能把
     /// 用户翻到一半的章节反复顶出内存。这里只取一行，不碰任何缓存。
-    public func segmentText(id: UUID) async throws -> String? {
+    public func segment(id: UUID) async throws -> ArticleSegment? {
         try await database.writer.read { db in
-            try String.fetchOne(
-                db, sql: "SELECT text FROM segment WHERE id = ?", arguments: [uuidString(id)])
+            try SegmentRecord
+                .filter(Column("id") == uuidString(id))
+                .fetchOne(db)?
+                .domainModel()
         }
     }
 

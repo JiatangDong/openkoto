@@ -105,9 +105,9 @@ import Testing
         let (article, segment) = try await makeArticle(repository)
         await store.load()
 
-        #expect(await store.sourceSentence(segmentID: segment.id) == "私は日本語を勉強しています。")
+        #expect(await store.sourceSegment(segmentID: segment.id)?.text == "私は日本語を勉強しています。")
         try await repository.deleteArticle(id: article.id)
-        #expect(await store.sourceSentence(segmentID: segment.id) == "私は日本語を勉強しています。")
+        #expect(await store.sourceSegment(segmentID: segment.id)?.text == "私は日本語を勉強しています。")
     }
 
     /// 查不到的那次也要记进缓存，否则每次翻面都为同一张必然落空的卡再查一次库。
@@ -116,8 +116,50 @@ import Testing
         await store.load()
         let ghost = UUID()
 
-        #expect(await store.sourceSentence(segmentID: ghost) == nil)
-        #expect(store.sourceSentenceCache.index(forKey: ghost) != nil)
+        #expect(await store.sourceSegment(segmentID: ghost) == nil)
+        #expect(store.sourceSegmentCache.index(forKey: ghost) != nil)
+    }
+
+    // MARK: - 出处弹窗的内容
+
+    /// 弹窗要在**不进阅读器**的前提下把这一句讲清楚，所以译文和精讲必须跟着句子一起回来。
+    /// 只带纯文本的话，弹窗就只剩一句看不懂的原文，等于没做。
+    @Test func theSourceCarriesItsTranslationAndExplanation() async throws {
+        let (store, repository) = try makeStore()
+        let (article, segment) = try await makeArticle(repository)
+        _ = try await repository.saveExplanation(
+            segmentID: segment.id,
+            explanation: SegmentExplanation(
+                translation: "我在学习日语。",
+                explanation: "「ています」表示正在持续的动作或状态。",
+                grammarPoints: [GrammarPoint(point: "〜ている", explanation: "持续体")],
+                culturalContext: "自我介绍时的常用说法。"),
+            meta: nil)
+        await store.load()
+        store.toggleFavorite(
+            VocabularyItem(word: "勉強", meaning: "学习"), source: article, segmentID: segment.id)
+
+        let favorite = try #require(store.favorites.first { $0.word == "勉強" })
+        let source = try #require(await store.resolveSource(for: favorite))
+        let explanation = try #require(source.segment?.explanation)
+        #expect(explanation.translation == "我在学习日语。")
+        #expect(explanation.grammarPoints.first?.point == "〜ている")
+        #expect(explanation.culturalContext == "自我介绍时的常用说法。")
+    }
+
+    /// 没精讲过的句子照样要能弹出来——弹窗自己降级成"只有原句"，
+    /// 而不是整个入口消失。用查词（gloss）建的卡就是这种情况。
+    @Test func aSentenceWithoutAnExplanationStillResolves() async throws {
+        let (store, repository) = try makeStore()
+        let (article, segment) = try await makeArticle(repository)
+        await store.load()
+        store.toggleFavorite(
+            VocabularyItem(word: "勉強", meaning: "学习"), source: article, segmentID: segment.id)
+
+        let favorite = try #require(store.favorites.first { $0.word == "勉強" })
+        let source = try #require(await store.resolveSource(for: favorite))
+        #expect(source.segment?.text == "私は日本語を勉強しています。")
+        #expect(source.segment?.explanation == nil)
     }
 }
 

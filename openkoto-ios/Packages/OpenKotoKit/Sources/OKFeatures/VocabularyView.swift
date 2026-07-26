@@ -14,6 +14,7 @@ struct VocabularyView: View {
     @State private var isAddPresented = false
     @State private var isPackManagerPresented = false
     @State private var editingFavorite: FavoriteVocabulary?
+    @State private var previewFavorite: FavoriteVocabulary?
 
     var body: some View {
         NavigationStack {
@@ -58,6 +59,12 @@ struct VocabularyView: View {
             }
             .sheet(item: $editingFavorite) { favorite in
                 VocabEditSheet(favorite: favorite)
+            }
+            .sheet(item: $previewFavorite) { favorite in
+                SourcePreviewSheet(favorite: favorite) { jump in
+                    previewFavorite = nil
+                    store.pendingJump = jump
+                }
             }
             .onChange(of: store.activePackId) {
                 Task { await store.refreshStats() }
@@ -165,17 +172,15 @@ struct VocabularyView: View {
         }
     }
 
-    /// 回到原句：把跳转请求放进 store，由 RootTabView 切 tab、LibraryView 落点。
+    /// 出处：先弹详情（句子 + 译文 + 讲解），要回原文再从详情里点。
     ///
-    /// 只在有出处时出现——存量卡片（v5 之前收藏的）没有 `sourceSegmentId`，
-    /// 那就退化成跳到文章开头，总比给一个点了没反应的按钮好。
+    /// 与复习卡片走同一个弹窗——同一件事在两个入口有两种行为，比两处都笨拙更糟。
+    /// 只在有出处时出现：存量卡片（v5 之前收藏的）没有来源，不给一个点了没反应的按钮。
     private func backToSourceButton(_ favorite: FavoriteVocabulary) -> some View {
         Button {
-            guard let articleID = favorite.sourceArticleId else { return }
-            store.pendingJump = .init(
-                articleID: articleID, segmentID: favorite.sourceSegmentId)
+            previewFavorite = favorite
         } label: {
-            Label(L("vocab.backToSource"), systemImage: "text.viewfinder")
+            Label(L("source.title"), systemImage: "text.viewfinder")
         }
         .tint(theme.primary)
     }

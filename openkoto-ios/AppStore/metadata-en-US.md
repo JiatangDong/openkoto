@@ -40,6 +40,12 @@ No account is required. Sample articles are included, so reading, vocabulary, an
 
 OpenKoto is free and open source.
 
+## What's new in 0.3.2
+
+• "Source" on a vocabulary card now opens a panel instead of jumping away: flip a review card, tap the source, and you get the original sentence, its translation, the explanation, grammar points and context — then carry on reviewing. If you do want the full text, the panel has an "Open in text" button. Previously a single tap dropped you into an article of several hundred paragraphs with no sense of where you had landed
+• Swiping a row in the vocabulary list opens the same panel, so both entry points behave alike
+• Sentences that have not been explained yet still open, showing the sentence alone; if the source has been re-split since (for example after re-importing the same book), the source name and the jump are kept instead of the whole block disappearing
+
 ## What's new in 0.3.1
 
 • Video and audio study: import a video or audio file (or pick one from Photos), pair it with SRT / VTT subtitles, or generate subtitles on device (requires iOS 26). Subtitles follow playback sentence by sentence, and the transcript can also be read as a plain article

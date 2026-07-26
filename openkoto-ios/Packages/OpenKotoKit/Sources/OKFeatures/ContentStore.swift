@@ -1172,10 +1172,10 @@ public final class ContentStore {
     /// 待处理的跨 tab 跳转（生词卡「回到原句」）。消费方取走后置 nil。
     public var pendingJump: PendingJump?
 
-    /// 出处原句的会话内缓存，键是 segmentID（见 `ContentStore+Source`）。
-    /// 存 `String?` 而非 `String`：查不到（句子被重新切分过）也要记下来，
-    /// 否则每次翻面都会为同一张必然落空的卡再查一次库。
-    @ObservationIgnored var sourceSentenceCache: [UUID: String?] = [:]
+    /// 出处句子的会话内缓存，键是 segmentID（见 `ContentStore+Source`）。
+    /// 存 `ArticleSegment?` 而非 `ArticleSegment`：查不到（句子被重新切分过）也要
+    /// 记下来，否则每次翻面都会为同一张必然落空的卡再查一次库。
+    @ObservationIgnored var sourceSegmentCache: [UUID: ArticleSegment?] = [:]
 
     /// - Returns: 是否成功产出精讲（供批量任务统计）。
     @discardableResult

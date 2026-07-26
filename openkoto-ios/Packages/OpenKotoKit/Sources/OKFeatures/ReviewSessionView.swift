@@ -27,6 +27,7 @@ struct ReviewSessionView: View {
     /// 当前卡的出处。正面就开始查，翻面时已经在手上了——查库虽然只要几毫秒，
     /// 但翻面是这个界面唯一的关键动作，不该有任何一帧的空档。
     @State private var source: ContentStore.FavoriteSource?
+    @State private var isPreviewPresented = false
 
     private var current: FavoriteVocabulary? { queue.first }
 
@@ -66,6 +67,15 @@ struct ReviewSessionView: View {
                 source = nil
                 guard let current else { return }
                 source = await store.resolveSource(for: current)
+            }
+            .sheet(isPresented: $isPreviewPresented) {
+                if let current {
+                    SourcePreviewSheet(favorite: current) { jump in
+                        // 两层 sheet 一起收：这一层自己关，复习页由呈现方关。
+                        isPreviewPresented = false
+                        onOpenSource(jump)
+                    }
+                }
             }
         }
     }
@@ -200,14 +210,14 @@ struct ReviewSessionView: View {
         }
     }
 
-    /// 出处：来源名 + 收藏时所在的那一句，整块可点，点了跳回原文。
+    /// 出处：来源名 + 收藏时所在的那一句，整块可点。
     ///
-    /// 「这词我在哪见过来着」才是用户翻到背面时真正想起的问题，所以句子本身
-    /// 就是主要价值——跳转是第二层。跳走会结束本轮复习，但不丢进度：
-    /// 评过分的卡片当场就落库了，重进复习时 `dueQueue()` 不会再把它们排进来。
+    /// 点了**先弹出处详情**（句子 + 译文 + 讲解），不直接跳原文——原文动辄几百段，
+    /// 一步跳过去只会让人不知道自己落在哪儿，而且复习也就此中断了。
+    /// 真要回原文，详情里还有一个按钮。
     private func sourceSection(_ source: ContentStore.FavoriteSource, word: String) -> some View {
         Button {
-            onOpenSource(source.jump)
+            isPreviewPresented = true
         } label: {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 4) {
@@ -234,7 +244,7 @@ struct ReviewSessionView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(source.sentence.map { "\(source.label)。\($0)" } ?? source.label))
-        .accessibilityHint(Text(L("vocab.backToSource")))
+        .accessibilityHint(Text(L("source.title")))
     }
 
     /// 把这个词在原句里标出来。找不到就整句原样显示——卡片是「勉強する」而原句写作
