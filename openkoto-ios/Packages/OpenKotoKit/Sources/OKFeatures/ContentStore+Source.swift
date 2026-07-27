@@ -1,5 +1,6 @@
 import Foundation
 import OKModels
+import OKPersistence
 
 // 生词卡的出处。
 //
@@ -33,10 +34,65 @@ extension ContentStore {
         if let segmentID = favorite.sourceSegmentId {
             segment = await sourceSegment(segmentID: segmentID)
         }
+        // 指不到句子就现找一次。两种卡会走到这儿：`source_segment_id` 是 v5 才加的列
+        // 且没有回填，升级前收藏的全是空的；书被重新导入过时旧 UUID 也会失效。
+        if segment == nil {
+            segment = await backfillSourceSegment(for: favorite, articleID: articleID)
+        }
         return FavoriteSource(
             label: sourceLabel(articleID: articleID, fallback: favorite.sourceArticleTitle),
             segment: segment,
-            jump: .init(articleID: articleID, segmentID: favorite.sourceSegmentId))
+            // 跳转坐标用现找到的那一句：回填成功后「在原文中查看」就能落到句上，
+            // 而不是把人扔到文章开头。
+            jump: .init(articleID: articleID, segmentID: segment?.id ?? favorite.sourceSegmentId))
+    }
+
+    /// 在来源文章里现找这个词出自哪一句，找到就写回卡片（只找一次）。
+    ///
+    /// 优先级：
+    /// 1. **精讲词汇表里含这个词的句子** —— 卡片本来就是从那份词汇表点出来的，
+    ///    这个信号几乎必中，且在一个词于同篇出现多次时能选对那一句；
+    /// 2. 正文含这个词、句序最小的那句；
+    /// 3. 都没有 —— 记一次未命中，只显示来源名（与回填前的表现一致）。
+    ///
+    /// 书籍章节从未打开过时库里没有 segment 行，这里自然什么也找不到；
+    /// 用户哪天读到那一章，下次复习就补上了。
+    func backfillSourceSegment(
+        for favorite: FavoriteVocabulary, articleID: UUID
+    ) async -> ArticleSegment? {
+        guard !sourceBackfillMisses.contains(favorite.id) else { return nil }
+
+        let candidates: [ArticleSegment]
+        if let inMemory = segmentsByArticle[articleID] {
+            // 正在读的章节直接在内存里找，省一次查询。
+            candidates = inMemory.filter { $0.text.localizedCaseInsensitiveContains(favorite.word) }
+        } else {
+            candidates =
+                (try? await repository.segments(articleID: articleID, containing: favorite.word))
+                ?? []
+        }
+        guard !candidates.isEmpty else {
+            sourceBackfillMisses.insert(favorite.id)
+            return nil
+        }
+
+        let target = normalizedWord(favorite.word)
+        let matched =
+            candidates.first { segment in
+                segment.explanation?.vocabulary.contains { normalizedWord($0.word) == target }
+                    ?? false
+            } ?? candidates[0]
+
+        // 写回卡片：下次翻到它走的就是 `sourceSegmentId` 那条快路径，只查这一次。
+        if let index = favorites.firstIndex(where: { $0.id == favorite.id }) {
+            favorites[index].sourceSegmentId = matched.id
+        }
+        sourceSegmentCache[matched.id] = matched
+        persist("setSourceSegment") { [repository] in
+            try await repository.setSourceSegment(
+                vocabularyId: favorite.id, segmentId: matched.id)
+        }
+        return matched
     }
 
     /// 单独一句，带会话内缓存。

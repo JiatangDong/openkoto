@@ -10,11 +10,21 @@ struct VocabularyView: View {
     @Environment(\.theme) private var theme
     @State private var speech = SpeechService()
     @State private var searchText = ""
-    @State private var isReviewPresented = false
     @State private var isAddPresented = false
     @State private var isPackManagerPresented = false
     @State private var editingFavorite: FavoriteVocabulary?
     @State private var previewFavorite: FavoriteVocabulary?
+
+    /// 今日清空后底部按钮改开提前复习，两种情况共用同一个 sheet。
+    ///
+    /// 用 `.sheet(item:)` 而不是「一个 Bool + 一个模式变量」：后者要在同一次动作里
+    /// 改两个 state，sheet 的内容闭包可能拿着**旧的**模式先构造一次，
+    /// `ReviewSessionView` 的 `@State` 只初始化一次，于是点「提前复习」开出来的是普通复习。
+    private struct ReviewSession: Identifiable {
+        let id = UUID()
+        let mode: ReviewSessionView.Mode
+    }
+    @State private var reviewSession: ReviewSession?
 
     var body: some View {
         NavigationStack {
@@ -43,13 +53,15 @@ struct VocabularyView: View {
                     .accessibilityLabel(L("vocabulary.addWord"))
                 }
             }
-            .sheet(isPresented: $isReviewPresented) {
+            .sheet(item: $reviewSession) { session in
                 // 关 sheet 与置跳转在同一次状态更新里完成：SwiftUI 一个事务处理完，
                 // 视觉上是"卡片消失，人已经在原文里了"，不会先看到 sheet 落下再跳一次。
-                ReviewSessionView { jump in
-                    isReviewPresented = false
-                    store.pendingJump = jump
-                }
+                ReviewSessionView(
+                    onOpenSource: { jump in
+                        reviewSession = nil
+                        store.pendingJump = jump
+                    },
+                    initialMode: session.mode)
             }
             .sheet(isPresented: $isAddPresented) {
                 VocabEditSheet(favorite: nil)
@@ -88,10 +100,12 @@ struct VocabularyView: View {
         }
     }
 
+    /// 与 `dueQueue` 同口径：坏日期（含空串）视为已到期。
+    /// 两边不一致的话，底部按钮会在队列还有卡时就换成「提前复习」。
     private var dueTodayCount: Int {
         let today = ContentStore.localDateString()
         return packFavorites.count {
-            $0.suspendedAt == nil && !$0.dueDate.isEmpty && $0.dueDate <= today
+            $0.suspendedAt == nil && ($0.dueDate.count != 10 || $0.dueDate <= today)
         }
     }
 
@@ -205,7 +219,8 @@ struct VocabularyView: View {
                     distributionChip(L("vocabulary.stateMastered"), count: stats.countSuspended,
                                      color: theme.mutedForeground)
                 }
-                Text(L("vocabulary.todayProgress\(stats.newToday)\(stats.reviewToday)"))
+                // 与复习页的进度条同口径：只数今天答对了的。
+                Text(L("vocabulary.todayProgress\(stats.passedNewToday)\(stats.passedReviewToday)"))
                     .font(.caption)
                     .foregroundStyle(theme.mutedForeground)
             }
@@ -213,20 +228,26 @@ struct VocabularyView: View {
         .padding(.vertical, 2)
     }
 
+    /// 今日清空了就换成「提前复习」，而不是给一个点不动的灰按钮——
+    /// 真正无事可做（一张未来到期的卡都没有）时才置灰。
     private var reviewButton: some View {
-        Button {
-            isReviewPresented = true
+        let isAhead = dueTodayCount == 0
+        let canStart = isAhead ? store.aheadAvailableCount > 0 : true
+        return Button {
+            reviewSession = .init(mode: isAhead ? .ahead : .due)
         } label: {
-            Label(L("vocabulary.startReview"), systemImage: "rectangle.on.rectangle.angled")
+            Label(
+                isAhead ? L("vocabulary.startAhead") : L("vocabulary.startReview"),
+                systemImage: isAhead ? "arrow.clockwise" : "rectangle.on.rectangle.angled")
                 .font(.headline)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
         }
         .buttonStyle(.borderedProminent)
-        .tint(theme.primary)
+        .tint(isAhead ? theme.srsFading : theme.primary)
         .padding(.horizontal)
         .padding(.bottom, 4)
-        .disabled(dueTodayCount == 0)
+        .disabled(!canStart)
     }
 
     private func stat(_ label: String, value: Int) -> some View {

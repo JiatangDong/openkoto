@@ -366,8 +366,13 @@ public struct ReviewEvent: Codable, Identifiable, Sendable, Hashable {
 
 /// 复习统计(规范 §6,由事件日志 + 卡片状态推导)。
 public struct ReviewStats: Sendable, Hashable {
+    /// 今日"碰过"的卡数(规范 §6:按事件去重,不看评分)。统计页的活跃度用它。
     public var newToday: Int
     public var reviewToday: Int
+    /// 今日**通过**(评分 ≥ good)的卡数。复习页的进度条用它:
+    /// 答错的卡当天还会回来,在点"认识"之前不该算学完(规范 §6 派生计数)。
+    public var passedNewToday: Int
+    public var passedReviewToday: Int
     public var streakDays: Int
     public var total: Int
     public var countNew: Int
@@ -376,11 +381,15 @@ public struct ReviewStats: Sendable, Hashable {
     public var countSuspended: Int
 
     public init(
-        newToday: Int = 0, reviewToday: Int = 0, streakDays: Int = 0, total: Int = 0,
+        newToday: Int = 0, reviewToday: Int = 0,
+        passedNewToday: Int = 0, passedReviewToday: Int = 0,
+        streakDays: Int = 0, total: Int = 0,
         countNew: Int = 0, countLearning: Int = 0, countReview: Int = 0, countSuspended: Int = 0
     ) {
         self.newToday = newToday
         self.reviewToday = reviewToday
+        self.passedNewToday = passedNewToday
+        self.passedReviewToday = passedReviewToday
         self.streakDays = streakDays
         self.total = total
         self.countNew = countNew

@@ -77,23 +77,97 @@ import Testing
         #expect(await store.resolveSource(for: favorite) == nil)
     }
 
-    /// 句子查不到时**只降级掉句子**，来源名和跳转都得留着。
+    /// 句子在原文里找不到时**只降级掉句子**，来源名和跳转都得留着。
     ///
-    /// 章节被重新切分后 segment 全换新 UUID（重导入同一本书就会发生），
-    /// 老卡片的 `sourceSegmentId` 就指向一个不存在的行了。这时仍然能跳回那篇文章，
-    /// 只是落在开头——比整块消失有用得多。
-    @Test func aStaleSegmentDegradesToLabelOnly() async throws {
+    /// 这里的词根本不在那篇文章里（编辑过卡片的词形、或者原文被整篇替换过），
+    /// 回填也救不回来。仍然能跳回那篇文章，只是落在开头——比整块消失有用得多。
+    @Test func aWordThatIsNowhereInTheArticleDegradesToLabelOnly() async throws {
         let (store, repository) = try makeStore()
         let (article, _) = try await makeArticle(repository)
+        await store.load()
+        store.toggleFavorite(
+            VocabularyItem(word: "図書館", meaning: "图书馆"), source: article, segmentID: UUID())
+
+        let favorite = try #require(store.favorites.first { $0.word == "図書館" })
+        let source = try #require(await store.resolveSource(for: favorite))
+        #expect(source.label == "ある記事")
+        #expect(source.sentence == nil)
+        #expect(source.jump.articleID == article.id)
+    }
+
+    // MARK: - 存量卡的回填
+
+    /// `source_segment_id` 是 migration v5 才加的列且**没有回填**，
+    /// 升级前收藏的卡全都指不到句子。现查一次原文把它们捞回来，并写回卡片。
+    @Test func aLegacyCardWithoutASegmentIDIsBackfilled() async throws {
+        let (store, repository) = try makeStore()
+        let (article, segment) = try await makeArticle(repository)
+        await store.load()
+        // 存量形态：有 articleID，没有 segmentID。
+        store.toggleFavorite(VocabularyItem(word: "勉強", meaning: "学习"), source: article)
+        let favorite = try #require(store.favorites.first { $0.word == "勉強" })
+        #expect(favorite.sourceSegmentId == nil)
+
+        let source = try #require(await store.resolveSource(for: favorite))
+        #expect(source.sentence == "私は日本語を勉強しています。")
+        // 跳转也跟着精确到句，而不是把人扔到文章开头。
+        #expect(source.jump.segmentID == segment.id)
+
+        // 写回卡片 + 落盘：只查这一次。
+        #expect(store.favorites.first { $0.word == "勉強" }?.sourceSegmentId == segment.id)
+        await store.flushPersistence()
+        let reloaded = try #require(
+            try await repository.loadAll().favorites.first { $0.word == "勉強" })
+        #expect(reloaded.sourceSegmentId == segment.id)
+    }
+
+    /// 章节被重新切分后（重导入同一本书，segment 全换新 UUID）老卡片也能自愈。
+    @Test func aStaleSegmentIDHealsItself() async throws {
+        let (store, repository) = try makeStore()
+        let (article, segment) = try await makeArticle(repository)
         await store.load()
         store.toggleFavorite(
             VocabularyItem(word: "勉強", meaning: "学习"), source: article, segmentID: UUID())
 
         let favorite = try #require(store.favorites.first { $0.word == "勉強" })
         let source = try #require(await store.resolveSource(for: favorite))
-        #expect(source.label == "ある記事")
-        #expect(source.sentence == nil)
-        #expect(source.jump.articleID == article.id)
+        #expect(source.segment?.id == segment.id)
+        _ = repository
+    }
+
+    /// 同一个词在一篇里出现多次时，**精讲词汇表**说了算——
+    /// 卡片本来就是从那份词汇表点出来的，句序最小的那句未必是它的出处。
+    @Test func theExplanationVocabularyPicksTheRightSentence() async throws {
+        let (store, repository) = try makeStore()
+        let article = Article(title: "ある記事", content: "本文")
+        let first = ArticleSegment(articleId: article.id, order: 0, text: "毎日勉強する。")
+        let second = ArticleSegment(
+            articleId: article.id, order: 1, text: "私は日本語を勉強しています。")
+        try await repository.insertArticle(article, segments: [first, second])
+        _ = try await repository.saveExplanation(
+            segmentID: second.id,
+            explanation: SegmentExplanation(
+                translation: "我在学习日语。", explanation: "讲解",
+                vocabulary: [VocabularyItem(word: "勉強", meaning: "学习")]),
+            meta: nil)
+        await store.load()
+        store.toggleFavorite(VocabularyItem(word: "勉強", meaning: "学习"), source: article)
+
+        let favorite = try #require(store.favorites.first { $0.word == "勉強" })
+        let source = try #require(await store.resolveSource(for: favorite))
+        #expect(source.segment?.id == second.id)
+    }
+
+    /// 找不到的那次也要记下来，否则每次翻面都为同一张必然落空的卡重扫一遍原文。
+    @Test func aFailedBackfillIsNotRetried() async throws {
+        let (store, repository) = try makeStore()
+        let (article, _) = try await makeArticle(repository)
+        await store.load()
+        store.toggleFavorite(VocabularyItem(word: "図書館", meaning: "图书馆"), source: article)
+        let favorite = try #require(store.favorites.first { $0.word == "図書館" })
+
+        #expect(await store.resolveSource(for: favorite)?.sentence == nil)
+        #expect(store.sourceBackfillMisses.contains(favorite.id))
     }
 
     /// 同一张卡翻面两次只查一次库。

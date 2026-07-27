@@ -174,6 +174,22 @@ review(s, d, elapsed, chosen_grade, desired_retention):
 - 种子卡(§4)缺失 `last_reviewed_at` 时回退:上次复习日 ≈ `due_date − interval_days(旧值)`;仍无法解析则取 0。
 - 同日重复复习:elapsed = 0(长期模式:通过时稳定性不变、难度照常更新;失败时 S ← min(S, S_forget))。
 
+### 2.8 同日巩固步骤(learning steps) — **iOS 已实现,桌面端待跟进**
+
+`next_interval` 的下限是 1 天,照搬到 `due_date` 就意味着**一答错当天再也见不到那张卡**,
+而它恰恰是最该再看一遍的。天粒度下的等价物是:没答对就留在今天。
+
+```
+due_date = chosen_grade >= Good ? date_local + interval_days : date_local
+```
+
+记忆状态(stability / difficulty / srs_state)与 ReviewEvent **一律照常按所选档位写入**,
+只有"下次什么时候见"这一项被覆盖。最终那次 Good 会从当时的记忆状态重新算出间隔,
+所以调度质量不受损;同日重复复习本来就由 §2.7 定义(elapsed = 0)。
+
+客户端**另可**在一次会话内把没答对的卡插回队列靠后的位置(iOS:Again 隔 3 张、Hard 隔 8 张),
+这是纯 UI 行为,不影响任何持久状态——`due_date` 已经保证了退出再进来卡片还在。
+
 ## 3. 到期队列与"已掌握"
 
 沿用现行队列语义,仅新增 suspended 过滤:
@@ -185,10 +201,19 @@ queue(cards, pack_id, date_local, new_limit, review_limit):
     cards = cards where due_date <= date_local      // 或 due_date 非法/为空时视为到期
     (new_learning, review) = partition by srs_state ∈ {new, learning}
     各自按 (due_date, last_reviewed_at) 升序
-    return new_learning.take(new_limit) ++ review.take(review_limit)
+    return new_learning.take_new(new_limit) ++ review.take(review_limit)
 ```
 
 每日上限:`srs_daily_new_limit` 默认 20,`srs_daily_review_limit` 默认 100(设置 UI 可改)。
+
+`take_new` — **iOS 已实现,桌面端待跟进**:`new_limit` 只截 `srs_state == "new"` 的卡,
+`learning` 全量入队。配合 §2.8:巩固卡的 `last_reviewed_at` 最新、排在组尾,
+若一并计入上限就会被当天的新词整批挤掉,同日巩固形同虚设。
+
+**提前复习队列**(可选,iOS 已实现):今日队列清空后按用户请求发一组
+`due_date` **严格晚于**今天的卡,按 (due_date, last_reviewed_at) 升序取前 N 张(iOS N = 20)。
+坏日期在上面已被算作"到期",这里必须排除,两个队列不重叠。评分走同一条 §2.5 路径,
+不做任何特殊处理——提前复习只是 elapsed 小于计划值,长期模式本就正确处理。
 
 "已掌握/暂停":写 `suspended_at = now(UTC)`;恢复时置空。FSRS 状态不动,恢复后按原 due_date 自然回队。
 
@@ -237,7 +262,12 @@ iOS 将三个 token 映射到 OKDesignSystem 对应色板;桌面端在 `index.cs
 - **今日复习** = 今日其余事件的去重卡数(与新学互斥:一张卡当日既有 new 事件又有后续事件时只计入新学);
 - **连续打卡** = 从今日(或昨日,若今日尚无事件)向前数,`date_local` 连续每天都有 ≥1 条事件的天数;
 - **状态分布** = 卡片按 `已掌握(suspended)` / `new` / `learning` / `review` 分桶计数;
-- **今日进度** = 今日新学 / `srs_daily_new_limit`,今日复习 / `srs_daily_review_limit`。
+- **今日通过新学 / 今日通过复习**(**iOS 已实现,桌面端待跟进**)= 上面两项各自的子集,
+  只保留"今日至少有一条 `grade >= 3(Good)` 事件"的卡。新学/复习的归属沿用同一条判定,
+  因此恒有 通过 ≤ 对应总数;
+- **今日进度** = 今日**通过**新学 / `srs_daily_new_limit`,今日**通过**复习 / `srs_daily_review_limit`。
+  用通过数而非事件数:配合 §2.8,答错的卡当天还会回到队列,在点"认识"之前不该算学完。
+  活跃度图、连续打卡等"做了多少事"的口径仍用今日新学/复习,两者并存不互相替代。
 
 ## 7. 版本化
 

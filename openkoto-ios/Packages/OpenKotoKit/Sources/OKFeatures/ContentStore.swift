@@ -36,7 +36,9 @@ public final class ContentStore {
     public private(set) var progressByBook: [UUID: BookProgress] = [:]
     /// 书签与划线，按书聚拢。数量小，随书籍元数据一起全量加载。
     public private(set) var marksByBook: [UUID: [BookMark]] = [:]
-    public private(set) var favorites: [FavoriteVocabulary] = []
+    /// `internal(set)`：出处回填在 `ContentStore+Source` 里写回 `sourceSegmentId`，
+    /// 对模块外仍是只读。
+    public internal(set) var favorites: [FavoriteVocabulary] = []
     public private(set) var packs: [WordPack] = []
     /// 生词本当前选中的词包(nil = 全部);复习队列与统计随之过滤。
     public var activePackId: UUID?
@@ -1177,6 +1179,11 @@ public final class ContentStore {
     /// 记下来，否则每次翻面都会为同一张必然落空的卡再查一次库。
     @ObservationIgnored var sourceSegmentCache: [UUID: ArticleSegment?] = [:]
 
+    /// 已经回填失败过的卡（键是 favorite id）。存量卡没有 segmentID，
+    /// 缺一个键就没法用上面那张按 segmentID 的表挡住重复查询——
+    /// 没有这一层，一张永远找不到出处的老卡每次翻面都要重扫一遍原文。
+    @ObservationIgnored var sourceBackfillMisses: Set<UUID> = []
+
     /// - Returns: 是否成功产出精讲（供批量任务统计）。
     @discardableResult
     public func generateExplanation(articleID: UUID, segmentID: UUID) async -> Bool {
@@ -1483,6 +1490,36 @@ public final class ContentStore {
         }
     }
 
+    /// 每次「再复习一组」发多少张。
+    public static let aheadRoundSize = 20
+
+    /// 今日清空后的提前复习队列：最近要到期的那一批，与 `dueQueue()` 不重叠。
+    public func aheadQueue(limit: Int = ContentStore.aheadRoundSize) async -> [FavoriteVocabulary] {
+        do {
+            return try await repository.aheadQueue(
+                packId: activePackId,
+                dateLocal: Self.localDateString(),
+                limit: limit
+            )
+        } catch {
+            Self.logger.error("aheadQueue failed: \(error)")
+            return []
+        }
+    }
+
+    /// 还剩多少张可以提前复习（当前词包内）。内存里数，不查库——
+    /// 生词本底部按钮每次重绘都要它。
+    public var aheadAvailableCount: Int {
+        let today = Self.localDateString()
+        return favorites.count { favorite in
+            guard favorite.suspendedAt == nil else { return false }
+            guard activePackId.map({ favorite.packIds.contains($0) }) ?? true else { return false }
+            // 长度校验对齐仓库侧的 isValidLocalDate：坏日期在 dueQueue 里算"已到期"，
+            // 这里就不能再算它一次。
+            return favorite.dueDate.count == 10 && favorite.dueDate > today
+        }
+    }
+
     /// 复习一张卡:FSRS 更新 + 卡片落盘 + 追加不可变复习事件(规范 §2.5 / §1.3)。
     public func review(_ id: UUID, grade: FSRS.Grade) {
         guard let index = favorites.firstIndex(where: { $0.id == id }) else { return }
@@ -1512,8 +1549,14 @@ public final class ContentStore {
         favorite.stability = update.stability
         favorite.difficulty = update.difficulty
         favorite.schedulerVersion = FSRS.schedulerVersion
-        favorite.dueDate = Self.localDateString(
-            Calendar.current.date(byAdding: .day, value: update.intervalDays, to: now) ?? now)
+        // 同日巩固步骤(规范 §2.8):没答对的卡**留在今天**,当天还会回到队列里,
+        // 直到点"认识"才排到未来。FSRS 的最小间隔是 1 天(`nextInterval` 的 max(1.0,…)),
+        // 照搬就等于"一答错当天再也见不到",这正是用户反馈的那个问题。
+        // 记忆状态(S/D/state)仍按 again/hard 正常更新并落盘——只改"下次什么时候见"。
+        favorite.dueDate = grade.rawValue >= FSRS.Grade.good.rawValue
+            ? Self.localDateString(
+                Calendar.current.date(byAdding: .day, value: update.intervalDays, to: now) ?? now)
+            : Self.localDateString(now)
         favorite.lastReviewedAt = now
         favorite.reviewCount += 1
         favorites[index] = favorite

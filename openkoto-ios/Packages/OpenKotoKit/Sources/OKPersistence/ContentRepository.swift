@@ -129,6 +129,52 @@ public struct ContentRepository: Sendable {
         }
     }
 
+    /// 出处回填：在指定文章里找含该词的句子（按句序，取前若干条候选）。
+    ///
+    /// 给的是**候选**不是答案——同一个词在一篇里出现多次时，调用方还要用精讲词汇表
+    /// 再筛一道（见 `ContentStore+Source`）。`source_segment_id` 是 v5 才加的列且没有回填，
+    /// 升级前收藏的卡全都指不到句子，这条查询就是把它们捞回来的唯一手段。
+    ///
+    /// 同样**不走 `loadSegments`**（理由见 `segment(id:)`），并且 `limit` 封顶。
+    /// 用 `instr(lower(...))` 而不是 `LIKE`：不必转义 `%` `_`，且对 ASCII 大小写不敏感
+    /// （句首大写的英文词也能命中；CJK 不受 `lower()` 影响）。
+    public func segments(
+        articleID: UUID, containing word: String, limit: Int = 8
+    ) async throws -> [ArticleSegment] {
+        let needle = word.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return [] }
+        return try await database.writer.read { db in
+            try SegmentRecord
+                .filter(
+                    sql: "article_id = ? AND instr(lower(text), lower(?)) > 0",
+                    arguments: [uuidString(articleID), needle])
+                .order(Column("order_index"))
+                .limit(max(limit, 0))
+                .fetchAll(db)
+                .map { try $0.domainModel() }
+        }
+    }
+
+    /// 只写 `source_segment_id`（照 `setSuspended` 的写法，不整行覆盖）——
+    /// 回填是后台自愈动作，不该把用户可能正在编辑的释义一起盖掉。
+    public func setSourceSegment(
+        vocabularyId: UUID, segmentId: UUID, now: Date = .now
+    ) async throws {
+        try await database.writer.write { db in
+            try db.execute(
+                sql: """
+                    UPDATE favorite_vocabulary
+                    SET source_segment_id = :segment, updated_at = :now
+                    WHERE id = :id
+                    """,
+                arguments: [
+                    "segment": uuidString(segmentId),
+                    "now": now,
+                    "id": uuidString(vocabularyId),
+                ])
+        }
+    }
+
     /// 延迟切分后写入：同一事务里删旧句、插新句、标记该章已切分。
     /// 旧句一并删除是为了让重切分幂等（首开时若中途失败，重来一次即可）。
     public func replaceSegments(
@@ -533,8 +579,36 @@ public struct ContentRepository: Sendable {
         newLearning.sort(by: Self.dueThenLastReview)
         review.sort(by: Self.dueThenLastReview)
 
-        return Array(newLearning.prefix(max(newLimit, 0)))
-            + Array(review.prefix(max(reviewLimit, 0)))
+        // 每日上限**只截新词**：learning 是"今天已经开了头、还没答对"的卡,
+        // 被 20 张新材料挤出队列就等于当天再也见不到,同日巩固步骤(§2.8)就白做了。
+        var newTaken = 0
+        newLearning = newLearning.filter { card in
+            guard card.srsState == .new else { return true }
+            newTaken += 1
+            return newTaken <= max(newLimit, 0)
+        }
+
+        return newLearning + Array(review.prefix(max(reviewLimit, 0)))
+    }
+
+    /// 今日队列清空后的「提前复习」：取最近要到期的若干张。
+    ///
+    /// 与 `dueQueue` 互补——只收 `due_date` **严格晚于**今天的卡，两者永不重叠。
+    /// 评分照常走 FSRS：提前复习意味着 elapsed 小于计划值，长期模式本就正确处理这种情况。
+    public func aheadQueue(
+        packId: UUID?, dateLocal: String, limit: Int
+    ) async throws -> [FavoriteVocabulary] {
+        let favorites = try await database.writer.read { db in
+            try Self.fetchFavorites(db)
+        }
+        var candidates = favorites.filter { $0.suspendedAt == nil }
+        if let packId {
+            candidates = candidates.filter { $0.packIds.contains(packId) }
+        }
+        // 坏日期在 dueQueue 里视为"已到期"，这里就必须排除，否则两个队列会重复给同一张卡。
+        candidates = candidates.filter { !Self.isDueOnOrBefore($0.dueDate, target: dateLocal) }
+        candidates.sort(by: Self.dueThenLastReview)
+        return Array(candidates.prefix(max(limit, 0)))
     }
 
     /// 与桌面 is_due_on_or_before 一致:无法解析的 due_date 视为到期。
@@ -582,6 +656,11 @@ public struct ContentRepository: Sendable {
             favorites: favorites, events: events, packId: packId, dateLocal: dateLocal)
     }
 
+    /// 「通过」的评分下限(good = 3;规范 §2.5 的档位编号)。
+    /// OKPersistence 不依赖 OKSRS,所以这里是个字面量——改档位编号必须与
+    /// `FSRS.Grade` 同步。
+    static let passingGrade = 3
+
     /// 纯函数,与桌面 build_review_stats 同一口径(规范 §6)。
     static func buildReviewStats(
         favorites: [FavoriteVocabulary],
@@ -597,6 +676,8 @@ public struct ContentRepository: Sendable {
         // 今日新学/复习:按卡去重,新学优先
         var newCards: Set<UUID> = []
         var reviewCards: Set<UUID> = []
+        // 今日**答对过**的卡。同一张卡当天可能 again→again→good,只要有一条通过就算通过。
+        var passedCards: Set<UUID> = []
         for event in events where event.dateLocal == dateLocal {
             guard cardIds.contains(event.vocabularyId) else { continue }
             if event.previousState == .new {
@@ -604,8 +685,14 @@ public struct ContentRepository: Sendable {
             } else {
                 reviewCards.insert(event.vocabularyId)
             }
+            if event.grade >= Self.passingGrade {
+                passedCards.insert(event.vocabularyId)
+            }
         }
         let reviewToday = reviewCards.subtracting(newCards).count
+        // 新学/复习的归属沿用上面同一套判定,保证 passed ≤ 对应的总数。
+        let passedNewToday = passedCards.intersection(newCards).count
+        let passedReviewToday = passedCards.subtracting(newCards).count
 
         // 连续打卡:全局(不过滤词包),从今日(或昨日)向前连续有事件的天数
         let eventDays = Set(events.map(\.dateLocal))
@@ -623,7 +710,9 @@ public struct ContentRepository: Sendable {
         }
 
         var stats = ReviewStats(
-            newToday: newCards.count, reviewToday: reviewToday, streakDays: streak)
+            newToday: newCards.count, reviewToday: reviewToday,
+            passedNewToday: passedNewToday, passedReviewToday: passedReviewToday,
+            streakDays: streak)
         for favorite in favorites where inPack(favorite) {
             stats.total += 1
             if favorite.suspendedAt != nil {

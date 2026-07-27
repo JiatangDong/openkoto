@@ -40,6 +40,13 @@ No account is required. Sample articles are included, so reading, vocabulary, an
 
 OpenKoto is free and open source.
 
+## What's new in 0.3.3
+
+• Cards you get wrong come back the same day: tapping "Unsure" or "Don't know" no longer pushes the card to tomorrow — it returns a few cards later, and keeps returning until you tap "Know it". Quitting after revealing the answer counts as "Don't know" and keeps the card in today's queue; closing without revealing it changes nothing
+• Today's progress now counts only the cards you actually got right. Previously every grade advanced it. Cards still to be cleared are shown under the progress bars
+• "Study 20 more" after you finish today's cards: reviews the cards due soonest, ahead of schedule, so tomorrow's queue gets shorter. The vocabulary button also turns into a review-ahead entry when nothing is due
+• "Source" on a vocabulary card now works for words saved before the feature shipped: opening it finds the sentence the word came from and remembers it. Sources broken by re-importing a book repair themselves the same way
+
 ## What's new in 0.3.2
 
 • "Source" on a vocabulary card now opens a panel instead of jumping away: flip a review card, tap the source, and you get the original sentence, its translation, the explanation, grammar points and context — then carry on reviewing. If you do want the full text, the panel has an "Open in text" button. Previously a single tap dropped you into an article of several hundred paragraphs with no sense of where you had landed

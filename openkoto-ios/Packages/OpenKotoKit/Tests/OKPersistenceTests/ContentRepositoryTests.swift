@@ -438,6 +438,136 @@ import OKModels
         #expect(stats.countReview == 2)
     }
 
+    /// 今日进度只数答对了的（规范 §6 的两个派生计数）。
+    ///
+    /// 这是"点了模糊/不认识也照算进度"那个反馈的判据：答错的卡当天还会回到队列，
+    /// 在点「认识」之前 `passed*` 不能动，而"碰过多少张"的 `newToday`/`reviewToday`
+    /// 仍按原口径走——两套数并存，谁都不替代谁。
+    @Test func passedTodayCountsOnlyCardsAnsweredCorrectly() async throws {
+        let learned = FavoriteVocabulary(word: "a", meaning: "m", srsState: .new)
+        let stillFailing = FavoriteVocabulary(word: "b", meaning: "m", srsState: .new)
+        let reviewed = FavoriteVocabulary(word: "c", meaning: "m", srsState: .review)
+        func event(
+            _ card: FavoriteVocabulary, grade: Int, previous: SRSState
+        ) -> ReviewEvent {
+            ReviewEvent(
+                vocabularyId: card.id, reviewedAt: .now, dateLocal: "2026-07-17",
+                grade: grade, elapsedDays: 0, previousState: previous, desiredRetention: 0.9,
+                resultStability: 1, resultDifficulty: 5, resultIntervalDays: 1,
+                resultState: grade == 1 ? .learning : .review)
+        }
+        let events = [
+            // 卡 a:又错又错才对 → 碰过 1 张、通过 1 张
+            event(learned, grade: 1, previous: .new),
+            event(learned, grade: 1, previous: .learning),
+            event(learned, grade: 3, previous: .learning),
+            // 卡 b:今天一直没对 → 碰过算它，通过不算
+            event(stillFailing, grade: 1, previous: .new),
+            event(stillFailing, grade: 2, previous: .learning),
+            // 卡 c:一次过的复习卡
+            event(reviewed, grade: 3, previous: .review),
+        ]
+
+        let stats = ContentRepository.buildReviewStats(
+            favorites: [learned, stillFailing, reviewed], events: events,
+            packId: nil, dateLocal: "2026-07-17")
+        #expect(stats.newToday == 2)
+        #expect(stats.reviewToday == 1)
+        #expect(stats.passedNewToday == 1)
+        #expect(stats.passedReviewToday == 1)
+    }
+
+    /// 每日上限只截新词：巩固卡的 `last_reviewed_at` 最新、排在组尾，
+    /// 一并计入上限就会被当天的新材料整批挤掉，同日巩固步骤（规范 §2.8）形同虚设。
+    @Test func dueQueueKeepsLearningCardsBeyondTheNewLimit() async throws {
+        let (repository, _) = try makeRepository()
+        let fresh = (0..<25).map {
+            FavoriteVocabulary(
+                word: "new\($0)", meaning: "m", srsState: .new, dueDate: "2026-07-17")
+        }
+        let relearning = (0..<5).map {
+            FavoriteVocabulary(
+                word: "again\($0)", meaning: "m", srsState: .learning,
+                dueDate: "2026-07-17", lastReviewedAt: Date(timeIntervalSince1970: 1_800_000_000))
+        }
+        for card in fresh + relearning { try await repository.insertFavorite(card) }
+
+        let queue = try await repository.dueQueue(
+            packId: nil, dateLocal: "2026-07-17", newLimit: 20, reviewLimit: 100)
+        #expect(queue.count == 25)
+        #expect(queue.count { $0.srsState == .learning } == 5)
+        #expect(queue.count { $0.srsState == .new } == 20)
+    }
+
+    /// 提前复习只发未来到期的卡，且与今日队列**没有交集**——
+    /// 重叠会让同一张卡在一次会话里出现两遍。
+    @Test func aheadQueueTakesTheNextDueCardsWithoutOverlappingToday() async throws {
+        let (repository, _) = try makeRepository()
+        let today = FavoriteVocabulary(word: "today", meaning: "m", dueDate: "2026-07-17")
+        let broken = FavoriteVocabulary(word: "broken", meaning: "m", dueDate: "")
+        let suspended = FavoriteVocabulary(
+            word: "done", meaning: "m", suspendedAt: .now, dueDate: "2026-07-18")
+        let soon = FavoriteVocabulary(word: "soon", meaning: "m", dueDate: "2026-07-18")
+        let later = FavoriteVocabulary(word: "later", meaning: "m", dueDate: "2026-07-25")
+        for card in [today, broken, suspended, soon, later] {
+            try await repository.insertFavorite(card)
+        }
+
+        let ahead = try await repository.aheadQueue(
+            packId: nil, dateLocal: "2026-07-17", limit: 20)
+        #expect(ahead.map(\.word) == ["soon", "later"])
+
+        // 坏日期在 dueQueue 里算"已到期"，所以它必须留在今日那一侧。
+        let due = try await repository.dueQueue(
+            packId: nil, dateLocal: "2026-07-17", newLimit: 20, reviewLimit: 100)
+        #expect(Set(due.map(\.id)).isDisjoint(with: Set(ahead.map(\.id))))
+        #expect(due.contains { $0.word == "broken" })
+
+        let capped = try await repository.aheadQueue(
+            packId: nil, dateLocal: "2026-07-17", limit: 1)
+        #expect(capped.map(\.word) == ["soon"])
+    }
+
+    // MARK: - 出处回填
+
+    /// 存量卡（v5 之前收藏的没有 source_segment_id）要靠现查原文才能找回原句。
+    @Test func segmentsContainingFindsCandidatesInOrder() async throws {
+        let (repository, _) = try makeRepository()
+        let article = makeArticle()
+        let segments = makeSegments(
+            for: article,
+            texts: ["犬が走る。", "私は日本語を勉強しています。", "毎日勉強する。"])
+        try await repository.insertArticle(article, segments: segments)
+
+        let hits = try await repository.segments(articleID: article.id, containing: "勉強")
+        #expect(hits.map(\.order) == [1, 2])
+        // ASCII 大小写不敏感：句首大写的英文词也要能命中。
+        let other = makeArticle(title: "en")
+        try await repository.insertArticle(
+            other, segments: makeSegments(for: other, texts: ["Turkey is a country."]))
+        #expect(
+            try await repository.segments(articleID: other.id, containing: "turkey").count == 1)
+        #expect(try await repository.segments(articleID: article.id, containing: "犬").count == 1)
+        #expect(try await repository.segments(articleID: article.id, containing: " ").isEmpty)
+    }
+
+    @Test func setSourceSegmentOnlyTouchesThatColumn() async throws {
+        let (repository, _) = try makeRepository()
+        let favorite = FavoriteVocabulary(
+            word: "勉強", meaning: "学习", sourceArticleTitle: "ある記事", dueDate: "2026-07-20")
+        try await repository.insertFavorite(favorite)
+        let segmentID = UUID()
+
+        try await repository.setSourceSegment(vocabularyId: favorite.id, segmentId: segmentID)
+
+        let loaded = try #require(
+            try await repository.loadAll().favorites.first { $0.id == favorite.id })
+        #expect(loaded.sourceSegmentId == segmentID)
+        #expect(loaded.meaning == "学习")
+        #expect(loaded.sourceArticleTitle == "ある記事")
+        #expect(loaded.dueDate == "2026-07-20")
+    }
+
     // MARK: - 首启种子
 
     @Test func seedIfEmptyIsIdempotent() async throws {

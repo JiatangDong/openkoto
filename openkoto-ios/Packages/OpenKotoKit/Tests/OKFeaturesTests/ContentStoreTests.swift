@@ -254,4 +254,72 @@ private func stubExplanation(for text: String) -> GeneratedExplanation {
         let all = await store.dueQueue()
         #expect(Set(all.map(\.word)) == ["内側", "外側"])
     }
+
+    /// 同日巩固步骤（规范 §2.8）：没答对的卡留在今天。
+    ///
+    /// FSRS 的最小间隔是 1 天，照搬就意味着一答错当天再也见不到那张卡——
+    /// 而它恰恰是最该再看一遍的。记忆状态仍按 again/hard 正常更新，只覆盖 due_date。
+    @Test func failingACardKeepsItDueToday() async throws {
+        let (store, repository, defaults) = try makeStore()
+        await store.load()
+        let today = ContentStore.localDateString()
+        #expect(store.addManualWord(
+            word: "曖昧", meaning: "暧昧", reading: nil, usage: nil, example: nil))
+        let id = try #require(store.favorites.first?.id)
+
+        store.review(id, grade: .again)
+        #expect(store.favorites.first?.dueDate == today)
+        #expect(store.favorites.first?.srsState == .learning)
+
+        store.review(id, grade: .hard)
+        #expect(store.favorites.first?.dueDate == today)
+
+        // 点「认识」才排到未来，间隔由 FSRS 从当时的记忆状态算出。
+        store.review(id, grade: .good)
+        let due = try #require(store.favorites.first?.dueDate)
+        #expect(due > today)
+        #expect(store.favorites.first?.reviewCount == 3)
+
+        // 关键在于**落盘**：纯会话内回队做不到"中途退出再进来卡片还在今日队列"。
+        // 用同一个库另开一个 store 模拟重启，重放到 again 这一步。
+        await store.flushPersistence()
+        store.review(id, grade: .again)
+        await store.flushPersistence()
+        let restarted = ContentStore(repository: repository, defaults: defaults)
+        await restarted.load()
+        #expect(restarted.favorites.first?.dueDate == today)
+        #expect(await restarted.dueQueue().map(\.word) == ["曖昧"])
+    }
+
+    /// 提前复习只发未来到期的卡，且尊重当前词包。
+    @Test func aheadQueueSkipsTodayAndHonorsThePackFilter() async throws {
+        let (store, repository, _) = try makeStore()
+        await store.load()
+        guard let pack = store.createPack(name: "合集C") else {
+            Issue.record("createPack returned nil")
+            return
+        }
+        #expect(store.addManualWord(
+            word: "明日", meaning: "明天", reading: nil, usage: nil, example: nil,
+            packIds: [pack.id]))
+        #expect(store.addManualWord(
+            word: "今日", meaning: "今天", reading: nil, usage: nil, example: nil))
+        await store.flushPersistence()
+
+        // 「明日」推到未来；「今日」留在今天。
+        let tomorrowCard = try #require(store.favorites.first { $0.word == "明日" })
+        var moved = tomorrowCard
+        moved.dueDate = ContentStore.localDateString(
+            Calendar.current.date(byAdding: .day, value: 3, to: .now)!)
+        try await repository.updateFavorite(moved)
+        await store.load()
+
+        #expect(await store.dueQueue().map(\.word) == ["今日"])
+        #expect(await store.aheadQueue().map(\.word) == ["明日"])
+        #expect(store.aheadAvailableCount == 1)
+
+        store.activePackId = pack.id
+        #expect(await store.aheadQueue().map(\.word) == ["明日"])
+        #expect(store.aheadAvailableCount == 1)
+    }
 }

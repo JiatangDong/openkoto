@@ -4946,6 +4946,52 @@
         }
       }
     },
+    "review.extraRound%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Study %lld more"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "もう %lld 枚"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再复习一组（%lld 张）"
+          }
+        }
+      }
+    },
+    "review.extraRoundHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reviews cards due soon, ahead of schedule — tomorrow's queue gets shorter."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "もうすぐ期限のカードを前倒しで復習します。明日の分がその分減ります。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提前复习最近要到期的卡，明天的队列会相应变短。"
+          }
+        }
+      }
+    },
     "review.gradeKnown": {
       "extractionState": "stale",
       "localizations": {
@@ -5044,19 +5090,19 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "New today"
+            "value": "New learned"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日の新規"
+            "value": "新規クリア"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日新词"
+            "value": "新词已掌握"
           }
         }
       }
@@ -5067,19 +5113,19 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reviews today"
+            "value": "Reviews cleared"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日の復習"
+            "value": "復習クリア"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日复习"
+            "value": "复习已通过"
           }
         }
       }
@@ -5103,6 +5149,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "先尝试回忆,再显示答案"
+          }
+        }
+      }
+    },
+    "review.relearning%lld": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld to redo"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "要復習 %lld 枚"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待巩固 %lld 张"
           }
         }
       }
@@ -7476,6 +7545,29 @@
         }
       }
     },
+    "vocabulary.startAhead": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review Ahead"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "先取り復習"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提前复习"
+          }
+        }
+      }
+    },
     "vocabulary.startReview": {
       "extractionState": "stale",
       "localizations": {
@@ -7620,19 +7712,19 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Today: %1$lld new · %2$lld reviewed"
+            "value": "Today: %1$lld new learned · %2$lld reviews cleared"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日:新規 %1$lld · 復習 %2$lld"
+            "value": "今日:新規 %1$lld · 復習 %2$lld クリア"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日:新词 %1$lld · 复习 %2$lld"
+            "value": "今日已通过:新词 %1$lld · 复习 %2$lld"
           }
         }
       }
