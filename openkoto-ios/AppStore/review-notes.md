@@ -22,6 +22,19 @@ Media notes:
 - Subtitles can be imported alongside a video (SRT/VTT), or generated on device. On-device generation uses the system `SpeechAnalyzer` / `SpeechTranscriber` API (iOS 26+); it does not use the microphone and sends no audio off the device. On iOS versions below 26 the generate-subtitles entry is not shown.
 - Imported media files are copied into the app's own container and are never uploaded.
 
+iCloud sync (new in 0.4.1):
+
+- Sync is **off by default** and is turned on by the user in Settings > iCloud Sync. Nothing is uploaded until they do.
+- It uses CloudKit and the reviewer's **own iCloud private database**. There is no OpenKoto server; we cannot see, store or access any of the synced data.
+- Synced: vocabulary, review history, word packs, article text and AI explanations. **Not synced: EPUB and video files** — they stay on each device, because syncing multi-gigabyte media would consume the user's iCloud storage.
+- The app can be reviewed entirely without iCloud. With sync off, or with no iCloud account signed in, every feature works exactly as before; the settings screen simply reports that sync is unavailable.
+- The Remote notifications background mode is used solely for CloudKit's silent sync pushes. The app sends no user-facing notifications and never asks for notification permission.
+
+Import and export (new in 0.4.1):
+
+- Settings > Data lets the user export their entire library to a single `.okdata` file, and import one back. This is how material prepared in the OpenKoto desktop app is brought onto the device.
+- Both are entirely local file operations through the system document picker. Nothing is uploaded.
+
 AI translation and explanation are optional BYOK features. A user may configure their own compatible provider and API key in Settings. The API key is stored in the iOS Keychain. Requests go directly from the device to the provider selected by the user and do not pass through an OpenKoto app server.
 
 If App Review needs to test the optional AI flow, provide a temporary, revocable, low-quota provider configuration here before submission:

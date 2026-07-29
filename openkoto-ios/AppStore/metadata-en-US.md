@@ -40,6 +40,15 @@ No account is required. Sample articles are included, so reading, vocabulary, an
 
 OpenKoto is free and open source.
 
+## What's new in 0.4.1
+
+• iCloud sync: words, review progress, word packs, articles and AI explanations now sync between your iPhone, iPad and Mac through your own iCloud account — we never see or store any of it. Off by default; turn it on in Settings → iCloud Sync. Book and video files stay on each device (a few GB would fill your iCloud), but their text, subtitles and explanations sync, so you can keep reading on another device
+• If two devices review the same card while offline, both reviews are kept — neither one overwrites the other
+• Mac app: same purchase as iPhone and iPad, with a sidebar, right-click actions, menu bar shortcuts and scroll-wheel support
+• iPad landscape and large screens now use a split layout: text on the left, explanation permanently on the right. Tapping a sentence swaps the right pane instead of covering the text with a sheet. Line length is capped, so a 13-inch landscape page no longer runs 70+ characters wide
+• Import and export your data: bring in material prepared in the desktop app, or export everything as a backup. Importing the same file twice creates no duplicates and never overwrites edits you made on your phone
+• Fixed the date labels on the three statistics charts, which showed as ellipses
+
 ## What's new in 0.3.3
 
 • Cards you get wrong come back the same day: tapping "Unsure" or "Don't know" no longer pushes the card to tomorrow — it returns a few cards later, and keeps returning until you tap "Know it". Quitting after revealing the answer counts as "Don't know" and keeps the card in today's queue; closing without revealing it changes nothing

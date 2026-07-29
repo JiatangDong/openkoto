@@ -12,7 +12,13 @@
       Run `scripts/check-catalyst-keychain.sh` first: without a provisioning profile
       the app is signed with no keychain access group and every API Key write fails
       silently. CLI builds need `-allowProvisioningUpdates`.
+- [ ] CloudKit schema is deployed to Production (CloudKit Dashboard > Schema >
+      Deploy Schema to Production). **TestFlight and App Store builds use the
+      Production environment**; without this every tester's sync fails while the
+      Xcode build keeps working, which reads as "it broke on device".
 - [ ] Universal Purchase is enabled so the Mac build ships with the iOS app.
+      Without it the Mac stays on a Development build and the two devices sync
+      to different environments, so they never see each other's data.
 - [ ] iPhone 6.9-inch screenshots are uploaded.
 - [ ] iPad 13-inch screenshots are uploaded.
 - [ ] Mac screenshots are uploaded.
