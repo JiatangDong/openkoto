@@ -56,6 +56,7 @@ struct BookmarksSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .okSheetSizing(.page)
     }
 
     private var list: some View {
@@ -168,6 +169,7 @@ private struct MarkNoteSheet: View {
             }
         }
         .presentationDetents([.medium])
+        .okSheetSizing(.form)
     }
 }
 #endif

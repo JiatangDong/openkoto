@@ -69,6 +69,12 @@ public final class ContentStore {
     public internal(set) var generationErrors: [UUID: AIClientError] = [:]
     public private(set) var lastPersistenceFailure: String?
 
+    /// iCloud 同步状态（见 ContentStore+Sync）。`internal(set)` 供该扩展写入。
+    public internal(set) var syncStatus: SyncStatus = .disabled
+    /// 同步引擎。用 `any SyncEngine` 而非具体类型：CloudKit 只在 iOS 17+ 可用，
+    /// 而这个属性要在所有版本下都能声明。
+    @ObservationIgnored var cloudSyncEngine: (any SyncEngine)?
+
     /// 真实精讲入口（App 壳注入）。签名：原文 → 结构化精讲 + 溯源元数据。
     @ObservationIgnored public var explanationProvider:
         ((String) async throws -> GeneratedExplanation)?
@@ -164,6 +170,9 @@ public final class ContentStore {
             // 不该发生在启动的同步路径上。进度就是待办表本身，可中断可续跑。
             await refreshIndexingProgress()
             if let searchIndexer { await searchIndexer.start() }
+            // 过期墓碑剪枝。用 try? 而不是并入上面的 throws 链：墓碑是同步/导入的
+            // 辅助数据，清不掉最多是表大一点，绝不该让整个启动加载失败。
+            _ = try? await repository.pruneTombstones()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-seedStatsDemo") {
                 await seedStatsDemo()
@@ -885,7 +894,7 @@ public final class ContentStore {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
-        guard copying else { return (nil, try? url.bookmarkData()) }
+        guard copying else { return (nil, MediaBookmark.data(for: url)) }
 
         let fileName = url.lastPathComponent
         let destination = storage.directory(for: mediaID).appendingPathComponent(fileName)
@@ -939,11 +948,8 @@ public final class ContentStore {
         }
         guard let bookmarkData = media.bookmarkData else { return nil }
         var isStale = false
-        guard
-            let url = try? URL(
-                resolvingBookmarkData: bookmarkData, bookmarkDataIsStale: &isStale)
-        else { return nil }
-        if isStale, let refreshed = try? url.bookmarkData(), let mediaRepository {
+        guard let url = MediaBookmark.resolve(bookmarkData, isStale: &isStale) else { return nil }
+        if isStale, let refreshed = MediaBookmark.data(for: url), let mediaRepository {
             let mediaID = media.id
             persist("refreshBookmark") { [mediaRepository] in
                 try await mediaRepository.updateBookmark(mediaID: mediaID, data: refreshed)
@@ -1553,10 +1559,10 @@ public final class ContentStore {
         // 直到点"认识"才排到未来。FSRS 的最小间隔是 1 天(`nextInterval` 的 max(1.0,…)),
         // 照搬就等于"一答错当天再也见不到",这正是用户反馈的那个问题。
         // 记忆状态(S/D/state)仍按 again/hard 正常更新并落盘——只改"下次什么时候见"。
-        favorite.dueDate = grade.rawValue >= FSRS.Grade.good.rawValue
-            ? Self.localDateString(
-                Calendar.current.date(byAdding: .day, value: update.intervalDays, to: now) ?? now)
-            : Self.localDateString(now)
+        // 规则本体已提到 `FSRS.dueDate`：跨设备同步的事件重放要用**同一条**规则，
+        // 各写一份迟早会算出不同的到期日，而且是那种没人会注意到的偏差。
+        favorite.dueDate = FSRS.dueDate(
+            grade: grade, intervalDays: update.intervalDays, reviewedAt: now)
         favorite.lastReviewedAt = now
         favorite.reviewCount += 1
         favorites[index] = favorite

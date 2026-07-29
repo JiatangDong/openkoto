@@ -352,6 +352,45 @@ public struct AppDatabase: Sendable {
                     END;
                     """)
         }
+        // 跨设备同步的删除墓碑（计划见 §P1）。
+        //
+        // **刻意用独立表，而不是给每张表加 `deleted_at` 列。** 加列意味着：
+        // 1. 每一条读查询都要补 `WHERE deleted_at IS NULL`，漏一处删掉的生词就复活；
+        // 2. `article` 的软删除是 UPDATE，会撞上上面 v6 那三个 FTS 触发器 ——
+        //    删掉的文章会继续留在全文索引里被搜出来，而改触发器又要碰
+        //    "database disk image is malformed" 那个雷（见 v6 注释）。
+        //
+        // 墓碑表是纯增量的：删除仍然是硬删除，读路径一行不改，FTS 行为不变。
+        //
+        // 用途有二：`TransferImporter` 靠它判断"这条是用户主动删的，不许从文件里复活"；
+        // CloudKit 同步靠它把删除传播出去（本地行已经没了，只剩这一笔记录）。
+        migrator.registerMigration("v7") { db in
+            try db.create(table: "deleted_record") { t in
+                // 逻辑表名（"favorite_vocabulary" / "word_pack" / …），不加外键：
+                // 被引用的行按定义已经不存在了。
+                t.column("table_name", .text).notNull()
+                // 主键值。词包成员这种复合主键用 "vocabularyId:packId" 拼接。
+                t.column("record_id", .text).notNull()
+                t.column("deleted_at", .datetime).notNull().indexed()
+                // 复合主键顺带保证重复删除幂等（`save` 覆盖同一行）。
+                t.primaryKey(["table_name", "record_id"])
+            }
+        }
+        // 同步引擎的持久状态（CloudKit，计划见 §P3）。单行表。
+        //
+        // `engine_state` 是 `CKSyncEngine.State.Serialization`，由引擎自己管理，
+        // 我们只负责存取；丢了不会丢数据，只会导致一次全量重新对账。
+        //
+        // `last_synced_at` 是**推送水位线**：每次同步扫 `updated_at` 晚于它的行。
+        // 用水位线而不是给每张表加 `dirty` 列，是为了不去动所有 Repository 的写入路径
+        // —— 那意味着几十处改动，且漏一处就是"这类数据永远不同步"的静默 bug。
+        migrator.registerMigration("v8") { db in
+            try db.create(table: "sync_state") { t in
+                t.primaryKey("id", .text)
+                t.column("engine_state", .blob)
+                t.column("last_synced_at", .datetime)
+            }
+        }
         return migrator
     }
 }

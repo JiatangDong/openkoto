@@ -38,7 +38,9 @@ public struct ContentRepository: Sendable {
         }
     }
 
-    private let database: AppDatabase
+    // internal 而非 private：同模块的 TransferIO / 同步引擎以 extension 形式扩展本类型，
+    // 需要拿到同一个 writer 才能把整批导入放进单一事务。
+    let database: AppDatabase
 
     public init(database: AppDatabase) {
         self.database = database
@@ -228,9 +230,12 @@ public struct ContentRepository: Sendable {
     }
 
     /// 删除文章；segment 级联删除、收藏 source_article_id 置空由 FK 完成。
-    public func deleteArticle(id: UUID) async throws {
+    ///
+    /// segment 不单独记墓碑：它们是文章的子行，导入方按"文章被删过"整体跳过即可。
+    public func deleteArticle(id: UUID, now: Date = .now) async throws {
         _ = try await database.writer.write { db in
             try ArticleRecord.deleteOne(db, key: uuidString(id))
+            try TombstoneRecord.mark(db, table: .article, id: id, at: now)
         }
     }
 
@@ -499,6 +504,11 @@ public struct ContentRepository: Sendable {
                 try db.execute(
                     sql: "DELETE FROM word_pack_membership WHERE vocabulary_id = ? AND pack_id = ?",
                     arguments: [vocabId, removed])
+                // 「把这个词移出这个词包」是一次独立的删除意图，生词和词包都还活着，
+                // 所以必须单独记墓碑——否则下次导入会把它塞回原来的包里。
+                try TombstoneRecord.mark(
+                    db, table: .wordPackMembership,
+                    recordID: "\(vocabId)_\(removed)", at: now)
             }
             for added in target.subtracting(existing) {
                 try WordPackMembershipRecord(
@@ -508,9 +518,14 @@ public struct ContentRepository: Sendable {
         }
     }
 
-    public func deleteFavorite(id: UUID) async throws {
+    /// 删除生词。
+    ///
+    /// 它的 membership 由 FK 级联清除，**不逐条记墓碑**：导入方看到生词本身
+    /// 被删过就会跳过，连带它的所有关系一起跳，逐条记只会白白放大墓碑表。
+    public func deleteFavorite(id: UUID, now: Date = .now) async throws {
         _ = try await database.writer.write { db in
             try FavoriteVocabularyRecord.deleteOne(db, key: uuidString(id))
+            try TombstoneRecord.mark(db, table: .favoriteVocabulary, id: id, at: now)
         }
     }
 
@@ -912,6 +927,9 @@ public struct ContentRepository: Sendable {
                 .fetchAll(db)
                 .map(\.vocabularyId)
             _ = try WordPackRecord.deleteOne(db, key: packId)
+            // 只记词包本身。它的 membership 由 FK 级联清除，导入方发现词包被删过
+            // 就会连同指向它的所有关系一起跳过——一个包几百个词，逐条记墓碑纯属浪费。
+            try TombstoneRecord.mark(db, table: .wordPack, id: id, at: now)
             for vocabularyId in memberIds {
                 let remaining = try WordPackMembershipRecord
                     .filter(Column("vocabulary_id") == vocabularyId)
@@ -948,6 +966,48 @@ public struct ContentRepository: Sendable {
             }
             try record.insert(db)
             return defaultPack
+        }
+    }
+
+    // MARK: - 删除墓碑(跨设备同步 / 导入去重)
+
+    /// 某张表全部墓碑的 id 集合。
+    ///
+    /// 导入前一次性取出做集合判定，不要逐条查库——一个几千词的传输文件
+    /// 会变成几千次单行查询。
+    public func tombstoneIDs(for table: TombstoneTable) async throws -> Set<String> {
+        try await database.writer.read { db in
+            let ids = try String.fetchAll(
+                db,
+                sql: "SELECT record_id FROM deleted_record WHERE table_name = ?",
+                arguments: [table.rawValue])
+            return Set(ids)
+        }
+    }
+
+    /// 全部墓碑，供导出与同步推送使用。
+    public func allTombstones() async throws -> [Tombstone] {
+        try await database.writer.read { db in
+            try TombstoneRecord
+                .order(Column("deleted_at"))
+                .fetchAll(db)
+                .compactMap(\.tombstone)  // 表名无法识别的历史行直接忽略
+        }
+    }
+
+    /// 剪掉过期墓碑，返回清掉的条数。
+    ///
+    /// 在 App 启动时跑一次即可——墓碑的增长速度取决于用户删东西的频率，
+    /// 不需要更勤。代价见 `Tombstone.retention` 的注释。
+    @discardableResult
+    public func pruneTombstones(
+        now: Date = .now, retention: TimeInterval = Tombstone.retention
+    ) async throws -> Int {
+        let cutoff = Tombstone.pruneCutoff(now: now, retention: retention)
+        return try await database.writer.write { db in
+            try db.execute(
+                sql: "DELETE FROM deleted_record WHERE deleted_at < ?", arguments: [cutoff])
+            return db.changesCount
         }
     }
 

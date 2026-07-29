@@ -11,6 +11,7 @@ struct SettingsView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(AppConfigStore.self) private var appConfig
     @Environment(\.theme) private var theme
+    @Environment(\.okCanvas) private var canvas
     // 由 RootTabView 注入的生效 Locale（跟随界面语言）：用于本地化讲解语言的选项名。
     @Environment(\.locale) private var locale
 
@@ -97,6 +98,10 @@ struct SettingsView: View {
                     }
                 }
 
+                SyncSection()
+
+                DataTransferSection()
+
                 Section {
                     Button {
                         // RootTabView 监听这个 key：置回 false 即回到引导第一步。
@@ -133,12 +138,16 @@ struct SettingsView: View {
                 }
             }
             .scrollContentBackground(.hidden)
+            // 表单限宽居中：Form 的行本来就靠系统 inset 撑着，
+            // 但 1300pt 宽下「标签 —— 大片空白 —— 控件」还是会拉得两头够不着。
+            .frame(maxWidth: canvas.isWide ? 720 : .infinity)
+            .frame(maxWidth: .infinity)
             .background(theme.background)
             .sheet(isPresented: $isAddingConfig) {
-                ModelConfigFormView(editing: nil)
+                ModelConfigFormView(editing: nil).okSheetSizing(.form)
             }
             .sheet(item: $editingConfig) { config in
-                ModelConfigFormView(editing: config)
+                ModelConfigFormView(editing: config).okSheetSizing(.form)
             }
         }
     }
@@ -151,6 +160,23 @@ struct SettingsView: View {
     }
 
     // MARK: - AI 模型配置
+
+    private func modelActions(for config: ModelConfig) -> [OKRowAction] {
+        var actions: [OKRowAction] = []
+        if !config.isDefault {
+            actions.append(
+                OKRowAction(
+                    title: L("model.form.setDefault"), systemImage: "star", tint: theme.primary
+                ) {
+                    appConfig.setDefault(config.id)
+                })
+        }
+        actions.append(
+            OKRowAction(title: L("common.delete"), systemImage: "trash", role: .destructive) {
+                appConfig.delete(config.id)
+            })
+        return actions
+    }
 
     @ViewBuilder
     private var modelsSection: some View {
@@ -171,21 +197,9 @@ struct SettingsView: View {
                         modelRow(config)
                     }
                     .buttonStyle(.plain)
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            appConfig.delete(config.id)
-                        } label: {
-                            Label(L("common.delete"), systemImage: "trash")
-                        }
-                        if !config.isDefault {
-                            Button {
-                                appConfig.setDefault(config.id)
-                            } label: {
-                                Label(L("model.form.setDefault"), systemImage: "star")
-                            }
-                            .tint(theme.primary)
-                        }
-                    }
+                    // 必须同时给右键菜单：Mac 上 List 行不支持横扫，
+                    // 只写 swipeActions 的话「删除模型」在 Mac 上就没有任何入口了。
+                    .okRowActions(trailing: modelActions(for: config))
                 }
             }
 

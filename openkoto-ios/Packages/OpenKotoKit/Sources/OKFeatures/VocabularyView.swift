@@ -8,6 +8,7 @@ import OKLocalization
 struct VocabularyView: View {
     @Environment(ContentStore.self) private var store
     @Environment(\.theme) private var theme
+    @Environment(\.okCanvas) private var canvas
     @State private var speech = SpeechService()
     @State private var searchText = ""
     @State private var isAddPresented = false
@@ -42,6 +43,10 @@ struct VocabularyView: View {
                     }
                 }
             }
+            // 限宽放在 chip 条和列表的共同父节点上，两者才会对齐。
+            // 只限列表的话，chip 会孤零零贴在最左边。
+            .frame(maxWidth: canvas.isWide ? Self.contentMaxWidth : .infinity)
+            .frame(maxWidth: .infinity)
             .background(theme.background)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -109,32 +114,45 @@ struct VocabularyView: View {
         }
     }
 
+    /// 合集筛选条。窄屏横滚（chip 多了也不占高度）；
+    /// 宽屏改用现成的 FlowLayout 自动折行——横滚条在 1000pt 宽下只挤在最左边，
+    /// 右边一大片空，还得拖着找。
+    @ViewBuilder
     private var packChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                chip(L("vocabulary.packAll"), isSelected: store.activePackId == nil) {
-                    store.activePackId = nil
-                }
-                ForEach(store.packs) { pack in
-                    chip(PackDisplay.name(pack), isSelected: store.activePackId == pack.id) {
-                        store.activePackId = pack.id
-                    }
-                }
-                Button {
-                    isPackManagerPresented = true
-                } label: {
-                    Image(systemName: "folder.badge.gearshape")
-                        .font(.subheadline)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(theme.muted, in: Capsule())
-                        .foregroundStyle(theme.mutedForeground)
-                }
-                .accessibilityLabel(L("vocabulary.packListTitle"))
+        if canvas.isWide {
+            FlowLayout(lineSpacing: 8, itemSpacing: 8) { packChipItems }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) { packChipItems }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
             }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
         }
+    }
+
+    @ViewBuilder
+    private var packChipItems: some View {
+        chip(L("vocabulary.packAll"), isSelected: store.activePackId == nil) {
+            store.activePackId = nil
+        }
+        ForEach(store.packs) { pack in
+            chip(PackDisplay.name(pack), isSelected: store.activePackId == pack.id) {
+                store.activePackId = pack.id
+            }
+        }
+        Button {
+            isPackManagerPresented = true
+        } label: {
+            Image(systemName: "folder.badge.gearshape")
+                .font(.subheadline)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(theme.muted, in: Capsule())
+                .foregroundStyle(theme.mutedForeground)
+        }
+        .accessibilityLabel(L("vocabulary.packListTitle"))
     }
 
     private func chip(
@@ -163,19 +181,18 @@ struct VocabularyView: View {
                         .listRowBackground(theme.card)
                         .contentShape(Rectangle())
                         .onTapGesture { editingFavorite = favorite }
-                        .swipeActions(edge: .leading) {
-                            suspendButton(favorite)
-                            if favorite.sourceArticleId != nil {
-                                backToSourceButton(favorite)
-                            }
-                        }
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                store.removeFavorite(favorite.id)
-                            } label: {
-                                Label(L("common.delete"), systemImage: "trash")
-                            }
-                        }
+                        // 同时产出右键菜单：Mac 上横扫不可用，
+                        // 「标记掌握」「回原文」只写 swipe 的话会变成不可达功能。
+                        .okRowActions(
+                            leading: rowLeadingActions(favorite),
+                            trailing: [
+                                OKRowAction(
+                                    title: L("common.delete"), systemImage: "trash",
+                                    role: .destructive
+                                ) {
+                                    store.removeFavorite(favorite.id)
+                                }
+                            ])
                 }
             }
         }
@@ -186,18 +203,9 @@ struct VocabularyView: View {
         }
     }
 
-    /// 出处：先弹详情（句子 + 译文 + 讲解），要回原文再从详情里点。
-    ///
-    /// 与复习卡片走同一个弹窗——同一件事在两个入口有两种行为，比两处都笨拙更糟。
-    /// 只在有出处时出现：存量卡片（v5 之前收藏的）没有来源，不给一个点了没反应的按钮。
-    private func backToSourceButton(_ favorite: FavoriteVocabulary) -> some View {
-        Button {
-            previewFavorite = favorite
-        } label: {
-            Label(L("source.title"), systemImage: "text.viewfinder")
-        }
-        .tint(theme.primary)
-    }
+    /// 生词行只有一个词加一句释义，横跨 1300pt 会让视线在两端来回跑，
+    /// 所以限宽居中；但不改多列——网格里放横扫手势是反模式。
+    private static let contentMaxWidth: CGFloat = 760
 
     private var statsHeader: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -245,9 +253,16 @@ struct VocabularyView: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(isAhead ? theme.srsFading : theme.primary)
+        // 内层 maxWidth:.infinity 让文字在按钮里居中；
+        // 这里再夹一层，否则宽屏上会变成横跨整屏的巨型按钮。
+        .frame(maxWidth: canvas.isWide ? 420 : .infinity)
         .padding(.horizontal)
         .padding(.bottom, 4)
         .disabled(!canStart)
+        // 底栏必须整条铺满并带底色：safeAreaInset 只是给列表让出高度，
+        // 按钮收窄后，列表内容会从按钮两侧的空隙里露出来。
+        .frame(maxWidth: .infinity)
+        .background(.bar)
     }
 
     private func stat(_ label: String, value: Int) -> some View {
@@ -271,17 +286,30 @@ struct VocabularyView: View {
         }
     }
 
-    private func suspendButton(_ favorite: FavoriteVocabulary) -> some View {
-        Button {
-            store.setSuspended(favorite.id, suspended: favorite.suspendedAt == nil)
-        } label: {
-            if favorite.suspendedAt == nil {
-                Label(L("vocabulary.markMastered"), systemImage: "checkmark.circle")
-            } else {
-                Label(L("vocabulary.resumeReview"), systemImage: "arrow.counterclockwise")
+    /// 行首侧操作：掌握/恢复复习，以及有出处时的「回原文」。
+    private func rowLeadingActions(_ favorite: FavoriteVocabulary) -> [OKRowAction] {
+        let isSuspended = favorite.suspendedAt != nil
+        var actions = [
+            OKRowAction(
+                title: isSuspended ? L("vocabulary.resumeReview") : L("vocabulary.markMastered"),
+                systemImage: isSuspended ? "arrow.counterclockwise" : "checkmark.circle",
+                tint: isSuspended ? theme.srsFading : theme.srsStrong
+            ) {
+                store.setSuspended(favorite.id, suspended: !isSuspended)
             }
+        ]
+        // 出处：先弹详情（句子 + 译文 + 讲解），要回原文再从详情里点——
+        // 与复习卡片走同一个弹窗，同一件事在两个入口有两种行为比两处都笨拙更糟。
+        // 只在有出处时出现：存量卡片（v5 之前收藏的）没有来源，不给一个点了没反应的按钮。
+        if favorite.sourceArticleId != nil {
+            actions.append(
+                OKRowAction(
+                    title: L("source.title"), systemImage: "text.viewfinder", tint: theme.primary
+                ) {
+                    previewFavorite = favorite
+                })
         }
-        .tint(favorite.suspendedAt == nil ? theme.srsStrong : theme.srsFading)
+        return actions
     }
 
     private func row(_ favorite: FavoriteVocabulary) -> some View {

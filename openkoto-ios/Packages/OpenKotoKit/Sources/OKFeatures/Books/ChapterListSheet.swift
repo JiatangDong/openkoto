@@ -36,6 +36,7 @@ struct ChapterListSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .okSheetSizing(.page)
     }
 
     private func row(index: Int, chapter: BookChapterSummary) -> some View {

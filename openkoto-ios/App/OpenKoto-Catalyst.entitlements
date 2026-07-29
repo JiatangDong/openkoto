@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Catalyst 强制沙盒。以下每一条缺失都表现为"静默失败"而非报错： -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<!-- BYOK 直连用户自配的模型服务商。不加则所有精讲/翻译都失败。 -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- 三处 fileImporter（txt/md/epub/字幕）+ 书库拖入导入。 -->
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+	<!-- 「引用模式」外部媒体的 app-scoped 书签（见 MediaBookmark）。
+	     不加则退出重开后视频永远显示"媒体不可用"。 -->
+	<key>com.apple.security.files.bookmarks.app-scope</key>
+	<true/>
+	<!-- 从相册导入视频（PhotosPicker 走 out-of-process PHPicker，
+	     理论上不需要相册权限，保留此项待 Catalyst 实机验证后再决定去留）。 -->
+	<key>com.apple.security.assets.movies.read-only</key>
+	<true/>
+	<!-- Mac 上 App Group 标识必须带 Team ID 前缀，容器落在 ~/Library/Group Containers/。 -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(TeamIdentifierPrefix)group.com.openkoto.ios</string>
+	</array>
+	<!-- API Key 的 Keychain 访问组。**这一条必须显式写**，别指望签名时自动注入。
+	     `KeychainStore` 四个查询都带 `kSecUseDataProtectionKeychain`，而 macOS 上
+	     data-protection keychain 要求调用方持有 keychain 访问组（或描述文件注入的
+	     `application-identifier`）。上面那几条沙盒 entitlement 都不需要描述文件，
+	     所以缺了这一条时 Xcode 根本不会去申请描述文件，签出来的产物两样都没有 ——
+	     `SecItemAdd` 返回 errSecMissingEntitlement(-34018)，**不报错、不弹窗**，
+	     表现为「填了 API Key、保存成功、行上却没有钥匙图标，重启后依然说没配」。
+	     实测 Xcode.app 构建同样中招，不是命令行独有的问题。
+
+	     加了这一条之后构建**必须能拿到描述文件**：
+	     Xcode.app 里 Run 会自动申请；命令行要带 `-allowProvisioningUpdates`。
+
+	     只加在 Catalyst 这份。**不要往 `App/OpenKoto.entitlements` 加** ——
+	     iOS 上引入显式 keychain 访问组会改变默认分组，
+	     存量用户已经存好的 API Key 会读不出来。 -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	</array>
+	<!-- 跨设备同步。容器 id 必须与 iOS 那份**完全一致**，
+	     否则 Mac 会同步到另一个空容器里，表现为"两边各存各的"而不报任何错。 -->
+	<!-- CKSyncEngine 依赖 CloudKit 推送驱动同步：它一初始化就会去创建数据库订阅。
+	     缺了推送能力，那个订阅请求会被服务端拒掉，而报出来的是笼统的
+	     serverRejectedRequest（error 15）—— 错误信息里完全看不出跟推送有关。
+	     Apple 的要求是三件套：CloudKit + Push Notifications + remote-notification 后台模式。
+
+	     值是 development；Xcode 归档时会按描述文件自动换成 production。 -->
+	<key>aps-environment</key>
+	<string>development</string>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudKit</string>
+	</array>
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>iCloud.com.openkoto.ios</string>
+	</array>
+	<!-- **macOS / Mac Catalyst 必须显式声明用哪个 CloudKit 环境。**
+	     iOS 会从描述文件推断（开发证书→Development，分发证书→Production），
+	     macOS 不会 —— 缺了这一条，服务端直接回
+	     `serverRejectedRequest (15)` + `CKInternalErrorDomain 2000`，
+	     而错误信息里完全看不出跟环境有关。实测踩过整整几轮。
+
+	     值由 pbxproj 的 OK_ICLOUD_ENV 按配置分流：Debug=Development、Release=Production。
+	     写死成 Development 的话，归档出来的正式版会去连开发环境，
+	     用户看到的是"同步一直失败"。 -->
+	<key>com.apple.developer.icloud-container-environment</key>
+	<string>$(OK_ICLOUD_ENV)</string>
+</dict>
+</plist>

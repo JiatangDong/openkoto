@@ -99,9 +99,10 @@ struct MediaPlayerView: View {
                 onToggleLoop: { playback.toggleLoop(segmentID: $0.id) })
         }
         .background(theme.background)
+        .explanationPane(article: article, selection: $selectedSegmentID)
         .navigationTitle(media.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
+        .hidesAppTabBar()
         .toolbar { playerToolbar }
         .task(id: media.id) { await loadIfNeeded() }
         .onDisappear {
@@ -118,26 +119,13 @@ struct MediaPlayerView: View {
         .onChange(of: playback.currentTime) { saveProgress(force: false) }
         // 播到下一句就重新遮上——单句循环时 activeID 不变，揭晓会一直留着，正合跟读所需。
         .onChange(of: playback.activeID) { revealedID = nil }
-        .sheet(
-            isPresented: Binding(
-                get: { selectedSegmentID != nil && article != nil },
-                set: { if !$0 { selectedSegmentID = nil } })
-        ) {
-            if let article, let segmentID = selectedSegmentID {
-                ExplanationSheet(
-                    article: article, segmentID: segmentID,
-                    onSelectSegment: { selectedSegmentID = $0 }
-                )
-                .presentationDetents([.medium, .large])
-                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
-            }
-        }
         .sheet(item: $batchKind) { kind in
             if let articleID {
                 BatchScopeSheet(
                     articleID: articleID, kind: kind,
                     currentOrder: currentOrder)
                     .presentationDetents([.medium])
+                    .okSheetSizing(.form)
             }
         }
         .sheet(isPresented: $showTranscribe) {

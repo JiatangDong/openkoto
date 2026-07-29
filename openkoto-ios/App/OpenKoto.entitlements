@@ -6,5 +6,34 @@
 	<array>
 		<string>group.com.openkoto.ios</string>
 	</array>
+	<!-- 跨设备同步：词库 / 复习进度 / 文章与精讲走用户自己的 iCloud 私有库。
+	     容器 id 三个平台共用同一个（bundle id 也是同一个），Mac Catalyst
+	     因此天然就是"第三台设备"，不需要任何额外配置。
+	     EPUB 与视频文件**不同步**：几 GB 会吃爆用户的 iCloud 配额。 -->
+	<!-- CKSyncEngine 依赖 CloudKit 推送驱动同步：它一初始化就会去创建数据库订阅。
+	     缺了推送能力，那个订阅请求会被服务端拒掉，而报出来的是笼统的
+	     serverRejectedRequest（error 15）—— 错误信息里完全看不出跟推送有关。
+	     Apple 的要求是三件套：CloudKit + Push Notifications + remote-notification 后台模式。
+
+	     值是 development；Xcode 归档时会按描述文件自动换成 production。 -->
+	<key>aps-environment</key>
+	<string>development</string>
+	<key>com.apple.developer.icloud-services</key>
+	<array>
+		<string>CloudKit</string>
+	</array>
+	<key>com.apple.developer.icloud-container-identifiers</key>
+	<array>
+		<string>iCloud.com.openkoto.ios</string>
+	</array>
+	<!-- CloudKit 环境。iOS 上本可由描述文件推断（开发证书→Development、
+	     分发证书→Production），显式声明是为了和 Catalyst 那份保持一致、
+	     并且让"这个构建连的是哪个库"在源码里一眼可见。
+
+	     值由 pbxproj 的 OK_ICLOUD_ENV 按配置分流：Debug=Development、Release=Production。
+	     **两个环境的数据完全不通** —— Xcode 跑的 Debug 版和 TestFlight 版
+	     互相看不见对方的数据，这是联调时最容易误判成"同步坏了"的地方。 -->
+	<key>com.apple.developer.icloud-container-environment</key>
+	<string>$(OK_ICLOUD_ENV)</string>
 </dict>
 </plist>

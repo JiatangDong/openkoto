@@ -10,6 +10,7 @@ import OKLocalization
 struct StatisticsView: View {
     @Environment(ContentStore.self) private var store
     @Environment(\.theme) private var theme
+    @Environment(\.okCanvas) private var canvas
 
     /// 图表用切片(状态分布 / 记忆保持)。
     private struct Slice: Identifiable {
@@ -36,6 +37,24 @@ struct StatisticsView: View {
         .task { await store.refreshStatistics() }
     }
 
+    /// 三个日期图表共用的 X 轴。**两件事缺一不可**，只做一半仍然是一排「…」：
+    ///
+    /// 1. `values:` 必须显式抽稀。X 值是 String → 分类轴，
+    ///    `.automatic(desiredCount:)` 只对连续轴生效，不抽稀就是 30 个标签。
+    /// 2. 标签必须 `.fixedSize()`。分类轴默认把标签压进它那一个「类目带」的宽度
+    ///    （30 天时每带约 14pt），即使只剩 5 个标签也照样截断。
+    private func dateAxis(_ labels: [String]) -> some AxisContent {
+        AxisMarks(values: ChartAxis.stridedLabels(labels)) { value in
+            AxisGridLine()
+            AxisTick()
+            AxisValueLabel {
+                if let label = value.as(String.self) {
+                    Text(label).fixedSize()
+                }
+            }
+        }
+    }
+
     private func hasAnyData(_ stats: StudyStatistics) -> Bool {
         stats.totalReviews > 0 || !store.favorites.isEmpty || stats.readingSecondsTotal > 0
     }
@@ -43,15 +62,23 @@ struct StatisticsView: View {
     private func content(_ stats: StudyStatistics) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 12) {
+                VStack(spacing: 12) {
+                    // 概览小卡是整页的表头，横跨整行。塞进网格的话它比同行的
+                    // 成就卡矮一大截，右边会空出一个显眼的洞。
                     overviewTiles(stats)
-                    achievementsSection(stats)
-                    activitySection(stats)
-                    statesSection(stats)
-                    gradesSection(stats)
-                    forecastSection(stats)
-                    retentionSection()
-                    readingSection(stats).id("reading")
+                    // 宽屏排成 2–4 列看板：单列时每个图表被拉成 1300×150 的扁条带，
+                    // 环形图更是左右各留 500pt 空白。
+                    // 用瀑布流而非 LazyVGrid——这些卡高度差三倍，网格的行对齐
+                    // 会在矮卡下面留下大洞。窄屏时列数为 1，版式与今天一致。
+                    MasonryLayout(columns: canvas.statisticsColumnCount, spacing: 12) {
+                        achievementsSection(stats)
+                        activitySection(stats)
+                        statesSection(stats)
+                        gradesSection(stats)
+                        forecastSection(stats)
+                        retentionSection()
+                        readingSection(stats).id("reading")
+                    }
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 12)
@@ -137,6 +164,7 @@ struct StatisticsView: View {
     private func activitySection(_ stats: StudyStatistics) -> some View {
         let newLabel = L("stats.legend.new")
         let reviewLabel = L("stats.legend.review")
+        let xLabels = stats.dailyActivity.map { String($0.dateLocal.suffix(5)) }
         return sectionCard("stats.section.activity", systemImage: "chart.bar.fill") {
             if stats.dailyActivity.allSatisfy({ $0.total == 0 }) {
                 emptyHint("stats.empty.activity")
@@ -155,7 +183,7 @@ struct StatisticsView: View {
                     newLabel: theme.srsStrong,
                     reviewLabel: theme.primary,
                 ])
-                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 5)) }
+                .chartXAxis { dateAxis(xLabels) }
                 .chartLegend(position: .bottom)
                 .frame(height: 180)
             }
@@ -239,7 +267,8 @@ struct StatisticsView: View {
     // MARK: - F. 复习预测(柱)
 
     private func forecastSection(_ stats: StudyStatistics) -> some View {
-        sectionCard("stats.section.forecast", systemImage: "calendar.badge.clock") {
+        let xLabels = stats.forecast.map { String($0.dateLocal.suffix(5)) }
+        return sectionCard("stats.section.forecast", systemImage: "calendar.badge.clock") {
             if stats.forecast.allSatisfy({ $0.dueCount == 0 }) {
                 emptyHint("stats.empty.forecast")
             } else {
@@ -249,7 +278,7 @@ struct StatisticsView: View {
                         y: .value("due", day.dueCount))
                     .foregroundStyle(theme.srsFading)
                 }
-                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 5)) }
+                .chartXAxis { dateAxis(xLabels) }
                 .frame(height: 160)
             }
         }
@@ -284,7 +313,8 @@ struct StatisticsView: View {
     // MARK: - H. 阅读时长
 
     private func readingSection(_ stats: StudyStatistics) -> some View {
-        sectionCard("stats.section.reading", systemImage: "book.fill") {
+        let xLabels = stats.readingByDay.map { String($0.dateLocal.suffix(5)) }
+        return sectionCard("stats.section.reading", systemImage: "book.fill") {
             HStack(spacing: 12) {
                 statTile("\(stats.readingSecondsToday / 60)",
                          "stats.reading.todayMinutes", tint: theme.primary)
@@ -302,7 +332,7 @@ struct StatisticsView: View {
                         y: .value("minutes", day.minutes))
                     .foregroundStyle(theme.explained)
                 }
-                .chartXAxis { AxisMarks(values: .automatic(desiredCount: 5)) }
+                .chartXAxis { dateAxis(xLabels) }
                 .frame(height: 150)
             }
         }

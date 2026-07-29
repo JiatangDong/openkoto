@@ -12,14 +12,35 @@
 	  “Multiple commands produce Info.plist”。
 	-->
 	<!--
+	  LSSupportsOpeningDocumentsInPlace 不在这里，改由 INFOPLIST_KEY_* 按平台分流：
+	  iOS 必须是 NO（详见下），而 macOS/Catalyst 不接受 NO，构建期就会报
+	  "'LSSupportsOpeningDocumentsInPlace = NO' is not supported on macOS"。
+
 	  声明了 CFBundleDocumentTypes 就必须表态"开的是原件还是副本"，
 	  否则 App Store 校验直接打回（Missing Document Configuration）。
-	  这里必须是 NO：我们把书导入到自己的存储后会删掉传进来的 URL
+	  iOS 上必须是 NO：我们把书导入到自己的存储后会删掉传进来的 URL
 	  （RootTabView.onOpenURL），NO 时那是 Documents/Inbox 里的系统副本，
 	  删掉正确；YES 时那会是用户在"文件"App 里的原件，删掉就是数据丢失。
+
+	  Mac 上被迫为 YES 也安全：那边不存在 Documents/Inbox，
+	  `RootTabView.isInDocumentsInbox` 恒为 false，删除分支根本不会走到。
 	-->
-	<key>LSSupportsOpeningDocumentsInPlace</key>
-	<false/>
+	<!--
+	  App Group 标识。走 plist 的 $(VAR) 展开而不是 INFOPLIST_KEY_*：
+	  后者只认 Xcode 白名单里的键，自定义键会被静默丢弃（实测验证过）。
+	  OK_APP_GROUP_ID 在 pbxproj 里按 sdk 分流，macOS 那份带 $(TeamIdentifierPrefix)。
+	-->
+	<!--
+	  CloudKit 同步要靠静默推送唤醒（CKSyncEngine 的订阅机制）。
+	  **只加 remote-notification**，不是音频后台播放 —— 媒体播放器"进后台就暂停"
+	  的既有行为不受影响（见 MediaPlayerView 的 scenePhase 处理）。
+	-->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
+	<key>OKAppGroupIdentifier</key>
+	<string>$(OK_APP_GROUP_ID)</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -59,6 +80,48 @@
 				<string>org.openkoto.subrip</string>
 				<string>org.w3.webvtt</string>
 			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>OpenKoto Data</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<!-- Owner 而非 Alternate：这个格式是我们定义的，AirDrop 过来时
+			     应该由我们优先接收，而不是被别的 JSON 查看器抢走。 -->
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.openkoto.transfer</string>
+			</array>
+		</dict>
+	</array>
+	<!--
+	  跨设备搬家用的传输包（生词 + 复习进度 + 文章精讲）。
+	  Exported 而非 Imported：这个格式是我们自己定义的。
+
+	  扩展名是单段的 .okdata，**不能写成 .okdata.json**——系统只看最后一段
+	  路径扩展名，双扩展名注册成 UTI 匹配不上，文件选择器里会是灰的。
+	  conformsTo public.json 让它在别处仍被当作 JSON 预览。
+	-->
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.openkoto.transfer</string>
+			<key>UTTypeDescription</key>
+			<string>OpenKoto Data</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.json</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>okdata</string>
+				</array>
+			</dict>
 		</dict>
 	</array>
 	<!--

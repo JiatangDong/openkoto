@@ -18,7 +18,9 @@ public struct RootTabView: View {
     @AppStorage(OnboardingGate.completedKey) private var onboardingCompleted = false
     @State private var onboarding = OnboardingState()
 
-    private enum Tab: Hashable { case library, vocabulary, statistics, settings }
+    /// ⚠️ 不能叫 `Tab`：那会遮蔽 SwiftUI 自己的 `Tab` builder，
+    /// 下面的 `Tab(_:systemImage:value:)` 会被解析成这个枚举而编不过。
+    private enum AppSection: Hashable { case library, vocabulary, statistics, settings }
 
     /// URL 是否落在本 App 的 `Documents/Inbox/` 里（系统为"用 XX 打开"留下的副本）。
     static func isInDocumentsInbox(_ url: URL) -> Bool {
@@ -31,10 +33,11 @@ public struct RootTabView: View {
 
     // 截图/UI 测试用（-startTab*）：启动直接落在指定页；默认书库。
     // 配合 -app.onboarding.completed YES（NSArgumentDomain）可跳过首启引导。
-    @State private var selection: Tab = {
+    @State private var selection: AppSection = {
         let args = ProcessInfo.processInfo.arguments
         if args.contains("-startTabSettings") { return .settings }
         if args.contains("-startTabStatistics") { return .statistics }
+        if args.contains("-startTabVocabulary") { return .vocabulary }
         return .library
     }()
 
@@ -59,19 +62,28 @@ public struct RootTabView: View {
         Group {
             if onboardingCompleted {
                 TabView(selection: $selection) {
-                    LibraryView()
-                        .tabItem { Label(L("tab.library"), systemImage: "books.vertical") }
-                        .tag(Tab.library)
-                    VocabularyView()
-                        .tabItem { Label(L("tab.vocabulary"), systemImage: "star.square.on.square") }
-                        .tag(Tab.vocabulary)
-                    StatisticsView()
-                        .tabItem { Label(L("tab.statistics"), systemImage: "chart.bar.xaxis") }
-                        .tag(Tab.statistics)
-                    SettingsView()
-                        .tabItem { Label(L("tab.settings"), systemImage: "gearshape") }
-                        .tag(Tab.settings)
+                    Tab(L("tab.library"), systemImage: "books.vertical", value: AppSection.library) {
+                        LibraryView()
+                    }
+                    Tab(
+                        L("tab.vocabulary"), systemImage: "star.square.on.square",
+                        value: AppSection.vocabulary
+                    ) {
+                        VocabularyView()
+                    }
+                    Tab(
+                        L("tab.statistics"), systemImage: "chart.bar.xaxis",
+                        value: AppSection.statistics
+                    ) {
+                        StatisticsView()
+                    }
+                    Tab(L("tab.settings"), systemImage: "gearshape", value: AppSection.settings) {
+                        SettingsView()
+                    }
                 }
+                // 宽屏自动变侧边栏、窄屏保持底部 tab 栏。
+                // 不加 TabViewCustomization：四个 tab 都是必需功能，让用户隐藏是净损失。
+                .tabViewStyle(.sidebarAdaptable)
                 // 生词卡「回到原句」发起的跳转：先把 tab 切过去，
                 // 落到哪一句由 LibraryView 消费同一个请求决定。
                 .onChange(of: store.pendingJump) {
@@ -85,6 +97,9 @@ public struct RootTabView: View {
         }
         // 语言切换时改变身份，强制整棵子树（含各 Feature 视图内部的 L()）按新语言重建。
         .id(interfaceLanguage)
+        // 全 App 的宽窄判定只在这里测一次。挂在 .id 之外，切语言重建子树时
+        // 已测到的尺寸不会丢，否则会看到一帧按兜底窄值渲染的闪烁。
+        .publishingCanvasMetrics()
         // 从设置页重看引导：向导状态是长驻的，不重置会直接落在上次的"完成"页。
         .onChange(of: onboardingCompleted) {
             if !onboardingCompleted { onboarding.reset() }

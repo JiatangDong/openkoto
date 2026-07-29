@@ -52,6 +52,7 @@ struct SourcePreviewSheet: View {
         }
         // 半屏起步：这是复习途中的一次侧看，不该把整个复习流盖住。
         .presentationDetents([.medium, .large])
+        .okSheetSizing(.page)
     }
 
     private func content(_ source: ContentStore.FavoriteSource) -> some View {

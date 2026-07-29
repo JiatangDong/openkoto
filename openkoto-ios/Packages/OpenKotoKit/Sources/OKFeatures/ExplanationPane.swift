@@ -6,10 +6,13 @@ import OKAIClient
 import OKDesignSystem
 import OKLocalization
 
-/// 精讲底部弹层（设计文档 §6.4）：
+/// 精讲内容面（设计文档 §6.4）：
 /// 分区 = 翻译 → 讲解 → 词汇（星标收藏）→ 语法 → 文化背景/难度/学习建议；
 /// 底部工具条 = 上一句/下一句/朗读/复制。
-struct ExplanationSheet: View {
+///
+/// 只负责内容、不带外壳。窄屏由 `adaptiveDetailPane` 套 NavigationStack 当半屏 sheet 用，
+/// 宽屏由同一个 modifier 放进右侧常驻栏——两种形态共用这一份实现，不做第二套。
+struct ExplanationPane: View {
     @Environment(ContentStore.self) private var store
     @Environment(\.theme) private var theme
 
@@ -49,20 +52,18 @@ struct ExplanationSheet: View {
     @AppStorage("explanation.mode") private var mode: Mode = .explain
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                if let segment {
-                    content(for: segment)
-                        .padding()
-                }
+        ScrollView {
+            if let segment {
+                content(for: segment)
+                    .padding()
             }
-            .background(theme.background)
-            .safeAreaInset(edge: .bottom) { bottomBar }
-            // ⚠️ 只在「精讲」页自动生成。以前不管三七二十一先发一次整句精讲，
-            // 于是"我只想查一个词"也要付整句的钱——那正是这一版要解决的问题。
-            .task(id: segmentID) { await generateIfNeeded() }
-            .onChange(of: mode) { Task { await generateIfNeeded() } }
         }
+        .background(theme.background)
+        .safeAreaInset(edge: .bottom) { bottomBar }
+        // ⚠️ 只在「精讲」页自动生成。以前不管三七二十一先发一次整句精讲，
+        // 于是"我只想查一个词"也要付整句的钱——那正是这一版要解决的问题。
+        .task(id: segmentID) { await generateIfNeeded() }
+        .onChange(of: mode) { Task { await generateIfNeeded() } }
     }
 
     private func generateIfNeeded() async {
@@ -213,8 +214,11 @@ struct ExplanationSheet: View {
 
     private var bottomBar: some View {
         HStack(spacing: 28) {
+            // 键盘换句：分栏常驻时上下键就是最自然的"读下一句"操作。
             navButton(systemImage: "chevron.up", offset: -1)
+                .keyboardShortcut(.upArrow, modifiers: [])
             navButton(systemImage: "chevron.down", offset: +1)
+                .keyboardShortcut(.downArrow, modifiers: [])
             Spacer()
             Button {
                 if let segment {
@@ -226,12 +230,14 @@ struct ExplanationSheet: View {
             } label: {
                 Image(systemName: "speaker.wave.2")
             }
+            .keyboardShortcut("p", modifiers: .command)
             .accessibilityLabel(Text(L("explanation.speak")))
             Button {
                 if let segment { UIPasteboard.general.string = segment.text }
             } label: {
                 Image(systemName: "doc.on.doc")
             }
+            .keyboardShortcut("c", modifiers: .command)
         }
         .font(.title3)
         .padding(.horizontal, 20)

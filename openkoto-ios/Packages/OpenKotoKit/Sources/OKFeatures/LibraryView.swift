@@ -77,6 +77,7 @@ enum LibraryRoute: Hashable {
 struct LibraryView: View {
     @Environment(ContentStore.self) private var store
     @Environment(\.theme) private var theme
+    @Environment(\.okCanvas) private var canvas
     @State private var showImport = false
     @State private var path: [LibraryRoute] = []
     @State private var importError: String?
@@ -114,10 +115,9 @@ struct LibraryView: View {
                 }
             }
             .background(theme.background)
-            .searchable(
-                text: $searchQuery,
-                placement: .navigationBarDrawer(displayMode: .automatic),
-                prompt: L("search.prompt"))
+            // placement 用 .automatic：navigationBarDrawer 是 iPhone 专有的下拉抽屉布局，
+            // iPad regular 宽度与 Catalyst 上要么被忽略要么错位。
+            .searchable(text: $searchQuery, prompt: L("search.prompt"))
             // 从"文件"App 或其他 App 拖入 .txt/.md/.epub 文件直接导入
             .dropDestination(for: URL.self) { urls, _ in
                 importDroppedFiles(urls)
@@ -150,7 +150,7 @@ struct LibraryView: View {
                 }
             }
             .sheet(isPresented: $showImport) {
-                ImportSheet()
+                ImportSheet().okSheetSizing(.form)
             }
             .navigationDestination(for: LibraryRoute.self) { route in
                 switch route.item {
@@ -265,7 +265,9 @@ struct LibraryView: View {
 
     private var articleList: some View {
         ScrollView {
-            LazyVStack(spacing: 10) {
+            // 宽屏自适应铺列：单列时每张卡横跨全屏，卡里只有标题+日期+句数徽章，
+            // 右边一大片空白。窄屏仍是单列，与今天一致。
+            LazyVGrid(columns: canvas.libraryColumns, spacing: 10) {
                 ForEach(items) { item in
                     NavigationLink(value: LibraryRoute.item(item)) {
                         switch item {

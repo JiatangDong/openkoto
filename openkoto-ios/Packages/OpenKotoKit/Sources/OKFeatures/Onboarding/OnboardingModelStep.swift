@@ -70,7 +70,9 @@ struct OnboardingModelStep: View {
     // MARK: - Provider 精选
 
     private var providerGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+        // 自适应而非写死两列：引导页在宽屏下已限宽 560，
+        // 但 iPad 分屏等中间尺寸下两列会把供应商名挤到换行。
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: 10)], spacing: 10) {
             ForEach(OnboardingProvider.curated) { provider in
                 providerChip(provider)
             }

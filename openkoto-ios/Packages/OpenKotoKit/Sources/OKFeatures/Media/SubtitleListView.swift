@@ -54,11 +54,15 @@ struct SubtitleListView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                 }
-                // 手一碰就停止跟随。用 simultaneousGesture 以免吃掉行内的点击。
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 12).onChanged { _ in
-                        if isFollowing { isFollowing = false }
-                    })
+                // 用户自己一滚就停止跟随。
+                //
+                // 原先用 DragGesture 判定，在 Mac（滚轮）和 iPad 触控板（两指滚）上
+                // 完全不触发——用户想往回看前一句会被自动跟随强行拽回当前句。
+                // 换成滚动阶段判定后三种输入都覆盖，而且比手势更准：
+                // proxy.scrollTo 发起的程序化滚动是 .animating，不会误判成脱离。
+                .onScrollPhaseChange { _, phase in
+                    if SubtitleFollow.shouldDisengage(phase), isFollowing { isFollowing = false }
+                }
                 .onChange(of: activeID) { _, id in
                     guard isFollowing, let id else { return }
                     withAnimation(.easeInOut(duration: 0.25)) {

@@ -53,6 +53,15 @@ struct NativeChapterView: View {
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 12)
+                // 正文限宽居中。加在 padding 之外、ScrollView 之内：
+                // 滚动条仍贴屏幕右缘、背景不断层，只有文字被收窄。
+                //
+                // 不限宽的话 iPad 13" 横屏一行 70+ 个汉字，而且段内的 FlowLayout
+                // 会把三四个句子塞进同一行，chip 边框给的句子边界线索被稀释成一片色块。
+                //
+                // 放在这里而不是三个调用方：ReaderView / BookReaderView /
+                // MediaPlayerView 的全文稿共用本视图，改一处三处都好。
+                .readableTextWidth(fontSize: fontSize)
             }
             .coordinateSpace(name: Self.scrollSpace)
             .onPreferenceChange(VisibleParagraphKey.self) { offsets in

@@ -16,21 +16,34 @@ public struct KeychainStore: Sendable {
         self.service = service
     }
 
+    /// 四个查询共用的基底。
+    ///
+    /// `kSecUseDataProtectionKeychain` 必须**四个查询全带**：Mac（Catalyst / 原生）上
+    /// 不带这个标志会落到老的 file-based keychain，`kSecAttrAccessible` 被忽略，
+    /// 而且跨进程访问会弹授权框。只给一部分查询带的话，会出现
+    /// "写进了 data-protection keychain、读却去 file-based 找" —— 表现为
+    /// 用户明明配好了 API Key，重启后 App 说没配。
+    ///
+    /// iOS 上该标志默认就是 true，显式写等于无操作，不影响存量用户的 Key。
+    private func baseQuery(account: UUID) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account.uuidString,
+            kSecUseDataProtectionKeychain as String: true,
+        ]
+    }
+
     /// 写入/更新某个模型配置的 API Key。空串等价于删除。
     @discardableResult
     public func setKey(_ key: String, for id: UUID) -> Bool {
         guard !key.isEmpty else {
             return deleteKey(for: id)
         }
-        let account = id.uuidString
         let data = Data(key.utf8)
 
         // 已存在则更新，否则新增。
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
+        let query = baseQuery(account: id)
         let attributes: [String: Any] = [
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
@@ -51,13 +64,9 @@ public struct KeychainStore: Sendable {
 
     /// 读取某个模型配置的 API Key（不存在返回 nil）。
     public func key(for id: UUID) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: id.uuidString,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
+        var query = baseQuery(account: id)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
               let data = result as? Data,
@@ -68,24 +77,15 @@ public struct KeychainStore: Sendable {
 
     /// 是否已配置 Key（设置页 SecureField 只显示“已配置”，不回显）。
     public func hasKey(for id: UUID) -> Bool {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: id.uuidString,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
+        var query = baseQuery(account: id)
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
         return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
     }
 
     /// 删除某个模型配置的 Key。
     @discardableResult
     public func deleteKey(for id: UUID) -> Bool {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: id.uuidString,
-        ]
-        let status = SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(baseQuery(account: id) as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound
     }
 }

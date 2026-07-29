@@ -9,6 +9,7 @@ import SwiftUI
 /// 也会频繁开关字幕（先盲听、听不懂再看）。藏进菜单等于让人每句点三下。
 struct TransportBar: View {
     @Environment(\.theme) private var theme
+    @Environment(\.okCanvas) private var canvas
 
     let currentTime: Double
     let duration: Double
@@ -52,6 +53,10 @@ struct TransportBar: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        // 控件本身的固定宽度是刻意的（见上），但整条 bar 要限宽居中：
+        // 不限的话进度条会横跨 1300pt，两端的时间戳离播放键有半个屏幕远。
+        .frame(maxWidth: canvas.isWide ? 640 : .infinity)
+        .frame(maxWidth: .infinity)
         .background(theme.card)
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.5)

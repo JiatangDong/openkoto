@@ -6,7 +6,27 @@ import Foundation
 /// 主 App 启动时 `drain()` 读取并清空。坏文件跳过并删除，保证队列不卡死。
 public struct ShareInbox: Sendable {
     /// App Group 标识——需在主 App 与扩展两端 entitlements 中声明一致。
+    ///
+    /// iOS 上就是这个裸标识；**Mac（Catalyst / 原生）要求带 Team ID 前缀**
+    /// （`ABCDE12345.group.com.openkoto.ios`），容器也落在 `~/Library/Group Containers/`。
+    /// 前缀不带的话 `containerURL(...)` 返回 nil → `init?` 返回 nil →
+    /// `ShareViewController` 的 guard 直接 return：**分享功能静默失效、一句报错都没有**。
     public static let appGroupID = "group.com.openkoto.ios"
+
+    /// 候选标识列表：优先用 Info.plist 注入的值（Catalyst 那份带 `$(TeamIdentifierPrefix)`），
+    /// 其次退回裸标识。
+    ///
+    /// 走 plist 注入而不是把 Team ID 硬编码进源码：Team ID 属于签名配置，
+    /// 换团队/换证书时不该改代码。列表兜底则保证注入出错时不会静默失效。
+    static var candidateAppGroupIDs: [String] {
+        let injected = Bundle.main.object(forInfoDictionaryKey: "OKAppGroupIdentifier") as? String
+        return [injected, appGroupID]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .reduce(into: [String]()) { unique, id in
+                if !unique.contains(id) { unique.append(id) }
+            }
+    }
 
     private let directory: URL
 
@@ -22,8 +42,19 @@ public struct ShareInbox: Sendable {
         return decoder
     }()
 
-    /// 用 App Group 容器初始化；容器不可用（缺 entitlement）时返回 nil。
-    public init?(appGroupID: String = ShareInbox.appGroupID) {
+    /// 用 App Group 容器初始化；所有候选标识都拿不到容器（缺 entitlement）时返回 nil。
+    public init?() {
+        guard let container = Self.candidateAppGroupIDs.lazy
+            .compactMap({
+                FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0)
+            })
+            .first
+        else { return nil }
+        self.directory = container.appendingPathComponent("Inbox", isDirectory: true)
+    }
+
+    /// 指定 App Group 标识初始化（测试与特殊场景用）。
+    public init?(appGroupID: String) {
         guard let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: appGroupID)
         else { return nil }

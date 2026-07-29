@@ -20,6 +20,11 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- 与主 App 保持同一个 App Group 标识（见 ShareInbox.candidateAppGroupIDs）。
+	     OK_APP_GROUP_ID 在 pbxproj 里按 sdk 分流，Catalyst 那份带 Team ID 前缀——
+	     两端不一致的话扩展写进去的信封主 App 读不到，且两边都不报错。 -->
+	<key>OKAppGroupIdentifier</key>
+	<string>$(OK_APP_GROUP_ID)</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>

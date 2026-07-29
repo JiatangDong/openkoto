@@ -21,12 +21,14 @@ enum ReaderViewMode: String, CaseIterable, Identifiable {
 }
 
 /// 阅读器（核心屏幕，设计文档 §6.4）：
-/// 段落 LazyVStack 虚拟化 + 段内 FlowLayout 逐句 chip，
-/// 点句弹出半屏 ExplanationSheet（半屏时正文仍可滚动换句）。
+/// 段落 LazyVStack 虚拟化 + 段内 FlowLayout 逐句 chip，点句展开精讲。
+/// 精讲的形态由画布宽度决定——窄屏半屏 sheet（正文仍可滚动换句），
+/// 宽屏右侧常驻分栏（正文完全不被遮挡），见 `adaptiveDetailPane`。
 struct ReaderView: View {
     @Environment(ContentStore.self) private var store
     @Environment(\.theme) private var theme
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.okCanvas) private var canvas
 
     let article: Article
     /// 从搜索结果进来时定位到的句序。`NativeChapterView.restoreOrder` 已支持滚到指定句，
@@ -36,10 +38,10 @@ struct ReaderView: View {
     @AppStorage("reader.fontSize") private var fontSize: Double = 18
     /// 词级读音开关。与三种视图模式正交（哪种模式下都可能想看读音），所以不做成第四种 mode。
     @AppStorage("reader.showReading") private var showReading = false
+    /// 宽屏下收起右侧精讲栏，把整片宽度还给正文（沉浸阅读）。窄屏无意义，按钮也不出现。
+    @AppStorage("reader.paneCollapsed") private var paneCollapsed = false
     @State private var viewMode: ReaderViewMode = .original
     @State private var selectedSegmentID: UUID?
-    /// 本段前台阅读计时起点(阅读时长统计用)。
-    @State private var readingStart: Date?
 
     private var segments: [ArticleSegment] {
         store.segments(for: article.id)
@@ -51,17 +53,6 @@ struct ReaderView: View {
 
     /// 这篇文章有没有可显示的读音。没有时把开关灰掉并说明，好过让用户点了没反应。
     private var hasReadings: Bool { !store.readingRuns(for: article.id).isEmpty }
-
-    /// 结算本段前台阅读时长：丢弃 <3s(噪声)与 >2h(挂机)，否则落一条阅读会话。
-    private func flushReadingSession() {
-        guard let start = readingStart else { return }
-        readingStart = nil
-        let elapsed = Int(Date().timeIntervalSince(start))
-        guard elapsed >= 3, elapsed <= 2 * 60 * 60 else { return }
-        let articleID = article.id
-        Task { await store.recordReadingSession(
-            articleId: articleID, seconds: elapsed, startedAt: start) }
-    }
 
     var body: some View {
         NativeChapterView(
@@ -83,39 +74,16 @@ struct ReaderView: View {
                 selectedSegmentID = segments.first?.id
             }
         }
-        .onAppear { readingStart = Date() }
-        .onDisappear { flushReadingSession() }
-        .onChange(of: scenePhase) { _, phase in
-            switch phase {
-            case .active:
-                if readingStart == nil { readingStart = Date() }
-            case .inactive, .background:
-                flushReadingSession()
-            @unknown default:
-                break
-            }
-        }
+        .readingClock(articleID: article.id)
+        // 挂在导航修饰之前：底部的 batchBar 留在左栏，导航栏横跨两栏。
+        .explanationPane(
+            article: article, selection: $selectedSegmentID, isCollapsed: paneCollapsed)
         .navigationTitle(article.title)
         .navigationBarTitleDisplayMode(.inline)
         // 阅读时收起底部 tab 栏：正文多一行，返回上一级会自动恢复。
-        .toolbar(.hidden, for: .tabBar)
+        // 宽屏不收——那边的主导航是侧边栏，藏掉用户就出不去了。
+        .hidesAppTabBar()
         .toolbar { readerToolbar }
-        .sheet(
-            isPresented: Binding(
-                get: { selectedSegmentID != nil },
-                set: { if !$0 { selectedSegmentID = nil } }
-            )
-        ) {
-            if let segmentID = selectedSegmentID {
-                ExplanationSheet(
-                    article: article,
-                    segmentID: segmentID,
-                    onSelectSegment: { selectedSegmentID = $0 }
-                )
-                .presentationDetents([.medium, .large])
-                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
-            }
-        }
     }
 
     // MARK: - 批量任务进度条
@@ -128,6 +96,20 @@ struct ReaderView: View {
 
     @ToolbarContentBuilder
     private var readerToolbar: some ToolbarContent {
+        // 只有宽屏才有右栏可收。窄屏走 sheet，收起是没有意义的概念。
+        if canvas.isWide {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    withAnimation(.snappy) { paneCollapsed.toggle() }
+                } label: {
+                    Image(systemName: "sidebar.right")
+                        .foregroundStyle(paneCollapsed ? theme.mutedForeground : theme.primary)
+                }
+                .accessibilityLabel(
+                    Text(paneCollapsed ? L("reader.pane.expand") : L("reader.pane.collapse")))
+                .accessibilityAddTraits(paneCollapsed ? [] : .isSelected)
+            }
+        }
         // 常驻按钮：唱歌/跟读时要频繁开关，藏进菜单太深。
         ToolbarItem(placement: .topBarTrailing) {
             Button {

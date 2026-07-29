@@ -11,6 +11,7 @@ struct OnboardingView: View {
     let onFinish: () -> Void
 
     @Environment(\.theme) private var theme
+    @Environment(\.okCanvas) private var canvas
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,6 +22,10 @@ struct OnboardingView: View {
                 .transition(.push(from: state.movingForward ? .trailing : .leading))
         }
         .animation(.default, value: state.step)
+        // 引导表单限宽居中：不限的话 Mac 窗口里输入框会横跨整屏，
+        // 标签和控件离得半个屏幕远。
+        .frame(maxWidth: canvas.isWide ? 560 : .infinity)
+        .frame(maxWidth: .infinity)
         .background(theme.background)
     }
 

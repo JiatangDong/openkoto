@@ -237,9 +237,14 @@ struct ReviewSessionView: View {
             Group {
                 if showAnswer {
                     HStack(spacing: 10) {
-                        gradeButton(L("review.gradeUnknown"), color: theme.srsWeak, grade: .again)
-                        gradeButton(L("review.gradeUncertain"), color: theme.srsFading, grade: .hard)
-                        gradeButton(L("review.gradeKnown"), color: theme.srsStrong, grade: .good)
+                        // 1/2/3 评分是 Anki 的通用肌肉记忆，键盘环境下收益最大。
+                        gradeButton(
+                            L("review.gradeUnknown"), color: theme.srsWeak, grade: .again, key: "1")
+                        gradeButton(
+                            L("review.gradeUncertain"), color: theme.srsFading, grade: .hard,
+                            key: "2")
+                        gradeButton(
+                            L("review.gradeKnown"), color: theme.srsStrong, grade: .good, key: "3")
                     }
                 } else {
                     Button {
@@ -349,7 +354,9 @@ struct ReviewSessionView: View {
         isLoading = false
     }
 
-    private func gradeButton(_ label: String, color: Color, grade: FSRS.Grade) -> some View {
+    private func gradeButton(
+        _ label: String, color: Color, grade: FSRS.Grade, key: KeyEquivalent
+    ) -> some View {
         Button {
             submitGrade(grade)
         } label: {
@@ -360,6 +367,8 @@ struct ReviewSessionView: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(color)
+        // 无修饰键：复习时手一直放在数字键上，加 ⌘ 反而慢。
+        .keyboardShortcut(key, modifiers: [])
     }
 
     /// 答错的卡隔几张回来。again 比 hard 早——刚才完全没想起来的那个更需要重来一次。

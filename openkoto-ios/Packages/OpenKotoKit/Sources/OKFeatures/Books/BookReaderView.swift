@@ -13,6 +13,7 @@ struct BookReaderView: View {
     @Environment(ContentStore.self) private var store
     @Environment(\.theme) private var theme
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.okCanvas) private var canvas
 
     let book: Book
     /// 从搜索结果进来时的落点（章 + 句序）。有值时压过续读位置——
@@ -23,11 +24,15 @@ struct BookReaderView: View {
     @AppStorage("reader.fontSize") private var fontSize: Double = 18
     /// 与 ReaderView 共用同一个 key：读音开关是全局阅读偏好，不该按书记忆。
     @AppStorage("reader.showReading") private var showReading = false
+    /// 同上，精讲栏收起状态也是全局阅读偏好。
+    @AppStorage("reader.paneCollapsed") private var paneCollapsed = false
+    /// 划词操作条的实测宽度与所在容器宽度，用于把它夹在可视区内。
+    @State private var selectionBarWidth: CGFloat = 0
+    @State private var readerWidth: CGFloat = 0
     @State private var viewMode: ReaderViewMode = .original
     @State private var selectedSegmentID: UUID?
     @State private var chapterIndex = 0
     @State private var showChapters = false
-    @State private var readingStart: Date?
     /// 本章当前视口顶部的句序，节流后落库。
     @State private var visibleOrder = 0
     @State private var restoreOrder: Int?
@@ -95,29 +100,24 @@ struct BookReaderView: View {
         .safeAreaInset(edge: .bottom) { bottomBar }
         .task(id: chapterIndex) { await openCurrentChapter() }
         .onAppear {
-            readingStart = Date()
             restoreFromProgress()
             jumpToInitialLocationIfNeeded()
         }
-        .onDisappear {
-            flushReadingSession()
-            saveProgress(force: true)
-        }
+        .onDisappear { saveProgress(force: true) }
         .onChange(of: scenePhase) { _, phase in
-            switch phase {
-            case .active:
-                if readingStart == nil { readingStart = Date() }
-            case .inactive, .background:
-                flushReadingSession()
-                saveProgress(force: true)
-            @unknown default:
-                break
-            }
+            if phase != .active { saveProgress(force: true) }
         }
+        // 阅读计时交给共用的 ReadingClock：翻章时会自动结算上一章再给新章起表，
+        // 不再像原来那样把整段阅读都记在停下来的那一章上。
+        .readingClock(articleID: currentChapter?.articleId)
+        // 挂在导航修饰之前：底部的翻章条留在左栏，导航栏横跨两栏。
+        .explanationPane(
+            article: currentArticle, selection: $selectedSegmentID, isCollapsed: paneCollapsed)
         .navigationTitle(currentChapter?.title ?? book.title)
         .navigationBarTitleDisplayMode(.inline)
         // 阅读时收起底部 tab 栏：翻页条已经占了底部，再叠一层 tab 太挤。
-        .toolbar(.hidden, for: .tabBar)
+        // 宽屏不收——那边的主导航是侧边栏。
+        .hidesAppTabBar()
         .toolbar { toolbar }
         .sheet(
             isPresented: Binding(
@@ -135,21 +135,6 @@ struct BookReaderView: View {
         .sheet(isPresented: $showChapters) {
             ChapterListSheet(book: book, currentIndex: chapterIndex) { index in
                 goTo(chapter: index)
-            }
-        }
-        .sheet(
-            isPresented: Binding(
-                get: { selectedSegmentID != nil },
-                set: { if !$0 { selectedSegmentID = nil } })
-        ) {
-            if let segmentID = selectedSegmentID, let article = currentArticle {
-                ExplanationSheet(
-                    article: article,
-                    segmentID: segmentID,
-                    onSelectSegment: { selectedSegmentID = $0 }
-                )
-                .presentationDetents([.medium, .large])
-                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
             }
         }
     }
@@ -258,6 +243,7 @@ struct BookReaderView: View {
                 }
             )
             if let selection = webSelection, let rect = selection.rects.first {
+                // 容器宽度不能用 canvas：宽屏下精讲右栏会把正文栏挤窄。
                 SelectionActionBar(
                     anchor: rect,
                     canExplain: !book.originalOnly,
@@ -270,11 +256,21 @@ struct BookReaderView: View {
                     }
                 )
                 // 浮在选区上方，贴边时下移，避免顶出屏幕。
+                //
+                // 右边界同样要夹：原先只挡了左边和上边，在段落右侧划词时
+                // 操作条会被推出可视区。窄屏勉强不显，宽屏下正文栏被精讲栏挤窄后必现。
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: {
+                    selectionBarWidth = $0
+                }
                 .offset(
-                    x: max(rect.minX, 8),
-                    y: rect.minY > 60 ? rect.minY - 52 : rect.maxY + 8)
+                    x: SelectionBarPlacement.x(
+                        anchorMinX: rect.minX,
+                        barWidth: selectionBarWidth,
+                        containerWidth: readerWidth),
+                    y: SelectionBarPlacement.y(anchorMinY: rect.minY, anchorMaxY: rect.maxY))
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { readerWidth = $0 }
     }
 
     /// 划词 → 精讲：把选区映射回本章的某一句，然后复用**未经修改**的 ExplanationSheet。
@@ -388,19 +384,6 @@ struct BookReaderView: View {
                 mode: renderMode))
     }
 
-    /// 结算本段前台阅读时长：丢弃 <3s(噪声)与 >2h(挂机)。
-    private func flushReadingSession() {
-        guard let start = readingStart, let chapter = currentChapter else { return }
-        readingStart = nil
-        let elapsed = Int(Date().timeIntervalSince(start))
-        guard elapsed >= 3, elapsed <= 2 * 60 * 60 else { return }
-        let articleID = chapter.articleId
-        Task {
-            await store.recordReadingSession(
-                articleId: articleID, seconds: elapsed, startedAt: start)
-        }
-    }
-
     // MARK: - 底部翻章条
 
     @ViewBuilder
@@ -451,6 +434,20 @@ struct BookReaderView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
+        // 只有宽屏才有右栏可收；窄屏走 sheet，收起是没有意义的概念。
+        if canvas.isWide {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    withAnimation(.snappy) { paneCollapsed.toggle() }
+                } label: {
+                    Image(systemName: "sidebar.right")
+                        .foregroundStyle(paneCollapsed ? theme.mutedForeground : theme.primary)
+                }
+                .accessibilityLabel(
+                    Text(paneCollapsed ? L("reader.pane.expand") : L("reader.pane.collapse")))
+                .accessibilityAddTraits(paneCollapsed ? [] : .isSelected)
+            }
+        }
         ToolbarItem(placement: .topBarTrailing) {
             Button {
                 showChapters = true

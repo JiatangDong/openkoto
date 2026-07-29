@@ -73,6 +73,9 @@ public struct SentenceChip: View {
         #endif
     }
 
+    /// 指针悬停高亮。触屏上永远为 false，不影响 iPhone 观感。
+    @State private var isHovered = false
+
     public var body: some View {
         Button(action: action) {
             content
@@ -80,7 +83,10 @@ public struct SentenceChip: View {
                 .padding(.vertical, 3)
                 .background(
                     RoundedRectangle(cornerRadius: OKRadius.chip)
-                        .fill(isSelected ? theme.primary.opacity(0.18) : .clear)
+                        .fill(
+                            isSelected
+                                ? theme.primary.opacity(0.18)
+                                : (isHovered ? theme.muted.opacity(0.5) : .clear))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: OKRadius.chip)
@@ -89,6 +95,12 @@ public struct SentenceChip: View {
                 .contentShape(RoundedRectangle(cornerRadius: OKRadius.chip))
         }
         .buttonStyle(.plain)
+        // 键鼠环境（Mac / iPad 触控板）下句子要看得出可点：
+        // chip 间距只有 2pt，没有悬停反馈很难分辨点中的是哪一句。
+        // 一处改动同时覆盖阅读器正文、字幕行与词表 chip。
+        //
+        // 只用 onHover，不加 pointerStyle——后者在 Mac Catalyst 上不可用。
+        .onHover { isHovered = $0 }
         .accessibilityLabel(Text(text))
         .accessibilityValue(Text(stateDescription, bundle: .module))
     }

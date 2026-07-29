@@ -12,6 +12,7 @@ import SwiftUI
 struct LibrarySearchResults: View {
     @Environment(ContentStore.self) private var store
     @Environment(\.theme) private var theme
+    @Environment(\.okCanvas) private var canvas
 
     let query: String
     let items: [LibraryItem]
@@ -66,6 +67,9 @@ struct LibrarySearchResults: View {
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
+        // 搜索命中是整行文字（标题 + 命中片段），不是卡片，所以限宽而不是铺成网格。
+        .frame(maxWidth: canvas.isWide ? 860 : .infinity)
+        .frame(maxWidth: .infinity)
         .background(theme.background)
         // 输入变化就重跑：`.task(id:)` 会取消上一次，前缀查询不会互相覆盖结果。
         .task(id: query) {

@@ -4,7 +4,9 @@ import PackageDescription
 let package = Package(
     name: "OpenKotoKit",
     defaultLocalization: "en",
-    platforms: [.iOS(.v17), .macOS(.v14)],
+    // macOS 必须跟着 iOS 一起升：OKDesignSystem 是跨平台 target，
+    // 里面的 onGeometryChange / pointerStyle 是 iOS 18 + macOS 15 才有的。
+    platforms: [.iOS(.v18), .macOS(.v15)],
     products: [
         .library(name: "OKModels", targets: ["OKModels"]),
         .library(name: "OKSRS", targets: ["OKSRS"]),
@@ -41,6 +43,9 @@ let package = Package(
             name: "OKPersistence",
             dependencies: [
                 "OKModels",
+                // 跨设备同步的冲突解决要重放复习事件（ReviewReplay）。
+                // OKSRS 只依赖 OKModels，不构成环。
+                "OKSRS",
                 .product(name: "GRDB", package: "GRDB.swift"),
             ]
         ),

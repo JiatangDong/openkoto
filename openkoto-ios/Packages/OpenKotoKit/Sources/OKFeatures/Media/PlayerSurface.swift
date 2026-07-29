@@ -33,6 +33,7 @@ final class PlayerLayerView: UIView {
 /// 播放区：视频画面 / 音频占位 / 媒体不可用的降级提示。
 struct MediaSurface: View {
     @Environment(\.theme) private var theme
+    @Environment(\.okCanvas) private var canvas
 
     let media: Media
     let player: AVPlayer
@@ -52,6 +53,9 @@ struct MediaSurface: View {
         }
         .frame(maxWidth: .infinity)
         .aspectRatio(16 / 9, contentMode: .fit)
+        // 宽屏封顶：16:9 在 iPad 横屏/Mac 窗口下会吃掉六成高度，
+        // 只给下面的字幕列表留一条缝。
+        .frame(maxHeight: canvas.isWide ? canvas.height * 0.45 : .infinity)
         .background(media.kind == .video && isAvailable ? Color.black : theme.muted)
         .clipped()
     }
