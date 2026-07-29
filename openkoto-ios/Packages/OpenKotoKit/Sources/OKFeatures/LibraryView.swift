@@ -360,18 +360,39 @@ private struct ImportSheet: View {
         }
     }
 
+    /// 要选哪一类文件。
+    ///
+    /// **三个 `.fileImporter` 不能叠在同一个 view 上。** SwiftUI 一个 view 只认一个
+    /// presentation，叠三个的话哪个生效是未定义的 —— 实测 Mac Catalyst 上
+    /// 「选择书籍」那个完全打不开面板，而 `isPresented` 已经被置成 true 且再没人复位，
+    /// 于是按钮**从此彻底点不动**（用户看到的就是"点了没反应，然后怎么点都没反应"）。
+    /// 收敛成一个 importer、用这个枚举选类型。
+    private enum FilePicker: Identifiable {
+        case book
+        case subtitle
+        case media
+
+        var id: Self { self }
+
+        var contentTypes: [UTType] {
+            switch self {
+            case .book: TextImport.readableContentTypes + TextImport.bookContentTypes
+            case .subtitle: TextImport.subtitleContentTypes
+            case .media: TextImport.mediaContentTypes
+            }
+        }
+    }
+
     @State private var mode: Mode = .paste
     @State private var title = ""
     @State private var content = ""
     @State private var urlText = ""
-    @State private var isFileImporterPresented = false
+    @State private var activePicker: FilePicker?
     @State private var isFetching = false
     @State private var errorMessage: String?
     /// 视频/音频模式：字幕必选，媒体文件可选（只导字幕就是纯文稿，当文章读）。
     @State private var subtitleURL: URL?
     @State private var mediaURL: URL?
-    @State private var isSubtitleImporterPresented = false
-    @State private var isMediaImporterPresented = false
     /// 相册选中的视频。相册资源不能长期引用，取出来即拷贝，落地时走 copying 分支。
     @State private var photoItem: PhotosPickerItem?
     @State private var photoURL: URL?
@@ -397,25 +418,30 @@ private struct ImportSheet: View {
             }
             .navigationTitle(L("import.title"))
             .navigationBarTitleDisplayMode(.inline)
+            // **只能有一个。** 见 `FilePicker` 的注释：叠多个的话在 Catalyst 上
+            // 会有 importer 永远打不开，而且按钮会卡死在 isPresented == true。
             .fileImporter(
-                isPresented: $isFileImporterPresented,
-                allowedContentTypes: TextImport.readableContentTypes + TextImport.bookContentTypes
+                isPresented: Binding(
+                    get: { activePicker != nil },
+                    // 用户取消时 SwiftUI 只把 isPresented 置 false，不走 completion，
+                    // 这里必须跟着清空 —— 不清就是下次点同一个按钮没反应。
+                    set: { if !$0 { activePicker = nil } }),
+                allowedContentTypes: activePicker?.contentTypes ?? FilePicker.book.contentTypes
             ) { result in
-                handleFileImport(result)
-            }
-            .fileImporter(
-                isPresented: $isSubtitleImporterPresented,
-                allowedContentTypes: TextImport.subtitleContentTypes
-            ) { result in
-                if case .success(let url) = result { subtitleURL = url }
-            }
-            .fileImporter(
-                isPresented: $isMediaImporterPresented,
-                allowedContentTypes: TextImport.mediaContentTypes
-            ) { result in
-                if case .success(let url) = result {
-                    mediaURL = url
-                    photoURL = nil
+                let picker = activePicker
+                activePicker = nil
+                switch picker {
+                case .book:
+                    handleFileImport(result)
+                case .subtitle:
+                    if case .success(let url) = result { subtitleURL = url }
+                case .media:
+                    if case .success(let url) = result {
+                        mediaURL = url
+                        photoURL = nil
+                    }
+                case nil:
+                    break
                 }
             }
             .onChange(of: photoItem) { _, item in
@@ -445,7 +471,7 @@ private struct ImportSheet: View {
 
     private var fileSection: some View {
         Button {
-            isFileImporterPresented = true
+            activePicker = .book
         } label: {
             Label(L("import.file.bookButton"), systemImage: "doc.badge.plus")
         }
@@ -531,7 +557,7 @@ private struct ImportSheet: View {
     private var mediaSection: some View {
         Section {
             Button {
-                isSubtitleImporterPresented = true
+                activePicker = .subtitle
             } label: {
                 LabeledContent {
                     Text(subtitleURL?.lastPathComponent ?? L(canTranscribeOnDevice ? "import.media.optional" : "import.media.required"))
@@ -543,7 +569,7 @@ private struct ImportSheet: View {
                 }
             }
             Button {
-                isMediaImporterPresented = true
+                activePicker = .media
             } label: {
                 LabeledContent {
                     Text(pickedMediaName ?? L("import.media.optional"))
