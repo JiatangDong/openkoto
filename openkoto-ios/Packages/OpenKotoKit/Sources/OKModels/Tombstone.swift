@@ -10,6 +10,12 @@ public enum TombstoneTable: String, Sendable, CaseIterable, Codable {
     case wordPack = "word_pack"
     case wordPackMembership = "word_pack_membership"
     case article
+    /// 删一本书要传播的是 `book` 这一条，**不是每一章的 article 墓碑** ——
+    /// 对端有自己的 `book_chapter` 行，能照 `BookRepository.deleteBook` 的顺序
+    /// 自己级联。一本 100 章的书因此只推一条删除而不是 101 条。
+    case book
+    case media
+    case bookMark = "book_mark"
 }
 
 /// 一条删除记录。本地行已经硬删除了，这是它存在过、且被用户主动删掉的唯一证据。

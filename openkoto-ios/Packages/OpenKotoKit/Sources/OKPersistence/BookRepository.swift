@@ -83,15 +83,13 @@ public struct BookRepository: Sendable {
     /// 删书。book → article 的级联没法用外键表达，这里显式做，且**顺序要紧**：
     /// 先删 article（触发 segment 级联删除、收藏 source_article_id 置空），
     /// 再删 book（级联清掉 book_chapter / book_progress / book_mark）。
-    public func deleteBook(id: UUID) async throws {
+    ///
+    /// 同事务写墓碑：不写的话删除不会传播，别的设备下次同步又把整本书推回来。
+    /// 章节 article 也要各记一条 —— 它们是独立的云端记录。
+    public func deleteBook(id: UUID, now: Date = .now) async throws {
         try await database.writer.write { db in
-            try db.execute(
-                sql: """
-                    DELETE FROM article
-                    WHERE id IN (SELECT article_id FROM book_chapter WHERE book_id = ?)
-                    """,
-                arguments: [uuidString(id)])
-            try db.execute(sql: "DELETE FROM book WHERE id = ?", arguments: [uuidString(id)])
+            try ContentRepository.deleteBookCascade(db, bookID: uuidString(id), now: now)
+            try TombstoneRecord.mark(db, table: .book, recordID: uuidString(id), at: now)
         }
     }
 
@@ -133,9 +131,11 @@ public struct BookRepository: Sendable {
         }
     }
 
-    public func deleteMark(id: UUID) async throws {
-        _ = try await database.writer.write { db in
-            try BookMarkRecord.deleteOne(db, key: uuidString(id))
+    public func deleteMark(id: UUID, now: Date = .now) async throws {
+        try await database.writer.write { db in
+            _ = try BookMarkRecord.deleteOne(db, key: uuidString(id))
+            // 同事务记墓碑，否则别的设备会把删掉的划线推回来。
+            try TombstoneRecord.mark(db, table: .bookMark, recordID: uuidString(id), at: now)
         }
     }
 }

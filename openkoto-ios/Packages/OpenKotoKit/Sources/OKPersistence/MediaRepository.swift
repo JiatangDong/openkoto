@@ -66,15 +66,11 @@ public struct MediaRepository: Sendable {
     /// 删除。media → article 的级联没法用外键表达，这里显式做，且**顺序要紧**：
     /// 先删 article（触发 segment 级联删除、收藏 source_article_id 置空），
     /// 再删 media（级联清掉 media_part / media_progress）。
-    public func deleteMedia(id: UUID) async throws {
+    public func deleteMedia(id: UUID, now: Date = .now) async throws {
         try await database.writer.write { db in
-            try db.execute(
-                sql: """
-                    DELETE FROM article
-                    WHERE id IN (SELECT article_id FROM media_part WHERE media_id = ?)
-                    """,
-                arguments: [uuidString(id)])
-            try db.execute(sql: "DELETE FROM media WHERE id = ?", arguments: [uuidString(id)])
+            // 同事务写墓碑：不写的话删除不会传播，别的设备下次同步又推回来。
+            try ContentRepository.deleteMediaCascade(db, mediaID: uuidString(id), now: now)
+            try TombstoneRecord.mark(db, table: .media, recordID: uuidString(id), at: now)
         }
     }
 

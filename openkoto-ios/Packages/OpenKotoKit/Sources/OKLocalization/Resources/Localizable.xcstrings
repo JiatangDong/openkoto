@@ -6677,19 +6677,19 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Words, review progress and explanations sync between your iPhone, iPad and Mac through your own iCloud account. Books and videos stay on each device — only their text is synced."
+            "value": "Words, review progress, explanations, book text, subtitles and highlights sync between your iPhone, iPad and Mac through your own iCloud account. Book and video files stay on each device, so on other devices you can read and study the text but not open the original file. The first sync may take a while."
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "単語・復習の進捗・精読解説を、ご自身の iCloud アカウント経由で iPhone・iPad・Mac 間で同期します。書籍と動画のファイル自体は各デバイスに残り、テキストのみ同期されます。"
+            "value": "単語・復習の進捗・精読解説・書籍本文・字幕・ハイライトを、ご自身の iCloud アカウント経由で iPhone・iPad・Mac 間で同期します。書籍と動画のファイル自体は各デバイスに残るため、他のデバイスではテキストの学習はできますが原本は開けません。初回の同期には時間がかかることがあります。"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "生词、复习进度与精讲会经你自己的 iCloud 账号在 iPhone、iPad 与 Mac 之间同步。书籍与视频文件留在各自设备上，只同步其中的文本。"
+            "value": "生词、复习进度、精讲、书籍正文、字幕与划线会经你自己的 iCloud 账号在 iPhone、iPad 与 Mac 之间同步。书籍与视频文件留在各自设备上，所以在别的设备上文本能读能学，但打不开原文件。首次同步可能较久。"
           }
         }
       }
@@ -6736,6 +6736,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "立即同步"
+          }
+        }
+      }
+    },
+    "settings.sync.resync": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Re-download everything"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "すべて取得し直す"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新拉取全部数据"
           }
         }
       }

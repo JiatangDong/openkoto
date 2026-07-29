@@ -84,6 +84,24 @@ extension ContentStore {
         }
     }
 
+    /// 丢掉同步状态，下一次同步把云端的东西全量重新拉一遍。
+    ///
+    /// **不删本地任何数据**，只清同步进度。给"云上明明有、这台就是没有"兜底 ——
+    /// CloudKit 的 change token 一旦走过头就再也不会重发那批记录，
+    /// 这种状态放着不管永远不会自己好。
+    public func resyncFromScratch() async {
+        guard #available(iOS 17.0, macOS 14.0, *),
+            let engine = await makeSyncEngineIfNeeded()
+        else {
+            syncStatus = .unavailable
+            return
+        }
+        try? await engine.resetSyncState()
+        // 引擎重建过了，缓存的那个已经作废。
+        cloudSyncEngine = nil
+        await syncNow()
+    }
+
     /// 向 APNs 注册。
     ///
     /// **CKSyncEngine 一初始化就会去创建数据库订阅，而订阅要绑定推送 topic。**

@@ -72,6 +72,9 @@ extension ContentRepository {
         case .favoriteVocabulary: sqlTable = "favorite_vocabulary"
         case .wordPack: sqlTable = "word_pack"
         case .article: sqlTable = "article"
+        case .book: sqlTable = "book"
+        case .media: sqlTable = "media"
+        case .bookMark: sqlTable = "book_mark"
         case .wordPackMembership:
             // 成员关系没有 updated_at（只有 created_at），按创建时间判定即可：
             // 这张表只有插入和删除，没有"修改"。

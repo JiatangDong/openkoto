@@ -25,6 +25,15 @@ struct SyncSection: View {
                 }
                 .disabled(store.syncStatus == .syncing)
 
+                // 兜底入口：CloudKit 的 change token 走过头之后，
+                // 那批记录再也不会被下发，"点一百次立即同步"都没用。
+                Button {
+                    Task { await store.resyncFromScratch() }
+                } label: {
+                    Label(L("settings.sync.resync"), systemImage: "arrow.clockwise.icloud")
+                }
+                .disabled(store.syncStatus == .syncing)
+
                 statusRow
             }
         } header: {

@@ -391,6 +391,48 @@ public struct AppDatabase: Sendable {
                 t.column("last_synced_at", .datetime)
             }
         }
+        // 每条云端记录的"上次同步成功时的样子"（CloudKit）。
+        //
+        // **`system_fields` 不是可选的优化，缺了它同步会稳定报错。** CloudKit 的保存是
+        // compare-and-swap：请求里要带上你上次见到的 `recordChangeTag`，服务端比对通过
+        // 才写。每次都 `CKRecord(recordType:recordID:)` 现造一条的话没有 tag，服务端一律
+        // 当成"新建"，于是**任何一条已经在云上的记录，再推一次必然回 `serverRecordChanged`**。
+        // 而水位线有 5 秒重叠（见 `watermarkOverlap`），下一次同步必定会重推最后那几条 ——
+        // 也就是说，只要同步跑第二次就一定报错。实测就是这么炸的。
+        //
+        // `payload_hash` 用来掐掉回声：从云端拉回来的记录会写进本地表，
+        // 于是它的 `updated_at` 立刻越过水位线，下一轮扫描又把它原样推回去。
+        // 内容一模一样时按哈希跳过，省掉这一整圈无用功。
+        migrator.registerMigration("v9") { db in
+            try db.create(table: "cloud_record_meta") { t in
+                // CKRecord.ID.recordName，即 `类型_主键`（见 `CloudRecord.recordName`）。
+                t.primaryKey("record_name", .text)
+                // NSKeyedArchiver 存的 CKRecord 系统字段（含 change tag）。
+                t.column("system_fields", .blob)
+                // 上次同步成功时 payload 的 SHA-256。
+                t.column("payload_hash", .text)
+                t.column("synced_at", .datetime).notNull()
+            }
+        }
+        // 依赖还没到本机的云端记录，先停在这里等下一轮（计划见 §P4-1）。
+        //
+        // **不停放就是永久丢数据。** `book_chapter` 要 article 与 book 都在，
+        // `segment` 要父 article，词包成员两头都要 —— 原来的写法是
+        // `guard … else { return false }` 静默跳过，而 CloudKit 的 change token
+        // 照样往前走，那条记录**再也不会被下发**。同一批内靠 `mergeOrder` 排序能解决，
+        // 跨批次不能：一本 100 章的书必然跨批次。
+        migrator.registerMigration("v10") { db in
+            try db.create(table: "pending_cloud_payload") { t in
+                t.primaryKey("record_name", .text)
+                t.column("record_type", .text).notNull()
+                t.column("record_id", .text).notNull()
+                t.column("payload", .blob).notNull()
+                // 原记录的 updatedAt。重放时要拿它跟本地比，否则 LWW 判定会用错时间。
+                t.column("updated_at", .datetime).notNull()
+                t.column("first_seen_at", .datetime).notNull().indexed()
+                t.column("attempts", .integer).notNull().defaults(to: 0)
+            }
+        }
         return migrator
     }
 }

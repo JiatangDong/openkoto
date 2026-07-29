@@ -209,6 +209,12 @@ extension ContentRepository {
                     WHERE vocabulary_id = ? AND pack_id = ?)
                     """,
                 arguments: [String(parts[0]), String(parts[1])]) ?? false
+        case .book:
+            return try BookRecord.fetchOne(db, key: tombstone.recordID) != nil
+        case .media:
+            return try MediaRecord.fetchOne(db, key: tombstone.recordID) != nil
+        case .bookMark:
+            return try BookMarkRecord.fetchOne(db, key: tombstone.recordID) != nil
         }
     }
 

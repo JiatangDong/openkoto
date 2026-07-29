@@ -10,9 +10,20 @@ enum SampleData {
         var segments: [UUID: [ArticleSegment]]
     }
 
+    /// **固定 id，不能用 `UUID()` 现生成。**
+    ///
+    /// 每台设备各自随机生成的话，iCloud 同步会认为它们是不同的文章，
+    /// 于是每接入一台新设备就多出两篇一模一样的示例；而且在示例上生成的精讲
+    /// 也传不到另一台（id 对不上）。固定 id 让三台设备天然指向同一篇。
+    ///
+    /// 只影响新安装：`seedIfEmpty` 只在文章表为空时种，老设备保持原样
+    /// —— 它们之间的去重由 `applyCloudPayloads` 的同名同正文判断兜底。
+    static let yumeID = UUID(uuidString: "0e8a1f52-0000-4000-a000-00006b756d65")!
+    static let aliceID = UUID(uuidString: "0e8a1f52-0000-4000-a000-0000616c6963")!
+
     static func make() -> Bundle {
-        let yumeID = UUID()
-        let aliceID = UUID()
+        let yumeID = Self.yumeID
+        let aliceID = Self.aliceID
 
         // created_at 错开 1 分钟，保证书库按时间倒序时示例顺序稳定（夢十夜在前）
         let now = Date.now

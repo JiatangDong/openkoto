@@ -1,4 +1,5 @@
 import CloudKit
+import CryptoKit
 import Foundation
 import OKModels
 
@@ -13,6 +14,40 @@ public enum CloudRecordType: String, Sendable, CaseIterable {
     case article = "Article"
     case segment = "Segment"
     case reviewEvent = "ReviewEvent"
+    // 书籍与媒体：只同步**文本与元数据**，EPUB / 视频文件本身不上云。
+    //
+    // 归属关系（`bookChapter` / `mediaPart`）刻意做成**独立记录类型**而不是塞进
+    // Article 的 payload：改 payload 结构的话，装着旧版的设备解不开会静默跳过
+    // 所有文章。独立类型天生向前兼容 —— 旧版 `parse(recordName:)` 遇到未知类型
+    // 返回 nil，直接忽略。
+    case book = "Book"
+    case bookChapter = "BookChapter"
+    case bookMark = "BookMark"
+    case media = "Media"
+    case mediaPart = "MediaPart"
+
+    /// 合并顺序：被引用的先落地。
+    ///
+    /// CloudKit 一批记录回来时是**没有顺序保证**的，而它们之间有真外键：
+    /// `favorite_vocabulary.source_article_id → article.id`、
+    /// `segment.article_id → article.id`、`book_chapter` 两头（article + book）、
+    /// `book_mark.book_id`、词包成员两头。被引用者排前面，绝大多数引用在同一批里
+    /// 就能接上。跨批次到达的靠 `pending_cloud_payload` 停放重试（见 migration v10）。
+    var mergeOrder: Int {
+        switch self {
+        case .book: return 0
+        case .media: return 1
+        case .article: return 2
+        case .bookChapter: return 3
+        case .mediaPart: return 4
+        case .segment: return 5
+        case .wordPack: return 6
+        case .vocabulary: return 7
+        case .wordPackMembership: return 8
+        case .bookMark: return 9
+        case .reviewEvent: return 10
+        }
+    }
 }
 
 /// 领域模型 ↔ `CKRecord` 的编解码。
@@ -82,6 +117,61 @@ public enum CloudRecord {
             record[payloadAssetKey] = CKAsset(fileURL: url)
             record[payloadKey] = nil
         }
+    }
+
+    // MARK: - 系统字段（change tag）
+
+    /// 把记录的**系统字段**（recordID / recordType / change tag / 时间戳）序列化存起来。
+    ///
+    /// CloudKit 的保存是 compare-and-swap：请求里必须带上"我上次见到的 change tag"。
+    /// 每次都现造一条空 `CKRecord` 等于说"这是新建的"，服务端一看已经有了，
+    /// 就回 `serverRecordChanged` —— 于是**任何一条已在云上的记录都推不上去**。
+    /// 用户看到的是 `partialFailure` + 一串 `serverRecordChanged`，
+    /// 而错误信息里完全看不出缺的是 change tag。
+    ///
+    /// 只存系统字段、不存业务字段：payload 每次都从本地库现编，
+    /// 避免同一份数据在两个地方各存一份、然后慢慢对不上。
+    public static func encodeSystemFields(_ record: CKRecord) -> Data {
+        let coder = NSKeyedArchiver(requiringSecureCoding: true)
+        record.encodeSystemFields(with: coder)
+        coder.finishEncoding()
+        return coder.encodedData
+    }
+
+    /// 还原出一条只有系统字段的 `CKRecord`，业务字段留空等着现填。
+    ///
+    /// 解不开返回 nil（换过 CloudKit 版本、数据损坏）。调用方退回现造新记录：
+    /// 那会走一次 `serverRecordChanged`，但下一轮就能靠服务端回传的记录自愈。
+    public static func decodeSystemFields(_ data: Data) -> CKRecord? {
+        guard let coder = try? NSKeyedUnarchiver(forReadingFrom: data) else { return nil }
+        coder.requiresSecureCoding = true
+        defer { coder.finishDecoding() }
+        return CKRecord(coder: coder)
+    }
+
+    /// payload 的内容指纹，用来判断"这条跟云上那份一模一样，不用再推了"。
+    public static func hash(_ payload: Data) -> String {
+        SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// 从待推候选里滤掉内容与云端完全一致的，按 recordName 索引返回真正要推的。
+    ///
+    /// 两处回声都靠它掐掉：
+    /// 1. 从云端拉回来的记录一落库，`updated_at` 就越过了水位线，下一轮扫描会原样推回去；
+    /// 2. 水位线故意向前重叠 5 秒（见 `watermarkOverlap`），刚推成功的最后几条每轮都会重来。
+    ///
+    /// 有了 change tag 之后重推本身不会再报错，但它是纯粹的浪费 ——
+    /// 而且每推一次就把 change tag 顶新一次，等于替其它设备制造冲突。
+    public static func changedPayloads(
+        _ payloads: [CloudPayload], knownHashes: [String: String]
+    ) -> [String: CloudPayload] {
+        var result: [String: CloudPayload] = [:]
+        for payload in payloads {
+            let name = recordName(payload.type, payload.id)
+            if let known = knownHashes[name], known == hash(payload.data) { continue }
+            result[name] = payload
+        }
+        return result
     }
 
     /// 读回 payload，内联与 asset 两种形态都认。
