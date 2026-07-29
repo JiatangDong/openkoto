@@ -11,6 +11,7 @@ pub mod pdf_sidecar;
 pub mod storage;
 mod subtitle_extraction;
 pub mod subtitle_import;
+pub mod transfer_export;
 pub mod types;
 mod video_server;
 mod youtube;
@@ -48,6 +49,8 @@ pub fn run() {
             commands::update_article_segment,
             commands::delete_article_cmd,
             commands::fetch_url_content,
+            commands::clean_web_content_cmd,
+            commands::export_transfer_bundle_cmd,
             commands::import_web_material_cmd,
             commands::article_get_overview_cmd,
             commands::article_read_window_cmd,

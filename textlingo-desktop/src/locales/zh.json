@@ -573,14 +573,36 @@
     "titleLabel": "标题",
     "titlePlaceholder": "留空则使用抓取标题",
     "contentLabel": "正文预览（可编辑）",
+    "contentLabelRaw": "原始抓取结果（可编辑）",
     "contentPlaceholder": "抓取结果将显示在这里，可手动修改后再导入。",
     "wordCount": "字数：{{count}}",
     "import": "确认导入",
     "importing": "导入中...",
+    "modes": {
+      "classic": "经典模式",
+      "smart": "智能模式",
+      "classicHint": "按固定规则提取正文，速度快、不消耗额度，但可能带进导航、推荐位等无关内容。",
+      "smartHint": "在经典模式基础上再让 AI 过一遍，删掉导航、广告、推荐位、评论等无关段落，正文原文不会被改写。",
+      "smartUnavailable": "尚未配置可用的 AI 模型，智能模式将退回经典结果。请先在设置中添加模型。"
+    },
+    "clean": {
+      "running": "AI 正在清洗正文...",
+      "progress": "AI 正在清洗正文（{{done}}/{{total}}）...",
+      "summary": "已移除 {{lines}} 段无关内容，约 {{chars}} 字",
+      "nothingRemoved": "AI 检查完毕，未发现无关内容",
+      "partial": "部分内容清洗失败，已按原文保留，可点击重新清洗。",
+      "showRaw": "查看原始抓取结果",
+      "showCleaned": "查看清洗结果",
+      "retry": "重新清洗"
+    },
     "errors": {
       "urlRequired": "请输入网页链接",
       "urlInvalid": "链接必须以 http:// 或 https:// 开头",
-      "contentTooShort": "正文内容过短，请检查链接或手动补充后再导入"
+      "contentTooShort": "正文内容过短，请检查链接或手动补充后再导入",
+      "cleanNoContent": "没有可清洗的正文内容",
+      "cleanTooShort": "智能清洗后正文过短，已保留原始抓取结果，建议改用经典模式",
+      "cleanFailed": "智能清洗失败，已保留原始抓取结果",
+      "cleanGeneric": "智能清洗失败，已保留原始抓取结果：{{message}}"
     }
   },
   "youtubeImport": {
@@ -849,5 +871,7 @@
     "exportRequiresTimedSegments": "需要带时间轴的字幕片段才能导出。",
     "exportCompleted": "导出完成",
     "exportFailed": "导出失败"
-  }
+  },
+  "favorites.exportToPhone": "导出到手机",
+  "favorites.exportTransferSuccess": "已导出：生词 {{vocabulary}} · 文章 {{articles}} · 复习记录 {{reviews}}（跳过 {{skipped}}）。用 AirDrop 或任意方式发到手机，在 OpenKoto 的「设置 → 数据 → 从文件导入」里打开。"
 }

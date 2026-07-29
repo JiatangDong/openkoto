@@ -563,14 +563,36 @@
     "titleLabel": "タイトル",
     "titlePlaceholder": "空欄の場合は抽出タイトルを使用",
     "contentLabel": "本文プレビュー（編集可）",
+    "contentLabelRaw": "抽出結果の原文（編集可）",
     "contentPlaceholder": "抽出された本文が表示されます。取り込み前に編集できます。",
     "wordCount": "文字数: {{count}}",
     "import": "インポート確定",
     "importing": "インポート中...",
+    "modes": {
+      "classic": "クラシック",
+      "smart": "スマート",
+      "classicHint": "固定ルールで本文を抽出します。高速で無料ですが、ナビゲーションや広告、関連記事が混ざることがあります。",
+      "smartHint": "クラシックの結果をAIで再チェックし、ナビゲーション・広告・関連記事・コメントなどを削除します。本文自体は書き換えません。",
+      "smartUnavailable": "利用可能なAIモデルが未設定のため、スマートモードはクラシックの結果に戻ります。設定でモデルを追加してください。"
+    },
+    "clean": {
+      "running": "AIが本文をクリーニング中...",
+      "progress": "AIが本文をクリーニング中（{{done}}/{{total}}）...",
+      "summary": "無関係な内容を {{lines}} ブロック（約 {{chars}} 文字）削除しました",
+      "nothingRemoved": "AIのチェックが完了しました。無関係な内容はありません",
+      "partial": "一部のクリーニングに失敗し、原文のまま残しました。再実行できます。",
+      "showRaw": "抽出結果の原文を表示",
+      "showCleaned": "クリーニング結果を表示",
+      "retry": "再クリーニング"
+    },
     "errors": {
       "urlRequired": "URLを入力してください",
       "urlInvalid": "URLは http:// または https:// で始まる必要があります",
-      "contentTooShort": "本文が短すぎます。URLを確認するか本文を編集してください。"
+      "contentTooShort": "本文が短すぎます。URLを確認するか本文を編集してください。",
+      "cleanNoContent": "クリーニングできる本文がありません。",
+      "cleanTooShort": "クリーニング後の本文が短すぎるため、抽出結果の原文を保持しました。クラシックモードをお試しください。",
+      "cleanFailed": "スマートクリーニングに失敗したため、抽出結果の原文を保持しました。",
+      "cleanGeneric": "スマートクリーニングに失敗したため、抽出結果の原文を保持しました: {{message}}"
     }
   },
   "youtubeImport": {
@@ -838,5 +860,7 @@
     "exportRequiresTimedSegments": "書き出しにはタイムコード付き字幕が必要です。",
     "exportCompleted": "書き出し完了",
     "exportFailed": "書き出し失敗"
-  }
+  },
+  "favorites.exportToPhone": "スマホへ書き出す",
+  "favorites.exportTransferSuccess": "単語 {{vocabulary}} 件・記事 {{articles}} 件・復習記録 {{reviews}} 件を書き出しました（{{skipped}} 件スキップ）。AirDrop などでスマホに送り、OpenKoto の「設定 → データ → ファイルから読み込む」で開いてください。"
 }

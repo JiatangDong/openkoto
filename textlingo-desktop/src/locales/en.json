@@ -568,14 +568,36 @@
     "titleLabel": "Title",
     "titlePlaceholder": "Leave empty to use extracted title",
     "contentLabel": "Content Preview (Editable)",
+    "contentLabelRaw": "Raw Extraction (Editable)",
     "contentPlaceholder": "Extracted content appears here. You can edit it before import.",
     "wordCount": "Characters: {{count}}",
     "import": "Confirm Import",
     "importing": "Importing...",
+    "modes": {
+      "classic": "Classic",
+      "smart": "Smart",
+      "classicHint": "Rule-based extraction. Fast and free, but navigation, ads and recommendation blocks may slip through.",
+      "smartHint": "Runs the classic result through AI to drop navigation, ads, recommendations and comments. The article text itself is never rewritten.",
+      "smartUnavailable": "No AI model is configured, so smart mode falls back to the classic result. Add a model in Settings first."
+    },
+    "clean": {
+      "running": "AI is cleaning the content...",
+      "progress": "AI is cleaning the content ({{done}}/{{total}})...",
+      "summary": "Removed {{lines}} unrelated blocks (~{{chars}} characters)",
+      "nothingRemoved": "AI found nothing unrelated to remove",
+      "partial": "Part of the content could not be cleaned and was kept as-is. You can retry.",
+      "showRaw": "Show raw extraction",
+      "showCleaned": "Show cleaned result",
+      "retry": "Clean again"
+    },
     "errors": {
       "urlRequired": "Please enter a URL",
       "urlInvalid": "URL must start with http:// or https://",
-      "contentTooShort": "Content is too short. Check the URL or edit content before import."
+      "contentTooShort": "Content is too short. Check the URL or edit content before import.",
+      "cleanNoContent": "There is no content to clean.",
+      "cleanTooShort": "Almost nothing was left after cleaning, so the raw extraction was kept. Try classic mode instead.",
+      "cleanFailed": "Smart cleaning failed. The raw extraction was kept.",
+      "cleanGeneric": "Smart cleaning failed, the raw extraction was kept: {{message}}"
     }
   },
   "youtubeImport": {
@@ -844,5 +866,7 @@
     "exportRequiresTimedSegments": "Timed subtitle segments are required before exporting.",
     "exportCompleted": "Export completed",
     "exportFailed": "Export failed"
-  }
+  },
+  "favorites.exportToPhone": "Export to phone",
+  "favorites.exportTransferSuccess": "Exported {{vocabulary}} words, {{articles}} articles, {{reviews}} review records ({{skipped}} skipped). Send it to your phone however you like, then open it from Settings → Data → Import in OpenKoto."
 }

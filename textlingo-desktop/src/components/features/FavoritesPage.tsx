@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Button } from "../ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
-import { ArrowLeft, BookOpen, Flame, Loader2, Plus, Search, SpellCheck, Upload } from "lucide-react";
+import { ArrowLeft, BookOpen, Flame, Loader2, Plus, Search, Smartphone, SpellCheck, Upload } from "lucide-react";
 import type { Article, FavoriteGrammar, FavoriteVocabulary, ReviewStats, WordPack } from "../../types";
 import { buildAnkiTsv } from "../../lib/ankiExport";
 import { EmptyState, GrammarCard, VocabularyCard } from "./FavoritesCards";
@@ -29,6 +29,19 @@ interface FavoritesPageProps {
 interface ExportWordPackResult {
   file_name: string;
   json_content: string;
+}
+
+/// 传输包（.okdata）的导出结果。字段名保持 Rust 侧的 snake_case
+/// （Tauri 不转换返回值的键名），与上面的 ExportWordPackResult 一致。
+interface ExportTransferBundleResult {
+  file_name: string;
+  json_content: string;
+  vocabulary: number;
+  packs: number;
+  articles: number;
+  segments: number;
+  review_events: number;
+  skipped: number;
 }
 
 interface ImportWordPackResult {
@@ -319,6 +332,34 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
     }
   };
 
+  /// 导出「传输包」（.okdata）：带稳定 id 与完整 FSRS 状态，供 iPhone / iPad / Mac 导入。
+  ///
+  /// 与上面的「单词包」（.okpack.json）是两回事：那个是分享格式，不带 id 也不带复习进度，
+  /// 拿它搬自己的数据会把进度清零。这个才是搬家用的，而且可以反复导入不产生重复。
+  const handleExportTransferBundle = async () => {
+    try {
+      const result = await invoke<ExportTransferBundleResult>("export_transfer_bundle_cmd", {
+        includeContent: true,
+      });
+      const filePath = await save({
+        defaultPath: result.file_name,
+        filters: [{ name: "OpenKoto Data", extensions: ["okdata"] }],
+      });
+      if (!filePath) return;
+      await invoke("write_text_file", { path: filePath, content: result.json_content });
+      alert(
+        t("favorites.exportTransferSuccess", {
+          vocabulary: result.vocabulary,
+          articles: result.articles,
+          reviews: result.review_events,
+          skipped: result.skipped,
+        }),
+      );
+    } catch (error) {
+      console.error("Failed to export transfer bundle:", error);
+    }
+  };
+
   const handleExportWordPack = async (packId: string) => {
     try {
       const result = await invoke<ExportWordPackResult>("export_word_pack_cmd", {
@@ -461,6 +502,15 @@ export function FavoritesPage({ onBack, onSelectArticle }: FavoritesPageProps) {
                   <Button variant="outline" size="sm" className="gap-2" onClick={() => fileInputRef.current?.click()}>
                     <Upload size={16} />
                     {t("favorites.importWordPack", "导入单词包")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => void handleExportTransferBundle()}
+                  >
+                    <Smartphone size={16} />
+                    {t("favorites.exportToPhone", "导出到手机")}
                   </Button>
                 </div>
               </div>

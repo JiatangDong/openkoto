@@ -1067,6 +1067,111 @@ Ensure all explanations, meanings, and descriptive text are written in {0}."#,
 
         repaired
     }
+
+    /// 网页素材智能清洗：让模型指出哪些行属于网页噪音（导航、广告、推荐位、评论、页脚……）。
+    ///
+    /// 模型只返回行号，不返回改写后的正文。学习素材必须和原文逐字一致，
+    /// 让模型整篇重写既费 token，又有漏字/改写/幻觉的风险。
+    ///
+    /// `lines` 是 (行号, 预览文本) 列表，预览文本由调用方截断；
+    /// 返回 (需要删除的行号, 模型给出的干净标题)。
+    pub async fn detect_web_noise_lines(
+        &self,
+        lines: &[(usize, String)],
+        want_title: bool,
+    ) -> Result<(Vec<usize>, Option<String>), String> {
+        if lines.is_empty() {
+            return Ok((Vec::new(), None));
+        }
+
+        let numbered = lines
+            .iter()
+            .map(|(idx, text)| format!("[{}] {}", idx, text))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let schema = if want_title {
+            r#"{"drop": [2, 5, 6], "title": "the clean article title, or an empty string if unclear"}"#
+        } else {
+            r#"{"drop": [2, 5, 6]}"#
+        };
+
+        let system_prompt = format!(
+            r#"You are cleaning a web page that was converted to plain text, so it can be used as language-learning material.
+
+You will receive numbered lines. Decide which lines are NOT part of the main article body.
+
+DROP a line when it is:
+- site navigation, menus, breadcrumbs, buttons, search boxes, login/subscribe prompts
+- advertisements, promotional blurbs, paywall or membership pitches
+- related/recommended article lists, "hot posts", tag clouds, category lists, pagination
+- share widgets, like/favorite/view counters, comment threads, comment forms
+- author bio boxes, editor signatures, copyright and legal footers, contact info, ICP/registration numbers
+- cookie or privacy banners, app-download prompts, "click here", "read more", "back to top"
+- standalone metadata that is not part of the text: bare timestamps, view counts, image credits, source attributions
+
+KEEP a line when it is:
+- the article title, headings and subheadings
+- any paragraph, sentence, dialogue or list item of the main body
+- lyrics, poems, quotes, or code that belong to the article
+- anything you are not sure about — when in doubt, KEEP it
+
+Rules:
+- Judge each line only by whether it belongs to the article body, never by whether it is interesting or well written.
+- Never rewrite, translate, summarize or reorder anything. You only report line numbers.
+- Long lines are truncated for review and marked with "(len=N)", where N is the real character count. A long line is almost always body text.
+- Return ONLY raw JSON, with no markdown fences and no explanation:
+{schema}"#,
+            schema = schema
+        );
+
+        let user_prompt = format!("Lines to review:\n{}", numbered);
+
+        let raw = if self.is_google_provider() {
+            let contents = vec![json!({
+                "role": "user",
+                "parts": [{"text": format!("{}\n\n{}", system_prompt, user_prompt)}]
+            })];
+            self.make_google_request(contents, Some(0.0)).await?
+        } else if self.is_anthropic_provider() {
+            let messages = vec![json!({"role": "user", "content": user_prompt})];
+            self.make_anthropic_request(Some(system_prompt), messages, Some(0.0))
+                .await?
+        } else {
+            let messages = vec![
+                json!({"role": "system", "content": system_prompt}),
+                json!({"role": "user", "content": user_prompt}),
+            ];
+            self.make_request(messages, Some(0.0), false).await?
+        };
+
+        let json_str = Self::extract_json(&raw);
+        let parsed: Value = serde_json::from_str(&json_str)
+            .or_else(|_| serde_json::from_str(&Self::repair_json(&json_str)))
+            .map_err(|e| format!("Failed to parse cleaning response: {} - raw: {}", e, raw))?;
+
+        let drop = parsed
+            .get("drop")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| {
+                        v.as_u64()
+                            .or_else(|| v.as_str().and_then(|s| s.trim().parse::<u64>().ok()))
+                    })
+                    .map(|n| n as usize)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let title = parsed
+            .get("title")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        Ok((drop, title))
+    }
 }
 
 // Simple in-memory cache for AI service instances

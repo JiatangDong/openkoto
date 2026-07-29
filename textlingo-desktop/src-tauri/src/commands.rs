@@ -1814,6 +1814,210 @@ pub async fn fetch_url_content(url: String) -> Result<FetchedContent, String> {
     Ok(FetchedContent { title, content })
 }
 
+// ---------------- 网页素材智能清洗 ----------------
+//
+// 经典模式（fetch_url_content）走 readability + 兜底选择器，规则固定，
+// 遇到导航、推荐位、评论区多的站点仍会带进一堆无关文本。
+// 智能模式在经典模式的结果上再过一遍模型：模型只判定"这一行是不是正文"，
+// 返回要删掉的行号，正文本身一个字都不经过模型改写。
+
+/// 送审时每行保留的字符数。噪音行通常很短，正文段落很长，
+/// 截断后判断几乎不受影响，token 却能省一大截。
+const WEB_CLEAN_PREVIEW_CHARS: usize = 120;
+/// 单批送审的预览文本字符预算
+const WEB_CLEAN_BATCH_CHARS: usize = 4000;
+/// 单批送审的最大行数
+const WEB_CLEAN_BATCH_LINES: usize = 80;
+/// 并发请求数，兼顾速度和第三方接口的限流
+const WEB_CLEAN_CONCURRENCY: usize = 3;
+
+#[derive(serde::Serialize)]
+pub struct CleanedWebContent {
+    pub title: String,
+    pub content: String,
+    pub removed_lines: usize,
+    pub removed_chars: usize,
+    pub kept_lines: usize,
+    /// 部分批次失败时为 true，表示只清洗了一部分
+    pub partial: bool,
+}
+
+/// 行预览：截断长行并附上真实长度，让模型知道"这是一大段正文"
+fn build_line_preview(line: &str) -> String {
+    let trimmed = line.trim();
+    let len = trimmed.chars().count();
+    if len <= WEB_CLEAN_PREVIEW_CHARS {
+        return trimmed.to_string();
+    }
+    let head: String = trimmed.chars().take(WEB_CLEAN_PREVIEW_CHARS).collect();
+    format!("{}… (len={})", head, len)
+}
+
+/// 拼回正文：连续空行压成一个，避免整段被删后留下大片空白
+fn collapse_blank_lines(lines: &[&str]) -> String {
+    let mut out: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut blank_run = 0usize;
+    for &line in lines {
+        if line.trim().is_empty() {
+            blank_run += 1;
+            if blank_run > 1 {
+                continue;
+            }
+        } else {
+            blank_run = 0;
+        }
+        out.push(line);
+    }
+    out.join("\n").trim().to_string()
+}
+
+/// 把待审行按字符预算切批
+fn split_clean_batches(candidates: Vec<(usize, String)>) -> Vec<Vec<(usize, String)>> {
+    let mut batches: Vec<Vec<(usize, String)>> = Vec::new();
+    let mut current: Vec<(usize, String)> = Vec::new();
+    let mut current_chars = 0usize;
+
+    for item in candidates {
+        // +8 是行号前缀 "[123] " 和换行的粗略开销
+        let cost = item.1.chars().count() + 8;
+        if !current.is_empty()
+            && (current.len() >= WEB_CLEAN_BATCH_LINES
+                || current_chars + cost > WEB_CLEAN_BATCH_CHARS)
+        {
+            batches.push(std::mem::take(&mut current));
+            current_chars = 0;
+        }
+        current_chars += cost;
+        current.push(item);
+    }
+
+    if !current.is_empty() {
+        batches.push(current);
+    }
+
+    batches
+}
+
+/// 用模型清洗抓取到的网页正文，只删除无关行，不改写原文。
+/// `event_id` 非空时会向 `web-clean://{event_id}` 推送 `{done, total}` 进度。
+#[tauri::command]
+pub async fn clean_web_content_cmd(
+    app_handle: AppHandle,
+    state: AppState<'_>,
+    title: Option<String>,
+    content: String,
+    event_id: Option<String>,
+) -> Result<CleanedWebContent, String> {
+    use futures::StreamExt;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let ai_service = get_ai_service(&state).await?;
+
+    let lines: Vec<&str> = content.lines().collect();
+    // 空行不送审，原样保留用来维持段落结构
+    let candidates: Vec<(usize, String)> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| !line.trim().is_empty())
+        .map(|(idx, line)| (idx, build_line_preview(line)))
+        .collect();
+
+    if candidates.is_empty() {
+        return Err("WEB_CLEAN_NO_CONTENT".to_string());
+    }
+
+    let batches = split_clean_batches(candidates);
+    let total_batches = batches.len();
+    let completed = AtomicUsize::new(0);
+    let progress_event = event_id.map(|id| format!("web-clean://{}", id));
+
+    let results: Vec<Result<(Vec<usize>, Option<String>), String>> =
+        futures::stream::iter(batches.into_iter().enumerate().map(|(index, batch)| {
+            let ai_service = &ai_service;
+            let completed = &completed;
+            let progress_event = progress_event.as_ref();
+            let app_handle = app_handle.clone();
+            async move {
+                // 只让第一批顺带给出干净标题，避免每批都重复要一次
+                let result = ai_service.detect_web_noise_lines(&batch, index == 0).await;
+                let done = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                if let Some(event) = progress_event {
+                    let _ = app_handle
+                        .emit(event, serde_json::json!({ "done": done, "total": total_batches }));
+                }
+                result
+            }
+        }))
+        .buffered(WEB_CLEAN_CONCURRENCY)
+        .collect()
+        .await;
+
+    let mut drop_set: HashSet<usize> = HashSet::new();
+    let mut suggested_title: Option<String> = None;
+    let mut failures = 0usize;
+    let mut last_error: Option<String> = None;
+
+    for result in results {
+        match result {
+            Ok((drop, batch_title)) => {
+                if suggested_title.is_none() {
+                    suggested_title = batch_title;
+                }
+                drop_set.extend(drop);
+            }
+            Err(err) => {
+                eprintln!("[WebClean] 批次清洗失败: {}", err);
+                failures += 1;
+                last_error = Some(err);
+            }
+        }
+    }
+
+    // 全军覆没多半是模型没配好或网络不通，报错让前端保留原文
+    if failures == total_batches {
+        return Err(last_error.unwrap_or_else(|| "WEB_CLEAN_FAILED".to_string()));
+    }
+
+    let mut kept: Vec<&str> = Vec::with_capacity(lines.len());
+    let mut removed_lines = 0usize;
+    let mut removed_chars = 0usize;
+    let mut kept_lines = 0usize;
+
+    for (idx, line) in lines.iter().enumerate() {
+        if drop_set.contains(&idx) {
+            removed_lines += 1;
+            removed_chars += line.trim().chars().count();
+            continue;
+        }
+        if !line.trim().is_empty() {
+            kept_lines += 1;
+        }
+        kept.push(line);
+    }
+
+    let cleaned = collapse_blank_lines(&kept);
+    if cleaned.trim().chars().count() < 10 {
+        return Err("WEB_CLEAN_TOO_SHORT".to_string());
+    }
+
+    let final_title = suggested_title
+        .or_else(|| {
+            title
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+        })
+        .unwrap_or_default();
+
+    Ok(CleanedWebContent {
+        title: final_title,
+        content: cleaned,
+        removed_lines,
+        removed_chars,
+        kept_lines,
+        partial: failures > 0,
+    })
+}
+
 /// Fallback extraction using CSS selectors for known difficult sites
 fn try_fallback_extraction(html: &str) -> Option<String> {
     use scraper::{Html, Selector};
@@ -3779,4 +3983,179 @@ mod word_pack_import_tests {
         assert_eq!(parsed.pack.name, "BOM Pack");
         assert_eq!(parsed.entries.len(), 1);
     }
+
+    #[test]
+    fn line_preview_keeps_short_lines_and_truncates_long_ones() {
+        assert_eq!(build_line_preview("  首页 登录 注册  "), "首页 登录 注册");
+
+        let long_line = "あ".repeat(WEB_CLEAN_PREVIEW_CHARS + 50);
+        let preview = build_line_preview(&long_line);
+        // 截断后必须带上真实长度，模型才知道这是一大段正文
+        assert!(preview.ends_with(&format!("(len={})", WEB_CLEAN_PREVIEW_CHARS + 50)));
+        assert!(preview.chars().count() < long_line.chars().count());
+    }
+
+    #[test]
+    fn collapse_blank_lines_squeezes_gaps_left_by_removed_blocks() {
+        let lines = vec!["", "", "第一段", "", "", "", "第二段", "", ""];
+        assert_eq!(collapse_blank_lines(&lines), "第一段\n\n第二段");
+    }
+
+    #[test]
+    fn batches_respect_the_line_and_char_budget() {
+        let candidates: Vec<(usize, String)> = (0..WEB_CLEAN_BATCH_LINES * 2 + 5)
+            .map(|i| (i, "短行".to_string()))
+            .collect();
+        let batches = split_clean_batches(candidates);
+        assert_eq!(batches.len(), 3);
+        assert!(batches.iter().all(|b| b.len() <= WEB_CLEAN_BATCH_LINES));
+
+        // 长行按字符预算切，行数没到上限也要分批，一批不会撑爆上下文
+        let long_line = "x".repeat(WEB_CLEAN_PREVIEW_CHARS);
+        let candidates: Vec<(usize, String)> = (0..WEB_CLEAN_BATCH_LINES / 2)
+            .map(|i| (i, long_line.clone()))
+            .collect();
+        let batches = split_clean_batches(candidates);
+        assert!(batches.len() > 1);
+        assert!(batches.iter().all(|b| b.len() < WEB_CLEAN_BATCH_LINES));
+        for batch in &batches {
+            let chars: usize = batch.iter().map(|(_, t)| t.chars().count() + 8).sum();
+            assert!(chars <= WEB_CLEAN_BATCH_CHARS + WEB_CLEAN_PREVIEW_CHARS + 8);
+        }
+    }
+
+    #[test]
+    fn batching_preserves_every_line_index_in_order() {
+        let candidates: Vec<(usize, String)> = (0..200).map(|i| (i, format!("line {}", i))).collect();
+        let flattened: Vec<usize> = split_clean_batches(candidates)
+            .into_iter()
+            .flatten()
+            .map(|(idx, _)| idx)
+            .collect();
+        assert_eq!(flattened, (0..200).collect::<Vec<_>>());
+    }
+}
+
+// ============================================================================
+// 传输包导出（跨设备同步 P2）
+// ============================================================================
+
+/// 导出结果。文件内容交给前端去写盘（复用既有的保存对话框），
+/// 命令本身只负责把库读成 JSON。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportTransferBundleResult {
+    pub file_name: String,
+    pub json_content: String,
+    pub vocabulary: usize,
+    pub packs: usize,
+    pub articles: usize,
+    pub segments: usize,
+    pub review_events: usize,
+    /// 因 id 非 UUID、时间戳无法解析等原因被丢掉的条数。
+    /// **必须报出来**：静默丢数据是最糟的失败方式。
+    pub skipped: usize,
+}
+
+/// 把桌面端的词库/素材导出成 `.okdata` 传输包，供 iOS / iPadOS / macOS 导入。
+///
+/// 桌面版是另一个 App，进不了 iOS 那边的 CloudKit 容器，所以这条通道是**单向**的：
+/// 桌面加工素材 → 文件 → Apple 生态学习。Apple 三平台之间由 CloudKit 自动同步。
+///
+/// - `include_content`: 是否带上文章正文与精讲。词库通常几百 KB，
+///   而全部正文＋精讲可能几十 MB。
+#[tauri::command]
+pub async fn export_transfer_bundle_cmd(
+    app_handle: AppHandle,
+    include_content: bool,
+) -> Result<ExportTransferBundleResult, String> {
+    use crate::transfer_export::{
+        build_article, build_pack, build_review_event, build_vocabulary, export_file_name,
+        TransferBundle, TransferSkipped, TRANSFER_FORMAT_ID, TRANSFER_SCHEMA_VERSION,
+    };
+
+    ensure_favorites_dirs(&app_handle)?;
+    let mut skipped = TransferSkipped::default();
+
+    let favorites = load_all_favorite_vocabularies_internal(&app_handle)?;
+    let mut vocabulary = Vec::with_capacity(favorites.len());
+    for favorite in &favorites {
+        let modified = crate::storage::favorite_vocabulary_modified_at(&app_handle, &favorite.id);
+        match build_vocabulary(favorite, modified) {
+            Some(item) => vocabulary.push(item),
+            None => skipped.vocabulary += 1,
+        }
+    }
+
+    let mut packs = Vec::new();
+    for pack in load_all_word_packs(&app_handle)? {
+        match build_pack(&pack) {
+            Some(item) => packs.push(item),
+            // 系统包是刻意不导出的，不计入"被丢掉"
+            None if pack.is_system => {}
+            None => skipped.packs += 1,
+        }
+    }
+
+    let mut articles = Vec::new();
+    let mut segments = Vec::new();
+    if include_content {
+        for id in list_articles(&app_handle)? {
+            let Ok(json) = load_article(&app_handle, &id) else {
+                skipped.articles += 1;
+                continue;
+            };
+            let Ok(article) = serde_json::from_str::<Article>(&json) else {
+                skipped.articles += 1;
+                continue;
+            };
+            let total_segments = article.segments.len();
+            match build_article(&article) {
+                Some((item, mut its_segments)) => {
+                    skipped.segments += total_segments.saturating_sub(its_segments.len());
+                    articles.push(item);
+                    segments.append(&mut its_segments);
+                }
+                None => {
+                    skipped.articles += 1;
+                    skipped.segments += total_segments;
+                }
+            }
+        }
+    }
+
+    let mut review_events = Vec::new();
+    for event in crate::storage::list_review_events(&app_handle)? {
+        match build_review_event(&event) {
+            Some(item) => review_events.push(item),
+            None => skipped.review_events += 1,
+        }
+    }
+
+    let exported_at = chrono::Utc::now();
+    let bundle = TransferBundle {
+        format: TRANSFER_FORMAT_ID.to_string(),
+        schema_version: TRANSFER_SCHEMA_VERSION,
+        exported_at: exported_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        source_app: "textlingo-desktop".to_string(),
+        vocabulary,
+        packs,
+        articles,
+        segments,
+        review_events,
+        tombstones: Vec::new(),
+    };
+
+    let json_content = serde_json::to_string_pretty(&bundle)
+        .map_err(|e| format!("Failed to serialize transfer bundle: {}", e))?;
+
+    Ok(ExportTransferBundleResult {
+        file_name: export_file_name(&exported_at),
+        json_content,
+        vocabulary: bundle.vocabulary.len(),
+        packs: bundle.packs.len(),
+        articles: bundle.articles.len(),
+        segments: bundle.segments.len(),
+        review_events: bundle.review_events.len(),
+        skipped: skipped.total(),
+    })
 }

@@ -595,3 +595,18 @@ pub fn list_bookmarks_for_book(
 
     Ok(matching_ids)
 }
+
+/// 单条生词收藏文件的最后修改时间。
+///
+/// 桌面端的 `FavoriteVocabulary` **只有 `created_at`、没有 `updated_at`**，
+/// 而 iOS 的导入靠 `updatedAt` 判断"文件里的和本地哪个新"。缺了它，
+/// 用户在桌面改过的释义永远同步不过去（两边时间戳恒等，被判成无变化）。
+/// 一条收藏就是一个文件，mtime 恰好就是"这条记录最后一次被写"的真实时间。
+pub fn favorite_vocabulary_modified_at(
+    app_handle: &AppHandle,
+    id: &str,
+) -> Option<std::time::SystemTime> {
+    let data_dir = get_app_data_dir(app_handle).ok()?;
+    let path = data_dir.join(FAVORITES_VOCAB_DIR).join(id);
+    fs::metadata(path).ok()?.modified().ok()
+}
