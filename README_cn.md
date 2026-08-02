@@ -18,13 +18,15 @@
 
 🌐 **官网与文档**: [openkoto.com](https://www.openkoto.com/)
 
+> 🎉 **新消息**: **OpenKoto iOS 版已正式上架 App Store！** 在 iPhone / iPad 上阅读文章和电子书、配字幕精学音视频、用间隔重复复习生词。在 App Store 搜索 **「OpenKoto」** 即可下载。 <!-- TODO: 替换为 App Store 直达链接 -->
+
 > 📢 **提示**: 本项目原名 **TextLingo**，现已更名为 **OpenKoto**（Open + 言/こと，日语中"话语"的意思），以更好地体现我们开源阅读、翻译和语言学习的愿景。
 
 ## 什么是 OpenKoto？
 
 OpenKoto Desktop 是一款**开源的 AI 驱动语言学习应用**，让你可以通过任何感兴趣的内容进行沉浸式语言学习。它不仅是语言学习工具，还是一款**出色的阅读器和翻译工具**。与传统语言学习应用不同，OpenKoto 支持从**真实内容**中学习 — 歌词、新闻、博客或任何你感兴趣的文本。
 
-基于 **Tauri + React + Rust** 构建，本地运行，**快速、安全、保护隐私**。
+基于 **Tauri + React + Rust** 构建，本地运行，**快速、安全、保护隐私**。此外，**iOS 原生应用**（iPhone / iPad）也已上架 App Store。
 
 > 🎯 **适合人群**: 日语学习者、英语学习者、多语言爱好者，以及所有希望通过有趣内容学习语言的人！
 
@@ -45,10 +47,22 @@ OpenKoto Desktop 是一款**开源的 AI 驱动语言学习应用**，让你可�
 
 | 版本 | 说明 | 链接 |
 |------|------|------|
+| **iOS 版** | **新上线！** 📱 iPhone / iPad 原生应用 — 阅读、离线注音（振假名/拼音）、视频字幕、间隔重复复习，隐私优先 | App Store 搜索 **「OpenKoto」** <!-- TODO: 替换为 App Store 直达链接 --> |
 | **桌面版** | **推荐** 🖥️ 原生性能，本地数据，支持 Mac/Windows/Linux | [下载最新版本](https://github.com/hikariming/OpenKoto/releases) |
 | 网页版 | 在线使用，无需安装 | [https://openkoto.app](https://openkoto.app) |
 | 源代码 | 🆓 完全开源，Apache 2.0 许可证 | [GitHub 仓库](https://github.com/hikariming/OpenKoto) |
 
+
+## OpenKoto iOS 版 📱
+
+iOS 版把「用喜欢的内容学语言」带到了 iPhone / iPad 上，离线优先、隐私优先：
+
+- 📖 导入文章（粘贴、TXT、Markdown、网页）以及 **TXT / EPUB 电子书**，自动分章
+- 🎬 配 **SRT / VTT 字幕**精学音视频 — 字幕逐句跟随、单句循环、变速不变调、盲听跟读；无字幕时可在设备上直接生成（需 iOS 26）
+- 🈶 中日文正文显示**词级读音**（振假名 / 拼音），完全离线生成
+- 📝 生词本与词包，支持**间隔重复（SRS）复习**；全库全文搜索，点结果直达原句
+- 🤖 可选 **BYOK AI** 翻译与句子精讲 — API Key 保存在 iOS 钥匙串，学习数据留在设备本地
+- 🌐 支持简体中文、英语、日语界面；无需注册账号
 
 ## 核心特性
 

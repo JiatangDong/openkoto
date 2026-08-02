@@ -18,13 +18,15 @@
 
 🌐 **Official Website & Documentation**: [openkoto.com](https://www.openkoto.com/)
 
+> 🎉 **New**: The **OpenKoto iOS app is now live on the App Store!** Read articles and books, study videos with subtitles, and review vocabulary with spaced repetition — right on your iPhone or iPad. Search for **“OpenKoto”** on the App Store to download it. <!-- TODO: replace with direct App Store link -->
+
 > 📢 **Note**: This project was previously known as **TextLingo**. We've renamed it to **OpenKoto** (Open + 言/ことば, meaning "word" in Japanese) to better reflect our vision of open-source reading, translation, and language learning.
 
 ## What is OpenKoto?
 
 OpenKoto Desktop is an **open-source, AI-powered language learning application** that transforms any content you're interested in into an immersive learning experience. Beyond language learning, it also serves as a **powerful reader and translation tool**. Unlike traditional language learning apps, OpenKoto lets you learn from **real-world content** — song lyrics, news articles, blog posts, or any text that sparks your interest.
 
-Built with **Tauri + React + Rust**, it runs locally on your machine for **fast performance and complete privacy**.
+Built with **Tauri + React + Rust**, it runs locally on your machine for **fast performance and complete privacy**. A **native iOS app** for iPhone and iPad is also available on the App Store.
 
 > 🎯 **Perfect for**: Japanese learners, English learners, polyglots, and anyone who wants to learn languages through content they actually enjoy!
 
@@ -45,10 +47,22 @@ Built with **Tauri + React + Rust**, it runs locally on your machine for **fast 
 
 | Version | Description | Link |
 |---------|-------------|------|
+| **iOS** | **New!** 📱 Native app for iPhone & iPad — reading, on-device furigana/pinyin, video subtitles, SRS review, privacy-first | Search **“OpenKoto”** on the App Store <!-- TODO: replace with direct App Store link --> |
 | **Desktop** | **Recommended** 🖥️ Native performance, local data, Mac/Windows/Linux | [Download Latest Release](https://github.com/hikariming/OpenKoto/releases) |
 | Web | Convenient online access, no installation required | [https://openkoto.app](https://openkoto.app) |
 | Source Code | 🆓 Fully open source, Apache 2.0 License | [GitHub Repository](https://github.com/hikariming/OpenKoto) |
 
+
+## OpenKoto for iOS 📱
+
+The iOS app brings the same "learn from content you love" experience to iPhone and iPad — offline-first and privacy-focused:
+
+- 📖 Import articles (paste, TXT, Markdown, web) and **TXT / EPUB books** with automatic chapter splitting
+- 🎬 Study video & audio with **SRT / VTT subtitles** — sentence-by-sentence follow, single-sentence loop, pitch-preserving speed control, and blind-listening shadowing; generate subtitles on device (iOS 26)
+- 🈶 **Word-level readings** above Japanese and Chinese text (furigana / pinyin), generated entirely on device
+- 📝 Vocabulary packs with **spaced-repetition (SRS) review**, plus full-text search across everything you've imported
+- 🤖 Optional **BYOK AI** translation and sentence explanations — your API key stays in the iOS Keychain, learning data stays on your device
+- 🌐 UI in English, Simplified Chinese, and Japanese; no account required
 
 ## Core Features
 
