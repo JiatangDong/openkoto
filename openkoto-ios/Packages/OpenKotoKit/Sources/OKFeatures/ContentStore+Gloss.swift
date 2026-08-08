@@ -52,6 +52,9 @@ extension ContentStore {
         } catch is CancellationError {
             glossStates[key] = nil
             return nil
+        } catch let failure as AIRequestFailure {
+            glossStates[key] = .failed(failure.error)
+            return nil
         } catch let error as AIClientError {
             glossStates[key] = .failed(error)
             return nil

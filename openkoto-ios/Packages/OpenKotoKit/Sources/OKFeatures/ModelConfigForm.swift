@@ -196,6 +196,8 @@ struct ModelConfigFormView: View {
         do {
             try await appConfig.testConnection(draftConfig(), apiKey: effectiveKey())
             testState = .success
+        } catch let failure as AIRequestFailure {
+            testState = .failure(userMessage(for: failure.error))
         } catch let error as AIClientError {
             testState = .failure(userMessage(for: error))
         } catch {

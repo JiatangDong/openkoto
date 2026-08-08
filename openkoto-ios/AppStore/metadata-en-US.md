@@ -40,6 +40,13 @@ No account is required. Sample articles are included, so reading, vocabulary, an
 
 OpenKoto is free and open source.
 
+## What's new in 0.5.5
+
+• Improved compatibility with reasoning models including GPT‑5, the o-series, and Gemini 2.5 by adapting output-limit and temperature parameters automatically
+• Automatically retries once after temporary rate limits or dropped network connections, making batch explanations and translations more reliable
+• Batch jobs now retain the failure count and specific cause, retry only recoverable items, and no longer hide errors such as insufficient balance or authorization failures
+• Copy a redacted diagnostic report after an AI request fails to help identify provider, model, network, or configuration issues; API keys are never included
+
 ## What's new in 0.4.1
 
 • iCloud sync: words, review progress, word packs, articles and AI explanations now sync between your iPhone, iPad and Mac through your own iCloud account — we never see or store any of it. Off by default; turn it on in Settings → iCloud Sync. Book and video files stay on each device (a few GB would fill your iCloud), but their text, subtitles and explanations sync, so you can keep reading on another device

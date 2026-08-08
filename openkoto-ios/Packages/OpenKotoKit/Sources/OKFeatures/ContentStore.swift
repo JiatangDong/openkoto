@@ -67,6 +67,9 @@ public final class ContentStore {
     /// 逐句精讲失败原因（供 ExplanationSheet 展示 + 重试）。
     /// `internal(set)`：批量任务（ContentStore+Batch）要清掉重试项的旧错因。
     public internal(set) var generationErrors: [UUID: AIClientError] = [:]
+    /// 与 `generationErrors` 同键的失败现场快照，是「复制诊断信息」按钮的数据源。
+    /// 配置类错误（未配模型）没走到 transport，对应键为空。
+    public internal(set) var generationDiagnostics: [UUID: AIFailureDiagnostics] = [:]
     public private(set) var lastPersistenceFailure: String?
 
     /// iCloud 同步状态（见 ContentStore+Sync）。`internal(set)` 供该扩展写入。
@@ -1201,12 +1204,14 @@ public final class ContentStore {
 
         guard let provider = explanationProvider else {
             generationErrors[segmentID] = .notConfigured
+            generationDiagnostics[segmentID] = nil
             return false
         }
 
         let text = segments0[index0].text
         generatingSegmentIDs.insert(segmentID)
         generationErrors[segmentID] = nil
+        generationDiagnostics[segmentID] = nil
         defer { generatingSegmentIDs.remove(segmentID) }
 
         // 发请求之前先看库里有没有同一句原文已经精讲过的结果。
@@ -1219,6 +1224,10 @@ public final class ContentStore {
         let generated: GeneratedExplanation
         do {
             generated = try await provider(text)
+        } catch let failure as AIRequestFailure {
+            generationErrors[segmentID] = failure.error
+            generationDiagnostics[segmentID] = failure.diagnostics
+            return false
         } catch let error as AIClientError {
             generationErrors[segmentID] = error
             return false
@@ -1247,17 +1256,23 @@ public final class ContentStore {
 
         guard let provider = translationProvider else {
             generationErrors[segmentID] = .notConfigured
+            generationDiagnostics[segmentID] = nil
             return false
         }
 
         let text = segments0[index0].text
         generatingSegmentIDs.insert(segmentID)
         generationErrors[segmentID] = nil
+        generationDiagnostics[segmentID] = nil
         defer { generatingSegmentIDs.remove(segmentID) }
 
         let translation: String
         do {
             translation = try await provider(text)
+        } catch let failure as AIRequestFailure {
+            generationErrors[segmentID] = failure.error
+            generationDiagnostics[segmentID] = failure.diagnostics
+            return false
         } catch let error as AIClientError {
             generationErrors[segmentID] = error
             return false
@@ -1267,7 +1282,12 @@ public final class ContentStore {
             generationErrors[segmentID] = .malformedResponse(requestID: UUID())
             return false
         }
-        guard !translation.isEmpty else { return false }
+        // 空译文不是"良性跳过"而是失败——不记错因的话批量统计不算它，
+        // 用户看到的只是这句悄无声息地没了。
+        guard !translation.isEmpty else {
+            generationErrors[segmentID] = .malformedResponse(requestID: UUID())
+            return false
+        }
 
         guard var segments = segmentsByArticle[articleID],
               let index = segments.firstIndex(where: { $0.id == segmentID }),

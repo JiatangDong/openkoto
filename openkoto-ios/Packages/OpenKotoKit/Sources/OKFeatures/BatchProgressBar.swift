@@ -1,7 +1,9 @@
 #if os(iOS)
+import OKAIClient
 import OKDesignSystem
 import OKLocalization
 import SwiftUI
+import UIKit
 
 /// 批量任务的进度条：进行中显示进度与取消，跑完若有可重试的失败句则显示重试入口。
 ///
@@ -13,11 +15,18 @@ struct BatchProgressBar: View {
 
     let articleID: UUID
 
+    @State private var diagnosticsCopied = false
+
     var body: some View {
         if let state = store.batchByArticle[articleID] {
             running(state)
-        } else if store.retryableFailureCount(articleID: articleID) > 0 {
-            retryPrompt
+        } else if let failures = store.batchFailures(articleID: articleID),
+            !failures.segmentIDs.isEmpty
+        {
+            // 不可重试的失败（401、余额不足、解析失败……）也必须停留在这里——
+            // 旧实现只在"可重试 > 0"时显示，整批 401 全灭时横幅直接消失，
+            // 用户只能报告"全都失败了，什么提示都没有"。
+            failurePrompt(failures)
         }
     }
 
@@ -61,24 +70,70 @@ struct BatchProgressBar: View {
         .background(.bar)
     }
 
-    private var retryPrompt: some View {
-        let count = store.retryableFailureCount(articleID: articleID)
+    private func failurePrompt(_ failures: ContentStore.BatchFailures) -> some View {
+        let retryable = store.retryableFailureCount(articleID: articleID)
+        let firstFailure = store.firstBatchFailure(articleID: articleID)
         return HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.footnote)
                 .foregroundStyle(theme.destructive)
-            Text(L("reader.batch.failed\(count)"))
-                .font(.footnote)
-                .foregroundStyle(theme.foreground)
-            Spacer()
-            Button(L("reader.batch.retryFailed")) {
-                store.retryFailedInBatch(articleID: articleID)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L("reader.batch.failed\(failures.segmentIDs.count)"))
+                    .font(.footnote)
+                    .foregroundStyle(theme.foreground)
+                // 失败原因必须直接可见："余额不足"和"限流"用户要做的事完全不同。
+                if let (error, _) = firstFailure {
+                    Text(userMessage(for: error))
+                        .font(.caption)
+                        .foregroundStyle(theme.mutedForeground)
+                        .lineLimit(1)
+                }
             }
-            .font(.footnote.weight(.medium))
+            Spacer()
+            if firstFailure != nil {
+                Button {
+                    copyDiagnostics()
+                } label: {
+                    Image(systemName: diagnosticsCopied ? "checkmark" : "doc.on.doc")
+                }
+                .font(.footnote)
+                .accessibilityLabel(
+                    L(diagnosticsCopied
+                        ? "explanation.diagnosticsCopied" : "explanation.copyDiagnostics"))
+            }
+            if retryable > 0 {
+                Button(L("reader.batch.retryFailed")) {
+                    store.retryFailedInBatch(articleID: articleID)
+                }
+                .font(.footnote.weight(.medium))
+            }
+            Button {
+                store.dismissBatchFailures(articleID: articleID)
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .font(.footnote)
+            .foregroundStyle(theme.mutedForeground)
+            .accessibilityLabel(L("reader.batch.dismiss"))
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
         .background(.bar)
+    }
+
+    /// 把第一个失败句的完整现场复制给用户转发开发者——批量场景不进精讲面板，
+    /// 这里是失败诊断唯一的出口。
+    private func copyDiagnostics() {
+        guard let (error, diagnostics) = store.firstBatchFailure(articleID: articleID) else {
+            return
+        }
+        Task {
+            let report = await AIDiagnosticsReport.make(error: error, diagnostics: diagnostics)
+            UIPasteboard.general.string = report
+            diagnosticsCopied = true
+            try? await Task.sleep(for: .seconds(2))
+            diagnosticsCopied = false
+        }
     }
 }
 #endif

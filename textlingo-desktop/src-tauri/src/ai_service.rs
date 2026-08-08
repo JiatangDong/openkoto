@@ -38,6 +38,46 @@ pub struct FileUploadResponse {
 const OLLAMA_DEFAULT_URL: &str = "http://localhost:11434/v1/chat/completions";
 const LMSTUDIO_DEFAULT_URL: &str = "http://localhost:1234/v1/chat/completions";
 
+/// OpenRouter 之类的模型 id 会带 `vendor/` 前缀，判模型家族取最后一段。
+fn canonical_model_name(model: &str) -> String {
+    model.rsplit('/').next().unwrap_or(model).to_lowercase()
+}
+
+/// gpt-5 与 o 系（o1/o3/o4）推理模型只接受默认 temperature(1)，
+/// 显式传其他值直接 400——这是"接 OpenAI 后翻译全部失败"的根因
+/// （与 iOS `LiveChatTransport.modelRejectsCustomTemperature` 同一判据）。
+/// gpt-5-chat 系是普通 chat 模型，不在此列。
+fn model_rejects_custom_temperature(model: &str) -> bool {
+    let name = canonical_model_name(model);
+    if name.starts_with("gpt-5-chat") {
+        return false;
+    }
+    if name.starts_with("gpt-5") {
+        return true;
+    }
+    ["o1", "o3", "o4"]
+        .iter()
+        .any(|family| name == *family || name.starts_with(&format!("{}-", family)))
+}
+
+/// 一次 chat/completions 调用的结构化失败：去不去掉 temperature 重发，
+/// 要看状态码与响应体，先拼成字符串就没法判了。
+/// `into_message` 保持对外错误文案与旧实现逐字一致。
+enum RequestFailure {
+    Http { status: u16, body: String },
+    Transport(String),
+    Parse(String),
+}
+
+impl RequestFailure {
+    fn into_message(self) -> String {
+        match self {
+            RequestFailure::Http { body, .. } => format!("API error: {}", body),
+            RequestFailure::Transport(message) | RequestFailure::Parse(message) => message,
+        }
+    }
+}
+
 impl AIService {
     #[allow(dead_code)]
     pub fn new(api_key: String, provider: String, model: String) -> Self {
@@ -97,6 +137,21 @@ impl AIService {
     /// 检查是否为 Google 类型的 provider（需要使用 X-goog-api-key 认证）
     fn is_google_provider(&self) -> bool {
         self.provider == "google" || self.provider == "google-ai-studio"
+    }
+
+    /// OpenAI 兼容端点上该带的 temperature。
+    /// - Moonshot：强制 1.0（"only 1 is allowed for this model"）；
+    /// - gpt-5 / o 系推理模型：只接受默认值，显式传其他值直接 400——
+    ///   字段整个不发（`None`），这是"接了 OpenAI 之后全部失败"的根因；
+    /// - 其余：用请求值，默认 0.7。
+    fn effective_temperature(&self, requested: Option<f32>) -> Option<f32> {
+        if is_moonshot_provider(&self.provider) {
+            Some(1.0)
+        } else if model_rejects_custom_temperature(&self.model) {
+            None
+        } else {
+            Some(requested.unwrap_or(0.7))
+        }
     }
 
     fn is_anthropic_provider(&self) -> bool {
@@ -159,18 +214,35 @@ impl AIService {
         temperature: Option<f32>,
         enable_thinking: bool,
     ) -> Result<String, String> {
-        // Moonshot specific fix: "only 1 is allowed for this model"
-        let temp = if is_moonshot_provider(&self.provider) {
-            1.0
-        } else {
-            temperature.unwrap_or(0.7)
-        };
+        let temp = self.effective_temperature(temperature);
 
+        match self.send_chat_completions(&messages, temp, enable_thinking).await {
+            // 中转站/自建端点背后的推理模型判不出来，只能靠 400 报错兜底：
+            // 去掉 temperature 重发一次。
+            Err(RequestFailure::Http { status: 400, body })
+                if temp.is_some() && body.to_lowercase().contains("temperature") =>
+            {
+                self.send_chat_completions(&messages, None, enable_thinking)
+                    .await
+                    .map_err(RequestFailure::into_message)
+            }
+            other => other.map_err(RequestFailure::into_message),
+        }
+    }
+
+    async fn send_chat_completions(
+        &self,
+        messages: &[Value],
+        temperature: Option<f32>,
+        enable_thinking: bool,
+    ) -> Result<String, RequestFailure> {
         let mut request_body = json!({
             "model": self.model,
             "messages": messages,
-            "temperature": temp
         });
+        if let Some(temp) = temperature {
+            request_body["temperature"] = json!(temp);
+        }
 
         // Moonshot specific fix: Enable thinking if requested and model supports it (like k2.5)
         if enable_thinking && is_moonshot_provider(&self.provider) && self.model.contains("k2.5") {
@@ -193,25 +265,29 @@ impl AIService {
             .json(&request_body)
             .send()
             .await
-            .map_err(|e| format!("Failed to send request: {}", e))?;
+            .map_err(|e| RequestFailure::Transport(format!("Failed to send request: {}", e)))?;
 
-        if !response.status().is_success() {
+        let status = response.status();
+        if !status.is_success() {
             let error_text = response
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(format!("API error: {}", error_text));
+            return Err(RequestFailure::Http {
+                status: status.as_u16(),
+                body: error_text,
+            });
         }
 
         let response_json: Value = response
             .json()
             .await
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
+            .map_err(|e| RequestFailure::Parse(format!("Failed to parse response: {}", e)))?;
 
         response_json["choices"][0]["message"]["content"]
             .as_str()
             .map(|s| s.to_string())
-            .ok_or_else(|| "No content in response".to_string())
+            .ok_or_else(|| RequestFailure::Parse("No content in response".to_string()))
     }
 
     async fn make_google_request(
@@ -524,50 +600,61 @@ impl AIService {
             })
             .collect();
 
-        // Moonshot specific fix
-        let temp = if is_moonshot_provider(&self.provider) {
-            1.0
-        } else {
-            request.temperature.unwrap_or(0.7)
-        };
+        let mut temp = self.effective_temperature(request.temperature);
+        let messages = Value::Array(messages);
 
-        let mut request_body = json!({
-            "model": self.model,
-            "messages": messages,
-            "temperature": temp,
-            "stream": true
-        });
-
-        // Moonshot specific fix: Enable thinking if likely a chat (stream is usually chat)
-        if is_moonshot_provider(&self.provider) && self.model.contains("k2.5") {
-            if let Some(obj) = request_body.as_object_mut() {
-                obj.insert("thinking".to_string(), json!({"type": "enabled"}));
+        let response = loop {
+            let mut request_body = json!({
+                "model": self.model,
+                "messages": messages.clone(),
+                "stream": true
+            });
+            if let Some(t) = temp {
+                request_body["temperature"] = json!(t);
             }
-        }
 
-        let mut request_builder = self
-            .client
-            .post(self.get_api_url())
-            .header("Content-Type", "application/json");
+            // Moonshot specific fix: Enable thinking if likely a chat (stream is usually chat)
+            if is_moonshot_provider(&self.provider) && self.model.contains("k2.5") {
+                if let Some(obj) = request_body.as_object_mut() {
+                    obj.insert("thinking".to_string(), json!({"type": "enabled"}));
+                }
+            }
 
-        if !self.api_key.is_empty() {
-            request_builder =
-                request_builder.header("Authorization", format!("Bearer {}", self.api_key));
-        }
+            let mut request_builder = self
+                .client
+                .post(self.get_api_url())
+                .header("Content-Type", "application/json");
 
-        let response = request_builder
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(|e| format!("Failed to send request: {}", e))?;
+            if !self.api_key.is_empty() {
+                request_builder =
+                    request_builder.header("Authorization", format!("Bearer {}", self.api_key));
+            }
 
-        if !response.status().is_success() {
-            let error_text = response
-                .text()
+            let response = request_builder
+                .json(&request_body)
+                .send()
                 .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(format!("API error: {}", error_text));
-        }
+                .map_err(|e| format!("Failed to send request: {}", e))?;
+
+            if !response.status().is_success() {
+                let status = response.status().as_u16();
+                let error_text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
+                // 推理模型只接受默认 temperature：400 点名它时去掉重发一次
+                // （与 make_request 的兜底一致；SSE 的 400 发生在流开始之前，可安全重试）。
+                if status == 400
+                    && temp.is_some()
+                    && error_text.to_lowercase().contains("temperature")
+                {
+                    temp = None;
+                    continue;
+                }
+                return Err(format!("API error: {}", error_text));
+            }
+            break response;
+        };
 
         let mut stream = response.bytes_stream();
         let mut full_content = String::new();
@@ -1222,4 +1309,57 @@ pub async fn get_ai_service(cache: &AIServiceCache) -> Result<AIService, String>
             base_url: service.base_url.clone(),
         })
         .ok_or_else(|| "AI service not initialized".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reasoning_models_reject_custom_temperature() {
+        for model in [
+            "gpt-5", "gpt-5-mini", "GPT-5.2", "o1", "o1-mini", "o3-pro", "o4-mini",
+            "openai/o3", "openai/gpt-5",
+        ] {
+            assert!(model_rejects_custom_temperature(model), "{}", model);
+        }
+    }
+
+    #[test]
+    fn chat_models_keep_custom_temperature() {
+        // o1x/openchat：不能把碰巧以 o 开头的模型误判成推理模型。
+        for model in [
+            "gpt-4o", "gpt-5-chat-latest", "deepseek-chat", "openchat-3.5",
+            "o1x-experimental", "kimi-k2",
+        ] {
+            assert!(!model_rejects_custom_temperature(model), "{}", model);
+        }
+    }
+
+    #[test]
+    fn effective_temperature_matrix() {
+        let svc = |provider: &str, model: &str| {
+            AIService::with_base_url(String::new(), provider.to_string(), model.to_string(), None)
+        };
+        // 推理模型：字段整个不发。
+        assert_eq!(svc("openai", "gpt-5").effective_temperature(Some(0.3)), None);
+        assert_eq!(svc("openrouter", "openai/o3").effective_temperature(Some(0.3)), None);
+        // Moonshot：强制 1.0。
+        assert_eq!(svc("moonshot", "kimi-k2.5").effective_temperature(Some(0.3)), Some(1.0));
+        // 普通模型：用请求值，缺省 0.7。
+        assert_eq!(svc("openai", "gpt-4o").effective_temperature(Some(0.3)), Some(0.3));
+        assert_eq!(svc("deepseek", "deepseek-chat").effective_temperature(None), Some(0.7));
+    }
+
+    #[test]
+    fn request_failure_messages_match_legacy_format() {
+        assert_eq!(
+            RequestFailure::Http { status: 400, body: "boom".into() }.into_message(),
+            "API error: boom"
+        );
+        assert_eq!(
+            RequestFailure::Parse("No content in response".into()).into_message(),
+            "No content in response"
+        );
+    }
 }

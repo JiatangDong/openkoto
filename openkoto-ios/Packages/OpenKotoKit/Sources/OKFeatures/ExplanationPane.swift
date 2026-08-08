@@ -21,6 +21,7 @@ struct ExplanationPane: View {
     let onSelectSegment: (UUID) -> Void
 
     @State private var speech = SpeechService()
+    @State private var diagnosticsCopied = false
 
     private var segments: [ArticleSegment] {
         store.segments(for: article.id)
@@ -121,14 +122,39 @@ struct ExplanationPane: View {
             Label(userMessage(for: error), systemImage: "exclamationmark.triangle")
                 .font(.subheadline)
                 .foregroundStyle(theme.destructive)
-            Button {
-                Task { await store.generateExplanation(articleID: article.id, segmentID: segmentID) }
-            } label: {
-                Label(L("explanation.retry"), systemImage: "arrow.clockwise")
+            HStack(spacing: 12) {
+                Button {
+                    Task { await store.generateExplanation(articleID: article.id, segmentID: segmentID) }
+                } label: {
+                    Label(L("explanation.retry"), systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                Button {
+                    copyDiagnostics(error, segmentID: segmentID)
+                } label: {
+                    Label(
+                        diagnosticsCopied
+                            ? L("explanation.diagnosticsCopied")
+                            : L("explanation.copyDiagnostics"),
+                        systemImage: diagnosticsCopied ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 把这次失败的完整现场（状态码/响应体/URLError/端点/当前网络）复制给开发者。
+    /// "网络不可用"的提示本身没有排查价值，报告才有。
+    private func copyDiagnostics(_ error: AIClientError, segmentID: UUID) {
+        Task {
+            let report = await AIDiagnosticsReport.make(
+                error: error, diagnostics: store.generationDiagnostics[segmentID])
+            UIPasteboard.general.string = report
+            diagnosticsCopied = true
+            try? await Task.sleep(for: .seconds(2))
+            diagnosticsCopied = false
+        }
     }
 
     @ViewBuilder

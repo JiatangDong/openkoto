@@ -50,6 +50,14 @@ public struct RootTabView: View {
         themeManager.tokens(for: systemScheme)
     }
 
+    /// 点通知进来的信箱。不放 `@State`：它是全局单例，通知代理在视图存在之前就可能写它。
+    private var reminderRouter: ReviewReminderRouter { .shared }
+
+    /// 取走一次「点了复习提醒」，切到生词本。
+    private func consumeReminderRoute() {
+        if reminderRouter.consumeOpenRequest() { selection = .vocabulary }
+    }
+
     /// 生效的界面 Locale（跟随系统时用当前系统 Locale）。
     private var activeLocale: Locale {
         interfaceLanguage == "system" ? .current : Locale(identifier: interfaceLanguage)
@@ -123,6 +131,11 @@ public struct RootTabView: View {
                 try await appConfig.gloss(word: word, sentence: sentence)
             }
             await store.load()
+            // 必须在 load 之后：favorites 还空着时排期会算出「没有任何到期卡」，
+            // 把已经排好的提醒全撤掉。
+            await ReviewReminder.reschedule(favorites: store.favorites)
+            // 冷启动点通知：代理在视图建起来之前就写了信箱，下面的 onChange 收不到那一次。
+            consumeReminderRoute()
             await store.importFromInbox()
         }
         // 从后台返回时也排空收件箱（用户可能刚从别处分享内容进来）
@@ -130,6 +143,20 @@ public struct RootTabView: View {
             if scenePhase == .active {
                 Task { await store.importFromInbox() }
             }
+            // 进出前台各重排一次：退到后台那次收的是这一程的复习成果
+            //（做完的卡到期日已经推后，明天不该再被催）；回到前台那次管的是
+            // 跨天——App 在后台待了三天，7 天窗口得往前滚。
+            if scenePhase == .active || scenePhase == .background {
+                Task { await ReviewReminder.reschedule(favorites: store.favorites) }
+            }
+        }
+        // 通知文案是排期那一刻定型的，换了界面语言就得重排，否则弹出来还是旧语言。
+        .onChange(of: interfaceLanguage) {
+            Task { await ReviewReminder.reschedule(favorites: store.favorites) }
+        }
+        // App 活着时点通知（从后台唤回）走这条。
+        .onChange(of: reminderRouter.openRequests) {
+            consumeReminderRoute()
         }
         // "用 OpenKoto 打开"：LSSupportsOpeningDocumentsInPlace = NO，
         // 所以系统把文件拷进 Documents/Inbox 再交给我们。

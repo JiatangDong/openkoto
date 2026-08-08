@@ -4,14 +4,19 @@ import OKModels
 import OKAIClient
 import OKDesignSystem
 import OKLocalization
+import UIKit
+import UserNotifications
 
 /// 设置（设计文档 §6.6）：AI 模型 CRUD + Keychain、外观/主题、学习目标语言、
-/// 界面语言、批量并发、复习（SRS 每日上限 + 期望保持率）、隐私披露。
+/// 界面语言、批量并发、复习（SRS 每日上限 + 期望保持率 + 每日提醒）、隐私披露。
 struct SettingsView: View {
     @Environment(ThemeManager.self) private var themeManager
     @Environment(AppConfigStore.self) private var appConfig
+    @Environment(ContentStore.self) private var store
     @Environment(\.theme) private var theme
     @Environment(\.okCanvas) private var canvas
+    @Environment(\.openURL) private var openURL
+    @Environment(\.scenePhase) private var scenePhase
     // 由 RootTabView 注入的生效 Locale（跟随界面语言）：用于本地化讲解语言的选项名。
     @Environment(\.locale) private var locale
 
@@ -21,10 +26,14 @@ struct SettingsView: View {
     @AppStorage("srs.dailyNewLimit") private var dailyNewLimit = 20
     @AppStorage("srs.dailyReviewLimit") private var dailyReviewLimit = 100
     @AppStorage("srs.desiredRetention") private var desiredRetention = 0.9
+    @AppStorage(ReviewReminder.enabledKey) private var reminderEnabled = false
+    @AppStorage(ReviewReminder.minutesKey) private var reminderMinutes = ReviewReminder
+        .defaultMinutes
     @AppStorage(OnboardingGate.completedKey) private var onboardingCompleted = false
 
     @State private var editingConfig: ModelConfig?
     @State private var isAddingConfig = false
+    @State private var reminderAuthorization: UNAuthorizationStatus = .notDetermined
 
     private let retentionOptions: [Double] = [0.80, 0.85, 0.90, 0.95]
 
@@ -98,6 +107,8 @@ struct SettingsView: View {
                     }
                 }
 
+                reminderSection
+
                 SyncSection()
 
                 DataTransferSection()
@@ -149,6 +160,16 @@ struct SettingsView: View {
             .sheet(item: $editingConfig) { config in
                 ModelConfigFormView(editing: config).okSheetSizing(.form)
             }
+            .task { reminderAuthorization = await ReviewReminder.authorizationStatus() }
+            // 用户可能刚从系统设置里改完通知权限回来。
+            .onChange(of: scenePhase) {
+                guard scenePhase == .active else { return }
+                Task { reminderAuthorization = await ReviewReminder.authorizationStatus() }
+            }
+            .onChange(of: reminderEnabled) { Task { await applyReminderChange() } }
+            .onChange(of: reminderMinutes) {
+                Task { await ReviewReminder.reschedule(favorites: store.favorites) }
+            }
         }
     }
 
@@ -157,6 +178,69 @@ struct SettingsView: View {
         let version = info?["CFBundleShortVersionString"] as? String ?? "—"
         let build = info?["CFBundleVersion"] as? String ?? "—"
         return "\(version) (\(build))"
+    }
+
+    // MARK: - 每日复习提醒
+
+    /// 提醒时间存的是「距零点的分钟数」，`DatePicker` 要的是 `Date`——这里做转换。
+    /// 只取时/分：日期部分是拿今天凑的，排期时会被重新落到每一天上。
+    private var reminderTime: Binding<Date> {
+        Binding {
+            Calendar.current.date(
+                bySettingHour: reminderMinutes / 60, minute: reminderMinutes % 60,
+                second: 0, of: .now) ?? .now
+        } set: { newValue in
+            let parts = Calendar.current.dateComponents([.hour, .minute], from: newValue)
+            reminderMinutes = (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+        }
+    }
+
+    /// 开着开关但系统那边被拒了——这时什么都不会弹，必须说清楚。
+    private var isReminderBlocked: Bool {
+        reminderEnabled && reminderAuthorization == .denied
+    }
+
+    @ViewBuilder
+    private var reminderSection: some View {
+        Section {
+            Toggle(L("settings.reminder.enabled"), isOn: $reminderEnabled)
+            if reminderEnabled {
+                DatePicker(
+                    L("settings.reminder.time"), selection: reminderTime,
+                    displayedComponents: .hourAndMinute)
+                // Catalyst 上没有这个 deep link（"app-settings:" 是 iOS 的），
+                // 点了什么都不会发生，所以干脆不给按钮——下面的说明文案照常显示。
+                #if !targetEnvironment(macCatalyst)
+                    if isReminderBlocked {
+                        Button(L("settings.reminder.openSystemSettings")) {
+                            guard
+                                let url = URL(
+                                    string: UIApplication.openNotificationSettingsURLString)
+                            else { return }
+                            openURL(url)
+                        }
+                    }
+                #endif
+            }
+        } header: {
+            Text(L("settings.reminder"))
+        } footer: {
+            Text(isReminderBlocked ? L("settings.reminder.denied") : L("settings.reminder.footer"))
+        }
+    }
+
+    /// 开关变化后的处理。
+    ///
+    /// 被系统拒了**不把开关拨回去**：用户的意图（想要提醒）是明确的，拨回去就丢了，
+    /// 等他去系统设置里放行、回到 App 时还得重新想起来再开一次。
+    /// 留着开、把话说明白，权限一旦到手，回前台那次重排就自动生效。
+    private func applyReminderChange() async {
+        if reminderEnabled, await ReviewReminder.authorizationStatus() == .notDetermined {
+            _ = await ReviewReminder.requestAuthorization()
+        }
+        reminderAuthorization = await ReviewReminder.authorizationStatus()
+        // 关掉时同样要走一次：reschedule 内部会把已排的全撤掉。
+        await ReviewReminder.reschedule(favorites: store.favorites)
     }
 
     // MARK: - AI 模型配置

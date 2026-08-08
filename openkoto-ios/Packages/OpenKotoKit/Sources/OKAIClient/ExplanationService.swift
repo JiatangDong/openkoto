@@ -77,7 +77,8 @@ public struct ExplanationService: Sendable {
         return item
     }
 
-    /// 设置页“测试连接”：发一条最小 chat 请求，成功即返回，失败抛 `AIClientError`。
+    /// 设置页“测试连接”：发一条最小 chat 请求，成功即返回，失败抛
+    /// `AIRequestFailure`（内含 `AIClientError` 分类与诊断快照）。
     public func testConnection(config: ModelConfig, apiKey: String?) async throws {
         let request = ChatRequest(
             purpose: .connectionTest,

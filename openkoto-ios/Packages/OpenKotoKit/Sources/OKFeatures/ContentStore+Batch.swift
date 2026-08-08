@@ -108,6 +108,23 @@ extension ContentStore {
         batchByArticle[articleID]?.phase = .cancelling
     }
 
+    /// 用户看过失败提示后主动关掉。不清 `generationErrors`——句级错误 chip 还要用。
+    public func dismissBatchFailures(articleID: UUID) {
+        lastBatchFailures[articleID] = nil
+    }
+
+    /// 上一批第一个真失败句的现场（错误 + 诊断快照），供失败横幅的「复制诊断信息」。
+    /// 批量失败时用户唯一能带走的排查线索就是它。
+    public func firstBatchFailure(articleID: UUID) -> (AIClientError, AIFailureDiagnostics?)? {
+        guard let failures = lastBatchFailures[articleID] else { return nil }
+        for id in failures.segmentIDs {
+            if let error = generationErrors[id] {
+                return (error, generationDiagnostics[id])
+            }
+        }
+        return nil
+    }
+
     /// 只重试**可重试**的失败句。余额不足/未授权重试多少次都不会好，重试它们纯属浪费。
     public func retryFailedInBatch(articleID: UUID) {
         guard batchTasks[articleID] == nil, let failures = lastBatchFailures[articleID] else {
@@ -115,7 +132,10 @@ extension ContentStore {
         }
         let retryable = failures.segmentIDs.filter { generationErrors[$0]?.isRetryable ?? false }
         guard !retryable.isEmpty else { return }
-        for id in retryable { generationErrors[id] = nil }
+        for id in retryable {
+            generationErrors[id] = nil
+            generationDiagnostics[id] = nil
+        }
         lastBatchFailures[articleID] = nil
         launch(articleID: articleID, kind: failures.kind, ids: retryable)
     }
@@ -132,7 +152,10 @@ extension ContentStore {
         // 无对应 provider 时不启动，直接把首句错误暴露给用户（设置未配模型）。
         let hasProvider = kind == .explain ? explanationProvider != nil : translationProvider != nil
         guard hasProvider else {
-            if let first = ids.first { generationErrors[first] = .notConfigured }
+            if let first = ids.first {
+                generationErrors[first] = .notConfigured
+                generationDiagnostics[first] = nil
+            }
             return
         }
 
@@ -184,7 +207,10 @@ extension ContentStore {
                     let segmentID = chunk[offset]
                     // 只有真的记了错因才算失败——`generate*` 在"已精讲""正在生成"
                     // 这类良性跳过时也返回 false，计进去会让失败数虚高。
-                    let isFailure = !ok && generationErrors[segmentID] != nil
+                    // `.cancelled` 也不算：用户主动取消不是故障，不该在取消后
+                    // 弹出"N 句失败"的横幅。
+                    let isFailure = !ok
+                        && generationErrors[segmentID].map { $0 != .cancelled } ?? false
                     if isFailure { failed.append(segmentID) }
                     if var state = batchByArticle[articleID] {
                         state.completed += 1

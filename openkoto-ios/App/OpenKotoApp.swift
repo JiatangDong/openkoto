@@ -10,6 +10,11 @@ struct OpenKotoApp: App {
     @AppStorage("reader.fontSize") private var fontSize: Double = 18
     @AppStorage("reader.paneCollapsed") private var paneCollapsed = false
 
+    // 每日复习提醒的通知代理。纯 SwiftUI 生命周期没有「点通知进来」的入口，
+    // 而 UNUserNotificationCenter.delegate 又必须在 didFinishLaunching 就位，
+    // 所以这里补一个 UIKit 代理——它只做挂载与转发，逻辑都在 OKFeatures。
+    @UIApplicationDelegateAdaptor(OKNotificationAppDelegate.self) private var notificationDelegate
+
     var body: some Scene {
         WindowGroup {
             RootTabView()

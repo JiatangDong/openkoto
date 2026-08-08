@@ -257,6 +257,8 @@ struct OnboardingModelStep: View {
         do {
             try await appConfig.testConnection(draftConfig(), apiKey: state.apiKeyInput)
             state.testState = .success
+        } catch let failure as AIRequestFailure {
+            state.testState = .failure(userMessage(for: failure.error))
         } catch let error as AIClientError {
             state.testState = .failure(userMessage(for: error))
         } catch {

@@ -37,6 +37,12 @@ Import and export (new in 0.4.1):
 
 AI translation and explanation are optional BYOK features. A user may configure their own compatible provider and API key in Settings. The API key is stored in the iOS Keychain. Requests go directly from the device to the provider selected by the user and do not pass through an OpenKoto app server.
 
+AI reliability and diagnostics (new in 0.5.5):
+
+- The app adapts request parameters for supported reasoning models and may retry a request once after a transient rate limit or dropped connection.
+- If an AI request fails, the explanation panel and batch-failure banner offer “Copy Diagnostics.” The report contains app/device details, provider/model/endpoint, HTTP or URL error information, and a truncated response excerpt. It explicitly records only whether a key was attached; the API key itself is never included.
+- This diagnostic report is copied to the system clipboard only when the user taps the button. OpenKoto does not upload or transmit it.
+
 If App Review needs to test the optional AI flow, provide a temporary, revocable, low-quota provider configuration here before submission:
 
 - Provider:
