@@ -31,6 +31,9 @@ final class PlaybackModel {
     private(set) var activeID: UUID?
     /// 播放位置已越过当前句结尾——UI 把高亮调暗，但不换句。
     private(set) var isInGap = false
+    /// 文件在（bookmark 解析成功），但资产读不出来——权限没拿到、文件损坏、
+    /// 或 iCloud 还没下载完。UI 据此显示"媒体不可用"，而不是一块沉默的黑屏。
+    private(set) var isUnplayable = false
 
     var rate: Float = 1 {
         didSet {
@@ -45,6 +48,8 @@ final class PlaybackModel {
     let player = AVPlayer()
 
     private var timeObserver: Any?
+    /// 正持有安全作用域的那个 URL（仅「引用模式」的外部文件）。
+    private var scopedURL: URL?
     private var index = TimelineIndex(entries: [])
     private var segmentsByID: [UUID: ArticleSegment] = [:]
     private var loopRange: (start: Double, end: Double)?
@@ -58,18 +63,26 @@ final class PlaybackModel {
     // MARK: - 装载
 
     func load(url: URL?, segments: [ArticleSegment], startAt position: Double) {
-        index = TimelineIndex(
-            entries: segments.compactMap { segment in
-                guard let start = segment.startTime, let end = segment.endTime else { return nil }
-                return (id: segment.id, start: start, end: end)
-            })
-        segmentsByID = Dictionary(uniqueKeysWithValues: segments.map { ($0.id, $0) })
+        updateTimeline(segments: segments)
+        releaseScopedAccess()
+        isUnplayable = false
 
         guard let url else {
             // 没有媒体文件（只导了字幕，或引用失效）：文稿照常能读，只是不能播。
             duration = segments.compactMap(\.endTime).max() ?? 0
             return
         }
+
+        // 「引用模式」的外部文件：解析出 bookmark 只是**知道文件在哪**，不等于能读它。
+        //
+        // 不开安全作用域，AVPlayer 拿到的是 EPERM，而且一声不吭：时长永远加载不出来、
+        // 画面全黑、时间停在 0:00。**导入当次能播**是因为文件选择器给的 sandbox extension
+        // 还活着；重启 App 后就只剩 bookmark 了——所以这个 bug 只在"第二次打开"时现形，
+        // 一次性的导入验证根本抓不到。
+        //
+        // 拷进自家容器的文件（相册来源）返回 false，那属于正常情况：
+        // 只有真的开成功了才配对 stop，否则就是不配对调用。
+        if url.startAccessingSecurityScopedResource() { scopedURL = url }
 
         // 让声音不受静音开关影响——学习类音频被静音键掐掉是纯粹的困惑来源。
         try? AVAudioSession.sharedInstance().setCategory(.playback)
@@ -82,10 +95,45 @@ final class PlaybackModel {
         observeTime()
         Task { [weak self] in
             let loaded = try? await item.asset.load(.duration)
-            guard let self, let loaded, loaded.isNumeric else { return }
-            self.duration = loaded.seconds
+            guard let self else { return }
+            guard let loaded, loaded.isNumeric, loaded.seconds > 0 else {
+                // 读不了就明说。此前这里是 `return`，用户面对的是一块沉默的黑屏，
+                // 分不清"文件坏了"还是"App 坏了"。
+                isUnplayable = true
+                return
+            }
+            duration = loaded.seconds
         }
         if position > 0 { seek(to: position) }
+    }
+
+    /// 交还安全作用域。开了才还——没开过还会破坏系统的引用计数。
+    private func releaseScopedAccess() {
+        scopedURL?.stopAccessingSecurityScopedResource()
+        scopedURL = nil
+    }
+
+    /// 重建时间轴索引，**不碰播放器**（不换 item、不 seek、不改播放状态）。
+    ///
+    /// `load` 每开一次页只跑一次，而端上转写会在页面开着的时候把 segments
+    /// 从 0 条变成几百条。不重建的话 `index` 与 `segmentsByID` 一直是空的，
+    /// 后果是**播放联动整体失灵、但表面上看不出来**：
+    /// 字幕列表读的是 store 里的 segments，所以字幕照常显示；
+    /// 而 `resolve` 恒返回 nil ⇒ `activeID` 恒为 nil ⇒ 当前句不高亮、列表不自动滚；
+    /// `seek(toSegment:)` 查不到那一句 ⇒ 点字幕也跳不过去，静默 return。
+    func updateTimeline(segments: [ArticleSegment]) {
+        index = TimelineIndex(
+            entries: segments.compactMap { segment in
+                guard let start = segment.startTime, let end = segment.endTime else { return nil }
+                return (id: segment.id, start: start, end: end)
+            })
+        segmentsByID = Dictionary(
+            segments.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        // 立刻按当前时间重解析一次。等下一次 observer 回调是不行的——
+        // 暂停时根本没有回调，转写完成后画面会一直停在"没有当前句"。
+        let resolved = index.resolve(at: currentTime)
+        if resolved?.id != activeID { activeID = resolved?.id }
+        isInGap = resolved?.isInGap ?? false
     }
 
     func teardown() {
@@ -95,6 +143,8 @@ final class PlaybackModel {
             self.timeObserver = nil
         }
         player.replaceCurrentItem(with: nil)
+        // 先摘 item 再交还作用域：反过来的话最后一次读可能落在权限已收回之后。
+        releaseScopedAccess()
         try? AVAudioSession.sharedInstance().setActive(false)
     }
 

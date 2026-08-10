@@ -1887,6 +1887,29 @@
         }
       }
     },
+    "import.media.needSubtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This system can't generate subtitles on device (needs iOS 26). Pick a subtitle file to save this media."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このシステムではデバイス上で字幕を生成できません（iOS 26 が必要）。保存するには字幕ファイルを選んでください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前系统不支持本机生成字幕（需要 iOS 26），先选一个字幕文件才能保存。"
+          }
+        }
+      }
+    },
     "import.media.optional": {
       "extractionState": "manual",
       "localizations": {
@@ -1906,6 +1929,29 @@
           "stringUnit": {
             "state": "translated",
             "value": "可选"
+          }
+        }
+      }
+    },
+    "import.media.photoFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't read that video from Photos. Try exporting it to Files first, then pick it with “Video or audio”."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "写真からその動画を読み込めませんでした。いったんファイルに書き出してから「ビデオまたはオーディオ」で選んでください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没能从相册读到这个视频。可以先导出到「文件」，再用「视频或音频」选它。"
           }
         }
       }

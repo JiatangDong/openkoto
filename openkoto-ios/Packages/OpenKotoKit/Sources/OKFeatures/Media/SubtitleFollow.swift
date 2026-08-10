@@ -26,4 +26,20 @@ enum SubtitleFollow {
             return false
         }
     }
+
+    /// 超过这个行距就不要动画滚动。
+    static let animatedRowSpan = 5
+
+    /// 这次跟随该不该带动画。
+    ///
+    /// 正常播放是一句一句往下走，动画让人看清"跳到哪了"。但两种情况会一次跨几十上百行：
+    /// 续播开屏（上次看到 6:50，列表停在第 0 句）和拖进度条。
+    /// `LazyVStack` 里跨大段未实现行的动画滚动经常滚不到位——看起来就像"自动滚动坏了"。
+    /// 距离一远就直接定位，牺牲动画换必达。
+    ///
+    /// `from` 为 nil 表示之前没有当前句（刚解析出第一句），按远距离处理。
+    static func shouldAnimateScroll(from: Int?, to: Int) -> Bool {
+        guard let from else { return false }
+        return abs(to - from) <= animatedRowSpan
+    }
 }

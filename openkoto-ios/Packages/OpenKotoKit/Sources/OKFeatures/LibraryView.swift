@@ -388,6 +388,16 @@ private struct ImportSheet: View {
     @State private var content = ""
     @State private var urlText = ""
     @State private var activePicker: FilePicker?
+    /// 完成回调里读的是**这个**，不是 `activePicker`。
+    ///
+    /// 关闭面板与调用完成回调的先后顺序 SwiftUI 没有承诺，实测是**先**把
+    /// `isPresented` 置回 false（binding 的 setter 随即清空 `activePicker`），
+    /// **再**调完成回调 —— 回调去读 `activePicker` 只能拿到 nil，`switch` 落到
+    /// `case nil`，选中的文件被整个丢掉。0.4.1 里书籍/字幕/视频三个入口都因此失灵：
+    /// 面板能开、文件能选，选完那一行还是「可选」，「保存」一直是灰的
+    /// （用户看到的就是"导不进去"）。
+    /// 这份记录只在下一次点按钮时被覆盖，两种顺序下都成立。
+    @State private var pendingPicker: FilePicker?
     @State private var isFetching = false
     @State private var errorMessage: String?
     /// 视频/音频模式：字幕必选，媒体文件可选（只导字幕就是纯文稿，当文章读）。
@@ -426,19 +436,27 @@ private struct ImportSheet: View {
                     // 用户取消时 SwiftUI 只把 isPresented 置 false，不走 completion，
                     // 这里必须跟着清空 —— 不清就是下次点同一个按钮没反应。
                     set: { if !$0 { activePicker = nil } }),
-                allowedContentTypes: activePicker?.contentTypes ?? FilePicker.book.contentTypes
+                // 用 pendingPicker：关闭时 activePicker 已被清空，拿它取类型会退化成书籍。
+                allowedContentTypes: pendingPicker?.contentTypes ?? FilePicker.book.contentTypes
             ) { result in
-                let picker = activePicker
+                let picker = pendingPicker
                 activePicker = nil
+                pendingPicker = nil
                 switch picker {
                 case .book:
                     handleFileImport(result)
                 case .subtitle:
-                    if case .success(let url) = result { subtitleURL = url }
+                    switch result {
+                    case .success(let url): subtitleURL = url
+                    case .failure(let error): reportPickerFailure(error)
+                    }
                 case .media:
-                    if case .success(let url) = result {
+                    switch result {
+                    case .success(let url):
                         mediaURL = url
                         photoURL = nil
+                    case .failure(let error):
+                        reportPickerFailure(error)
                     }
                 case nil:
                     break
@@ -471,10 +489,24 @@ private struct ImportSheet: View {
 
     private var fileSection: some View {
         Button {
-            activePicker = .book
+            present(.book)
         } label: {
             Label(L("import.file.bookButton"), systemImage: "doc.badge.plus")
         }
+    }
+
+    /// 先记下「这次要选哪类文件」，再开面板 —— 顺序不能反，
+    /// 完成回调只认 `pendingPicker`。
+    private func present(_ picker: FilePicker) {
+        pendingPicker = picker
+        activePicker = picker
+    }
+
+    /// 取消不是错误（走完成回调时是 `.failure(userCancelled)`）；
+    /// 其余失败必须说出来，否则用户只看到"选了没反应"。
+    private func reportPickerFailure(_ error: Error) {
+        if (error as? CocoaError)?.code == .userCancelled { return }
+        errorMessage = error.localizedDescription
     }
 
     private var urlSection: some View {
@@ -557,7 +589,7 @@ private struct ImportSheet: View {
     private var mediaSection: some View {
         Section {
             Button {
-                activePicker = .subtitle
+                present(.subtitle)
             } label: {
                 LabeledContent {
                     Text(subtitleURL?.lastPathComponent ?? L(canTranscribeOnDevice ? "import.media.optional" : "import.media.required"))
@@ -569,11 +601,14 @@ private struct ImportSheet: View {
                 }
             }
             Button {
-                activePicker = .media
+                present(.media)
             } label: {
                 LabeledContent {
+                    // 选中后要看得出来变了：沿用字幕那一行的深浅对比，
+                    // 一直用 mutedForeground 的话「选没选上」全靠猜。
                     Text(pickedMediaName ?? L("import.media.optional"))
-                        .foregroundStyle(theme.mutedForeground)
+                        .foregroundStyle(
+                            pickedMedia == nil ? theme.mutedForeground : theme.foreground)
                         .lineLimit(1)
                 } label: {
                     Label(L("import.media.file"), systemImage: "film")
@@ -585,6 +620,13 @@ private struct ImportSheet: View {
                 } label: {
                     Label(L("import.media.photoLibrary"), systemImage: "photo.on.rectangle")
                 }
+            }
+            // 旧系统上「只选媒体」确实存不了（转写要 iOS 26）。但光把按钮灰掉
+            // 等于不解释，用户只会以为导入坏了 —— 明说缺什么。
+            if pickedMedia != nil, subtitleURL == nil, !canTranscribeOnDevice {
+                Label(L("import.media.needSubtitle"), systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(theme.destructive)
             }
         } footer: {
             Text(L(canTranscribeOnDevice ? "import.media.footer.asr" : "import.media.footer"))
@@ -626,8 +668,13 @@ private struct ImportSheet: View {
             defer { isLoadingPhoto = false }
             do {
                 let video = try await item.loadTransferable(type: PhotoLibraryVideo.self)
-                photoURL = video?.url
-                if photoURL != nil { mediaURL = nil }
+                // nil 不抛错：不报的话用户看到的是转圈停了、什么都没变、保存还是灰的。
+                guard let video else {
+                    errorMessage = L("import.media.photoFailed")
+                    return
+                }
+                photoURL = video.url
+                mediaURL = nil
             } catch {
                 errorMessage = error.localizedDescription
             }

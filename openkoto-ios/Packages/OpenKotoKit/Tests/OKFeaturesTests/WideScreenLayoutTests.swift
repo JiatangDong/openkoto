@@ -25,6 +25,27 @@ import Testing
         #expect(SubtitleFollow.shouldDisengage(.idle) == false)
         #expect(SubtitleFollow.shouldDisengage(.tracking) == false)
     }
+
+    /// 正常播放是一句一句走，动画让人看清跳到哪了。
+    @Test func adjacentSentencesScrollWithAnimation() {
+        #expect(SubtitleFollow.shouldAnimateScroll(from: 12, to: 13))
+        #expect(SubtitleFollow.shouldAnimateScroll(from: 13, to: 12))
+        #expect(SubtitleFollow.shouldAnimateScroll(from: 10, to: 15))
+    }
+
+    /// 拖进度条会一次跨几十上百行。`LazyVStack` 里这种动画滚动经常滚不到位，
+    /// 用户看到的就是"自动滚动坏了"——所以远距离直接定位。
+    @Test func longJumpsSkipAnimation() {
+        #expect(SubtitleFollow.shouldAnimateScroll(from: 10, to: 16) == false)
+        #expect(SubtitleFollow.shouldAnimateScroll(from: 0, to: 95) == false)
+        #expect(SubtitleFollow.shouldAnimateScroll(from: 400, to: 12) == false)
+    }
+
+    /// 续播开屏：解析出第一句时还没有"上一句"，那一跳可能横跨整个列表。
+    @Test func firstResolvedSentenceSkipsAnimation() {
+        #expect(SubtitleFollow.shouldAnimateScroll(from: nil, to: 0) == false)
+        #expect(SubtitleFollow.shouldAnimateScroll(from: nil, to: 95) == false)
+    }
 }
 
 /// 划词操作条的落点。宽屏下正文栏被精讲右栏挤窄，右边界溢出必现。

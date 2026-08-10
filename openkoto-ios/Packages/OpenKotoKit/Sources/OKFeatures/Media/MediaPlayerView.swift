@@ -11,6 +11,7 @@ import SwiftUI
 struct MediaPlayerView: View {
     @Environment(ContentStore.self) private var store
     @Environment(\.theme) private var theme
+    @Environment(\.okCanvas) private var canvas
     @Environment(\.scenePhase) private var scenePhase
 
     let media: Media
@@ -53,6 +54,20 @@ struct MediaPlayerView: View {
         return segment.order
     }
 
+    /// 段落集合的指纹，用来发现「字幕换了一批」。
+    ///
+    /// 不直接比 `[ArticleSegment]`：744 句每次 body 求值都做一次全量比较不值当，
+    /// 而转写/重转写一定会改变句数或首尾句，这三项足够识别。
+    private struct TimelineKey: Equatable {
+        let count: Int
+        let firstID: UUID?
+        let lastID: UUID?
+    }
+
+    private var timelineKey: TimelineKey {
+        TimelineKey(count: segments.count, firstID: segments.first?.id, lastID: segments.last?.id)
+    }
+
     private var readingRuns: [UUID: [ReadingRun]] {
         guard showReading, let articleID else { return [:] }
         return store.readingRuns(for: articleID)
@@ -62,7 +77,10 @@ struct MediaPlayerView: View {
         VStack(spacing: 0) {
             MediaSurface(
                 media: media, player: playback.player,
-                isAvailable: store.mediaFileURL(for: media) != nil)
+                // 文件"找得到"不等于"读得了"：权限没拿到 / 文件损坏 / iCloud 没下完，
+                // 都是解析得出 URL 但资产加载失败。这两种都归到"媒体不可用"，
+                // 别让用户对着一块沉默的黑屏猜。
+                isAvailable: store.mediaFileURL(for: media) != nil && !playback.isUnplayable)
             TransportBar(
                 currentTime: playback.currentTime,
                 duration: playback.duration,
@@ -92,6 +110,12 @@ struct MediaPlayerView: View {
                         revealedID = segment.id
                         return
                     }
+                    // 宽屏右栏常驻，点哪句就讲哪句——右栏占位文案写的就是这个约定
+                    // （「点正文里的任意一句，讲解会显示在这里」），此前媒体页却只跳转不选中，
+                    // 于是照着提示点了半天右栏一直是空的。
+                    // 窄屏**不**跟着选：那会在每次点句跳转时弹出半屏 sheet 盖住字幕列表，
+                    // iPhone 上仍走长按菜单里的「精讲」。
+                    if canvas.isWide { selectedSegmentID = segment.id }
                     playback.seek(toSegment: segment.id)
                     saveProgress(force: true)
                 },
@@ -117,6 +141,9 @@ struct MediaPlayerView: View {
             }
         }
         .onChange(of: playback.currentTime) { saveProgress(force: false) }
+        // 转写完成后 segments 从 0 条变成几百条，必须让 playback 重建时间轴。
+        // 少了这一步，字幕会照常显示，但当前句不高亮、列表不自动滚、点字幕也跳不过去。
+        .onChange(of: timelineKey) { playback.updateTimeline(segments: segments) }
         // 播到下一句就重新遮上——单句循环时 activeID 不变，揭晓会一直留着，正合跟读所需。
         .onChange(of: playback.activeID) { revealedID = nil }
         .sheet(item: $batchKind) { kind in
@@ -289,7 +316,13 @@ struct MediaPlayerView: View {
 
     /// 节流写库。位置只是便利功能，丢一点无所谓，写太勤才是问题。
     private func saveProgress(force: Bool) {
-        guard playback.duration > 0 || playback.currentTime > 0 else { return }
+        // 资产没加载成功时**一个字都不写**。
+        //
+        // 原条件是 `duration > 0 || currentTime > 0`：读不到文件时 `load` 里那次
+        // `seek(to: 上次位置)` 会先把 currentTime 顶成 410，条件通过；紧接着
+        // 时间观察者按死掉的 item 回调 0，于是把用户真实的观看位置覆写成 0。
+        // 一次打不开，进度就永久没了。
+        guard playback.duration > 0 else { return }
         let now = Date()
         if !force, let lastSavedAt, now.timeIntervalSince(lastSavedAt) < Self.saveInterval {
             return

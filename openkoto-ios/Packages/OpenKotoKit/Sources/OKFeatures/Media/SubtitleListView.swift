@@ -63,11 +63,9 @@ struct SubtitleListView: View {
                 .onScrollPhaseChange { _, phase in
                     if SubtitleFollow.shouldDisengage(phase), isFollowing { isFollowing = false }
                 }
-                .onChange(of: activeID) { _, id in
+                .onChange(of: activeID) { old, id in
                     guard isFollowing, let id else { return }
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        proxy.scrollTo(id, anchor: .center)
-                    }
+                    scroll(proxy: proxy, to: id, from: old)
                 }
 
                 if !isFollowing {
@@ -77,14 +75,24 @@ struct SubtitleListView: View {
         }
     }
 
+    /// 滚到某一句。跨度大时不带动画——见 `SubtitleFollow.shouldAnimateScroll`。
+    private func scroll(proxy: ScrollViewProxy, to id: UUID, from old: UUID?) {
+        let oldIndex = old.flatMap { o in segments.firstIndex { $0.id == o } }
+        let newIndex = segments.firstIndex { $0.id == id } ?? 0
+        if SubtitleFollow.shouldAnimateScroll(from: oldIndex, to: newIndex) {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                proxy.scrollTo(id, anchor: .center)
+            }
+        } else {
+            proxy.scrollTo(id, anchor: .center)
+        }
+    }
+
     private func resumeButton(proxy: ScrollViewProxy) -> some View {
         Button {
             isFollowing = true
-            if let activeID {
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    proxy.scrollTo(activeID, anchor: .center)
-                }
-            }
+            // 从"用户翻到别处"回来通常就是远距离，别动画。
+            if let activeID { proxy.scrollTo(activeID, anchor: .center) }
         } label: {
             Label(L("media.backToCurrent"), systemImage: "arrow.down.circle")
                 .font(.footnote.weight(.medium))
