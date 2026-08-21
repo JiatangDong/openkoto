@@ -128,17 +128,14 @@ struct WordListPane: View {
                 favoriteButton(item)
             }
 
-            Text(item.meaning)
-                .font(.body)
+            MarkdownText(item.meaning, font: .body)
                 .foregroundStyle(theme.cardForeground)
             if let usage = item.usage, !usage.isEmpty {
-                Text(usage)
-                    .font(.footnote)
+                MarkdownText(usage, font: .footnote)
                     .foregroundStyle(theme.mutedForeground)
             }
             if let example = item.example, !example.isEmpty {
-                Text(example)
-                    .font(.footnote.italic())
+                MarkdownText(example, font: .footnote.italic())
                     .foregroundStyle(theme.mutedForeground)
             }
         }

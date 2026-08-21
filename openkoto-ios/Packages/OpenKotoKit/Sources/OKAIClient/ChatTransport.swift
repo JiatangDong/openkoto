@@ -13,6 +13,8 @@ public struct ChatRequest: Sendable {
         /// 单词释义。目前所有 purpose 都走同一个模型；带上它是为了将来真要按用途
         /// 路由到不同模型时，调用点不必回头改。
         case wordGloss
+        /// 网页/粘贴素材清洗：判定哪些行是网页噪音。
+        case webClean
     }
 
     public var purpose: Purpose

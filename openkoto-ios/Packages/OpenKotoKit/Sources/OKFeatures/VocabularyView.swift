@@ -345,7 +345,7 @@ struct VocabularyView: View {
                             .foregroundStyle(theme.mutedForeground)
                     }
                 }
-                Text(favorite.meaning).font(.subheadline)
+                MarkdownText(favorite.meaning)
                 HStack(spacing: 8) {
                     if let retention = RetentionBucket.retention(for: favorite) {
                         Text(L("vocabulary.retention\(Int((retention * 100).rounded()))"))

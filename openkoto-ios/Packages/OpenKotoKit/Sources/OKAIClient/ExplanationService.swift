@@ -77,6 +77,62 @@ public struct ExplanationService: Sendable {
         return item
     }
 
+    /// 网页素材清洗：让模型指出哪些行属于网页噪音（导航、广告、推荐位、评论、页脚……）。
+    ///
+    /// 模型只返回行号，不返回改写后的正文——理由见 `WebContentCleaner`。
+    /// `lines` 是 (原始行号, 预览文本)；返回 (要删的行号, 模型给出的干净标题)。
+    public func detectWebNoiseLines(
+        lines: [(index: Int, preview: String)],
+        wantTitle: Bool,
+        config: ModelConfig,
+        apiKey: String?
+    ) async throws -> ([Int], String?) {
+        guard !lines.isEmpty else { return ([], nil) }
+        let request = ChatRequest(
+            purpose: .webClean,
+            systemPrompt: PromptLibrary.webCleanSystemPrompt(wantTitle: wantTitle),
+            userMessage: PromptLibrary.webCleanUserMessage(lines: lines),
+            // 判定题不需要发挥。0 温度下同一篇网页两次清洗结果一致，用户重试才有意义。
+            temperature: 0,
+            timeout: 120
+        )
+        let content = try await transport.complete(request, config: config, apiKey: apiKey)
+        let parsed = try LLMJSONExtractor.parse(
+            NoiseLineResponse.self, from: content, requestID: request.requestID)
+        return (parsed.dropIndices, parsed.cleanTitle)
+    }
+
+    /// 清洗响应。`drop` 偶尔会回成字符串数组（"3" 而非 3），故自定义解码兼容两种形态——
+    /// 否则一个引号就让整批清洗白跑。
+    private struct NoiseLineResponse: Decodable {
+        let dropIndices: [Int]
+        let cleanTitle: String?
+
+        private enum CodingKeys: String, CodingKey { case drop, title }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            let raw = (try? container.decode([LenientInt].self, forKey: .drop)) ?? []
+            dropIndices = raw.compactMap(\.value)
+            let title = (try? container.decodeIfPresent(String.self, forKey: .title)) ?? nil
+            cleanTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        }
+    }
+
+    private struct LenientInt: Decodable {
+        let value: Int?
+        init(from decoder: Decoder) throws {
+            let single = try decoder.singleValueContainer()
+            if let int = try? single.decode(Int.self) {
+                value = int
+            } else if let string = try? single.decode(String.self) {
+                value = Int(string.trimmingCharacters(in: .whitespaces))
+            } else {
+                value = nil
+            }
+        }
+    }
+
     /// 设置页“测试连接”：发一条最小 chat 请求，成功即返回，失败抛
     /// `AIRequestFailure`（内含 `AIClientError` 分类与诊断快照）。
     public func testConnection(config: ModelConfig, apiKey: String?) async throws {

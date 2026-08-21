@@ -20,12 +20,37 @@ struct MediaPlayerView: View {
 
     @AppStorage("reader.fontSize") private var fontSize: Double = 18
     @AppStorage("reader.showReading") private var showReading = false
+    /// 字幕显示：原文 / 对照 / 只看译文。与阅读器共用同一套模式，
+    /// 但**单独存一个键**——看视频和读文章想要的默认形态不一样。
+    @AppStorage("media.viewMode") private var viewMode: ReaderViewMode = .original
+
+    /// 媒体页的三个弹窗收敛成一个。
+    ///
+    /// **多个 `.sheet` 叠在同一个 view 上，`dismiss()` 会失灵。** 弹是弹得出来的
+    /// （哪个 binding 变 true 就弹哪个），但被展示内容拿到的 `dismiss` 环境值绑的是
+    /// 最后一个 `.sheet` 修饰符的那个 presentation —— 于是「全文翻译」范围窗里的
+    /// 「取消」实际是把一个本来就为 false 的 binding 又置了一次 false，窗口纹丝不动。
+    /// 用户看到的就是"取消点了没有任何反应，只能强退"。
+    ///
+    /// 与 `LibraryView` 把三个 `.fileImporter` 收敛成一个是同一条教训：
+    /// **一个 view 只挂一个 presentation。**
+    private enum PlayerSheet: Identifiable {
+        case batch(ContentStore.BatchState.Kind)
+        case transcribe
+        case transcript
+
+        var id: String {
+            switch self {
+            case .batch(let kind): "batch-\(kind.rawValue)"
+            case .transcribe: "transcribe"
+            case .transcript: "transcript"
+            }
+        }
+    }
 
     @State private var playback = PlaybackModel()
     @State private var selectedSegmentID: UUID?
-    @State private var showTranscript = false
-    @State private var showTranscribe = false
-    @State private var batchKind: ContentStore.BatchState.Kind?
+    @State private var activeSheet: PlayerSheet?
     @State private var isLoaded = false
     @State private var lastSavedAt: Date?
     /// 盲听：遮住字幕，逼自己先用耳朵听。**不持久化**——下次点开视频却看不见字幕，
@@ -33,11 +58,18 @@ struct MediaPlayerView: View {
     @State private var isBlind = false
     /// 盲听中临时揭晓的那一句；播放推进到下一句就重新遮上。
     @State private var revealedID: UUID?
+    /// 媒体文件位置，开页时解析一次就存住。
+    ///
+    /// **不能在 body 里现算。** `store.mediaFileURL` 解析 bookmark 要走 XPC，
+    /// 而这个 body 跟着 `currentTime` 高频重算——实测两分钟 251 次 XPC 往返，
+    /// 且那个 agent 的连接一断（休眠唤醒后必现）解析就返回 nil，
+    /// 界面随即翻成"媒体文件不可用"。详见 `ContentStore.resolvedMediaURLs`。
+    @State private var mediaURL: URL?
 
     /// 端上转写要 iOS 26，且必须真的有媒体文件可读。
     private var canTranscribe: Bool {
         guard #available(iOS 26, *) else { return false }
-        return store.mediaFileURL(for: media) != nil
+        return mediaURL != nil
     }
 
     /// 播放位置写库的最小间隔——每秒十次写库没有意义。
@@ -80,7 +112,7 @@ struct MediaPlayerView: View {
                 // 文件"找得到"不等于"读得了"：权限没拿到 / 文件损坏 / iCloud 没下完，
                 // 都是解析得出 URL 但资产加载失败。这两种都归到"媒体不可用"，
                 // 别让用户对着一块沉默的黑屏猜。
-                isAvailable: store.mediaFileURL(for: media) != nil && !playback.isUnplayable)
+                isAvailable: mediaURL != nil && !playback.isUnplayable)
             TransportBar(
                 currentTime: playback.currentTime,
                 duration: playback.duration,
@@ -101,6 +133,7 @@ struct MediaPlayerView: View {
                 loopingID: playback.loopingSegmentID,
                 readingRuns: readingRuns,
                 fontSize: fontSize,
+                viewMode: viewMode,
                 isBlind: isBlind,
                 revealedID: revealedID,
                 onTap: { segment in
@@ -146,38 +179,42 @@ struct MediaPlayerView: View {
         .onChange(of: timelineKey) { playback.updateTimeline(segments: segments) }
         // 播到下一句就重新遮上——单句循环时 activeID 不变，揭晓会一直留着，正合跟读所需。
         .onChange(of: playback.activeID) { revealedID = nil }
-        .sheet(item: $batchKind) { kind in
-            if let articleID {
-                BatchScopeSheet(
-                    articleID: articleID, kind: kind,
-                    currentOrder: currentOrder)
-                    .presentationDetents([.medium])
-                    .okSheetSizing(.form)
-            }
-        }
-        .sheet(isPresented: $showTranscribe) {
-            if #available(iOS 26, *) {
-                TranscribeSheet(media: media)
-            }
-        }
-        .sheet(isPresented: $showTranscript) {
-            if let article {
-                NavigationStack {
-                    // 「当文章读」白捡的功能：字幕句就是普通 segment，
-                    // 直接把现成的正文渲染器拿过来即可。
-                    NativeChapterView(
-                        segments: segments,
-                        selectedSegmentID: $selectedSegmentID,
-                        fontSize: fontSize,
-                        viewMode: .original,
-                        readingRuns: readingRuns
-                    )
-                    .background(theme.background)
-                    .navigationTitle(article.title)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button(L("common.close")) { showTranscript = false }
+        // **只能有一个。** 见 `PlayerSheet` 的注释：叠多个的话弹得出来但关不掉。
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .batch(let kind):
+                if let articleID {
+                    BatchScopeSheet(
+                        articleID: articleID, kind: kind,
+                        currentOrder: currentOrder)
+                        .presentationDetents([.medium])
+                        .okSheetSizing(.form)
+                }
+            case .transcribe:
+                if #available(iOS 26, *) {
+                    TranscribeSheet(media: media)
+                }
+            case .transcript:
+                if let article {
+                    NavigationStack {
+                        // 「当文章读」白捡的功能：字幕句就是普通 segment，
+                        // 直接把现成的正文渲染器拿过来即可。
+                        NativeChapterView(
+                            segments: segments,
+                            selectedSegmentID: $selectedSegmentID,
+                            fontSize: fontSize,
+                            // 跟着字幕列表的显示模式走：在列表里选了「译文」，
+                            // 进「当文章读」却又变回原文，只会让人以为设置没生效。
+                            viewMode: viewMode,
+                            readingRuns: readingRuns
+                        )
+                        .background(theme.background)
+                        .navigationTitle(article.title)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button(L("common.close")) { activeSheet = nil }
+                            }
                         }
                     }
                 }
@@ -189,18 +226,25 @@ struct MediaPlayerView: View {
     private var playerToolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
             Menu {
+                // 原文 / 对照 / 译文。与阅读器同一套模式、同一套文案——
+                // 全文翻译完之后想「只看译文」或「对照着看」，入口就在这。
+                Picker(selection: $viewMode, label: Text(verbatim: "")) {
+                    ForEach(ReaderViewMode.allCases) { mode in
+                        Text(L(mode.titleKey)).tag(mode)
+                    }
+                }
                 Toggle(isOn: $showReading) {
                     Label(L("reader.showReading"), systemImage: "character.phonetic")
                 }
                 .disabled(articleID.map { store.readingRuns(for: $0).isEmpty } ?? true)
                 Button {
-                    showTranscript = true
+                    activeSheet = .transcript
                 } label: {
                     Label(L("media.readAsArticle"), systemImage: "text.alignleft")
                 }
                 if canTranscribe {
                     Button {
-                        showTranscribe = true
+                        activeSheet = .transcribe
                     } label: {
                         Label(
                             segments.isEmpty
@@ -213,12 +257,12 @@ struct MediaPlayerView: View {
                 if !segments.isEmpty {
                     Section {
                         Button {
-                            batchKind = .explain
+                            activeSheet = .batch(.explain)
                         } label: {
                             Label(L("reader.batch.explainAll"), systemImage: "sparkles")
                         }
                         Button {
-                            batchKind = .translate
+                            activeSheet = .batch(.translate)
                         } label: {
                             Label(
                                 L("reader.batch.translateAll"),
@@ -301,8 +345,10 @@ struct MediaPlayerView: View {
         await store.openArticle(articleID)
         guard !isLoaded else { return }
         isLoaded = true
+        // 整个播放会话只解析这一次，之后 body 读的都是这个 @State。
+        mediaURL = store.mediaFileURL(for: media)
         playback.load(
-            url: store.mediaFileURL(for: media),
+            url: mediaURL,
             segments: store.segments(for: articleID),
             startAt: store.progress(ofMedia: media.id)?.position ?? 0)
         // 从搜索结果进来：定位到那一句，并把播放位置也带过去

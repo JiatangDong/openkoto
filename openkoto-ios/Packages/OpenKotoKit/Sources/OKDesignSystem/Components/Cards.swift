@@ -66,7 +66,7 @@ public struct VocabCard: View {
                         .accessibilityLabel(Text("vocab.speak", bundle: .module))
                     }
                 }
-                Text(meaning).font(.subheadline)
+                MarkdownText(meaning)
             }
             Spacer(minLength: 0)
             Button(action: onToggleFavorite) {
@@ -106,10 +106,9 @@ public struct GrammarCard: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(point).font(.subheadline.bold())
-            Text(explanation).font(.subheadline)
+            MarkdownText(explanation)
             if let example {
-                Text(example)
-                    .font(.footnote)
+                MarkdownText(example, font: .footnote)
                     .foregroundStyle(theme.mutedForeground)
             }
         }
@@ -134,7 +133,7 @@ public struct TranslationBox: View {
     }
 
     public var body: some View {
-        Text(text)
+        MarkdownText(text, font: .body)
             .foregroundStyle(theme.primary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)

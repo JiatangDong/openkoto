@@ -202,18 +202,16 @@ struct ReviewSessionView: View {
                 }
                 if showAnswer {
                     VStack(spacing: 8) {
-                        Text(favorite.meaning)
-                            .font(.title3.weight(.medium))
+                        MarkdownText(
+                            favorite.meaning, font: .title3.weight(.medium), alignment: .center)
                         if let usage = favorite.usage, !usage.isEmpty {
-                            Text(usage)
-                                .font(.subheadline)
+                            MarkdownText(usage, font: .subheadline, alignment: .center)
                                 .foregroundStyle(theme.mutedForeground)
                         }
                         if let example = favorite.example, !example.isEmpty {
-                            Text(example)
-                                .font(.subheadline.italic())
+                            MarkdownText(
+                                example, font: .subheadline.italic(), alignment: .center)
                                 .foregroundStyle(theme.mutedForeground)
-                                .multilineTextAlignment(.center)
                         }
                     }
                     .padding(.top, 4)

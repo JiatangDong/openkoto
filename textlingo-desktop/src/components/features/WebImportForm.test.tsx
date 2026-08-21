@@ -174,6 +174,86 @@ describe("WebImportForm smart cleaning mode", () => {
     expect(screen.queryByText("webImport.clean.summary")).not.toBeInTheDocument();
   });
 
+  it("cleans on demand in classic mode without switching modes", async () => {
+    mockInvoke({
+      clean_web_content_cmd: {
+        title: "原始标题",
+        content: CLEANED_CONTENT,
+        removed_lines: 2,
+        removed_chars: 18,
+        kept_lines: 2,
+        partial: false,
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<WebImportForm onCancel={() => {}} />);
+
+    await fetchPreview(user);
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("webImport.contentPlaceholder")).toHaveValue(RAW_CONTENT)
+    );
+
+    await user.click(screen.getByRole("button", { name: /webImport.clean.action/ }));
+
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("webImport.contentPlaceholder")).toHaveValue(
+        CLEANED_CONTENT
+      )
+    );
+    // 没切模式，经典模式仍然选中
+    expect(screen.getByRole("button", { name: /webImport.modes.classic/ })).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+  });
+
+  /// 手动清洗按编辑区当前的内容走，而不是抓取回来的那一版——用户可能已经手改过。
+  it("cleans the edited content, not the fetched snapshot", async () => {
+    mockInvoke({
+      clean_web_content_cmd: {
+        title: "",
+        content: "留下来的正文。",
+        removed_lines: 1,
+        removed_chars: 5,
+        kept_lines: 1,
+        partial: false,
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<WebImportForm onCancel={() => {}} />);
+
+    await fetchPreview(user);
+    const textarea = await screen.findByPlaceholderText("webImport.contentPlaceholder");
+    await waitFor(() => expect(textarea).toHaveValue(RAW_CONTENT));
+
+    await user.clear(textarea);
+    await user.type(textarea, "我自己贴进来的一段正文。");
+    await user.click(screen.getByRole("button", { name: /webImport.clean.action/ }));
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith(
+        "clean_web_content_cmd",
+        expect.objectContaining({ content: "我自己贴进来的一段正文。" })
+      )
+    );
+  });
+
+  it("disables the clean button when no AI model is configured", async () => {
+    mockInvoke({ get_config: { model_configs: [], active_model_id: undefined } });
+
+    const user = userEvent.setup();
+    render(<WebImportForm onCancel={() => {}} />);
+
+    await fetchPreview(user);
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("webImport.contentPlaceholder")).toHaveValue(RAW_CONTENT)
+    );
+
+    expect(screen.getByRole("button", { name: /webImport.clean.action/ })).toBeDisabled();
+  });
+
   it("warns when no AI model is configured", async () => {
     mockInvoke({ get_config: { model_configs: [], active_model_id: undefined } });
 

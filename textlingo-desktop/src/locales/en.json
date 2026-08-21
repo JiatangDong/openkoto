@@ -588,7 +588,8 @@
       "partial": "Part of the content could not be cleaned and was kept as-is. You can retry.",
       "showRaw": "Show raw extraction",
       "showCleaned": "Show cleaned result",
-      "retry": "Clean again"
+      "retry": "Clean again",
+      "action": "Clean with AI"
     },
     "errors": {
       "urlRequired": "Please enter a URL",

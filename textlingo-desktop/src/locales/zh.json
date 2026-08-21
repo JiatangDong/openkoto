@@ -593,7 +593,8 @@
       "partial": "部分内容清洗失败，已按原文保留，可点击重新清洗。",
       "showRaw": "查看原始抓取结果",
       "showCleaned": "查看清洗结果",
-      "retry": "重新清洗"
+      "retry": "重新清洗",
+      "action": "AI 清洗"
     },
     "errors": {
       "urlRequired": "请输入网页链接",

@@ -15,6 +15,9 @@ public enum PromptLibrary {
     /// 单词释义 Prompt 版本。
     public static let wordGlossVersion = "gloss-v1"
 
+    /// 网页素材清洗 Prompt 版本。
+    public static let webCleanVersion = "webclean-v1"
+
     /// 目标语言代码 → prompt 内使用的母语名（对齐 `segment_translate_explain` 映射表）。
     public static func nativeLanguageName(for targetLanguage: String) -> String {
         switch targetLanguage {
@@ -119,5 +122,49 @@ public enum PromptLibrary {
     /// 单词释义的 user message：词 + 它所在的句子（上下文决定义项）。
     public static func wordGlossUserMessage(word: String, sentence: String) -> String {
         "Word: \(word)\nSentence: \(sentence)"
+    }
+
+    /// 网页素材清洗 system prompt（对齐桌面 `ai_service.rs::detect_web_noise_lines`）。
+    ///
+    /// **模型只返回行号，不返回改写后的正文。** 学习素材必须与原文逐字一致：
+    /// 让模型整篇重写既费 token，又有漏字/改写/幻觉的风险——用户拿去精讲的那句话
+    /// 如果不是网页上原本那句，整个产品的前提就没了。
+    public static func webCleanSystemPrompt(wantTitle: Bool) -> String {
+        let schema = wantTitle
+            ? #"{"drop": [2, 5, 6], "title": "the clean article title, or an empty string if unclear"}"#
+            : #"{"drop": [2, 5, 6]}"#
+        return """
+            You are cleaning a web page that was converted to plain text, so it can be used as language-learning material.
+
+            You will receive numbered lines. Decide which lines are NOT part of the main article body.
+
+            DROP a line when it is:
+            - site navigation, menus, breadcrumbs, buttons, search boxes, login/subscribe prompts
+            - advertisements, promotional blurbs, paywall or membership pitches
+            - related/recommended article lists, "hot posts", tag clouds, category lists, pagination
+            - share widgets, like/favorite/view counters, comment threads, comment forms
+            - author bio boxes, editor signatures, copyright and legal footers, contact info, ICP/registration numbers
+            - cookie or privacy banners, app-download prompts, "click here", "read more", "back to top"
+            - standalone metadata that is not part of the text: bare timestamps, view counts, image credits, source attributions
+
+            KEEP a line when it is:
+            - the article title, headings and subheadings
+            - any paragraph, sentence, dialogue or list item of the main body
+            - lyrics, poems, quotes, or code that belong to the article
+            - anything you are not sure about — when in doubt, KEEP it
+
+            Rules:
+            - Judge each line only by whether it belongs to the article body, never by whether it is interesting or well written.
+            - Never rewrite, translate, summarize or reorder anything. You only report line numbers.
+            - Long lines are truncated for review and marked with "(len=N)", where N is the real character count. A long line is almost always body text.
+            - Return ONLY raw JSON, with no markdown fences and no explanation:
+            \(schema)
+            """
+    }
+
+    /// 清洗请求的 user message：带原始行号的待审行（对齐 Rust `"Lines to review:\n{}"`）。
+    public static func webCleanUserMessage(lines: [(index: Int, preview: String)]) -> String {
+        let numbered = lines.map { "[\($0.index)] \($0.preview)" }.joined(separator: "\n")
+        return "Lines to review:\n\(numbered)"
     }
 }

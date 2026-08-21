@@ -110,7 +110,7 @@ struct SourcePreviewSheet: View {
                 TranslationBox(explanation.translation)
             }
             section("explanation.explanation", icon: "text.book.closed") {
-                Text(explanation.explanation).font(.subheadline)
+                MarkdownText(explanation.explanation)
             }
             if !explanation.grammarPoints.isEmpty {
                 section("explanation.grammar", icon: "textformat.abc.dottedunderline") {
@@ -126,12 +126,14 @@ struct SourcePreviewSheet: View {
             }
             if let culture = explanation.culturalContext, !culture.isEmpty {
                 section("explanation.culture", icon: "building.columns") {
-                    Text(culture).font(.footnote).foregroundStyle(theme.mutedForeground)
+                    MarkdownText(culture, font: .footnote)
+                        .foregroundStyle(theme.mutedForeground)
                 }
             }
             if let tips = explanation.learningTips, !tips.isEmpty {
                 section("explanation.tips", icon: "lightbulb") {
-                    Text(tips).font(.footnote).foregroundStyle(theme.mutedForeground)
+                    MarkdownText(tips, font: .footnote)
+                        .foregroundStyle(theme.mutedForeground)
                 }
             }
         } else if let translation = segment.translation, !translation.isEmpty {

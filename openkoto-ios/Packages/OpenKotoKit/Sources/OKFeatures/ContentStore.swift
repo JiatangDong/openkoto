@@ -943,27 +943,52 @@ public final class ContentStore {
         }
     }
 
+    /// 本次进程内已解析成功的 bookmark。
+    ///
+    /// **必须缓存。** `mediaFileURL` 被 SwiftUI 的 body 直接调用（判断"媒体是否可用"），
+    /// 而播放页的 body 跟着 `currentTime` 高频重算——实测两分钟内解析了 251 次，
+    /// 每一次 `CFURLResolveBookmarkData` 都是一趟到 `com.apple.scopedbookmarksagent`
+    /// 的 XPC 往返。
+    ///
+    /// 这不只是浪费：那个 agent 的连接会断（休眠唤醒后日志里就是
+    /// `XPC_ERROR_CONNECTION_INTERRUPTED`），连接断掉时解析返回 nil，
+    /// 被 `try?` 一声不吭地咽掉 ⇒ 界面突然变成"媒体文件不可用"。
+    /// 文件一直好好在原处——**是我们自己把一个会瞬时失败的 XPC 调用
+    /// 当成了逐帧的 UI 判据**。这就是"视频文件时不时消失"的真相。
+    ///
+    /// 解析成功过一次就记住：此后的瞬时故障不会再把已经可用的媒体判成丢失。
+    @ObservationIgnored private var resolvedMediaURLs: [UUID: URL] = [:]
+
     /// 媒体文件的实际位置。引用模式下解析 bookmark；文件失效返回 nil（只影响播放）。
+    ///
+    /// 解析结果按本进程缓存，见 `resolvedMediaURLs`。
     public func mediaFileURL(for media: Media) -> URL? {
         if let fileName = media.fileName, let mediaStorage {
             let url = mediaStorage.directory(for: media.id).appendingPathComponent(fileName)
             return FileManager.default.fileExists(atPath: url.path) ? url : nil
         }
+        if let cached = resolvedMediaURLs[media.id] { return cached }
         guard let bookmarkData = media.bookmarkData else { return nil }
         var isStale = false
-        guard let url = MediaBookmark.resolve(bookmarkData, isStale: &isStale) else { return nil }
+        guard let url = MediaBookmark.resolve(bookmarkData, isStale: &isStale) else {
+            // 静默返回 nil 就是"文件神秘消失"的来源，至少留个可查的现场。
+            Self.logger.warning("bookmark resolve failed for media \(media.id, privacy: .public)")
+            return nil
+        }
         if isStale, let refreshed = MediaBookmark.data(for: url), let mediaRepository {
             let mediaID = media.id
             persist("refreshBookmark") { [mediaRepository] in
                 try await mediaRepository.updateBookmark(mediaID: mediaID, data: refreshed)
             }
         }
+        resolvedMediaURLs[media.id] = url
         return url
     }
 
     public func deleteMedia(_ mediaID: UUID) {
         guard let mediaRepository else { return }
         guard let index = medias.firstIndex(where: { $0.id == mediaID }) else { return }
+        resolvedMediaURLs[mediaID] = nil
         let media = medias.remove(at: index)
         if let articleID = mediaIDByArticle.first(where: { $0.value == mediaID })?.key {
             mediaIDByArticle[articleID] = nil

@@ -19,6 +19,8 @@ struct SubtitleListView: View {
     let loopingID: UUID?
     let readingRuns: [UUID: [ReadingRun]]
     let fontSize: Double
+    /// 原文 / 对照 / 只看译文。
+    let viewMode: ReaderViewMode
     /// 盲听：文本被遮住，只留时间与循环标记。
     let isBlind: Bool
     /// 盲听中被临时揭晓的那一句。
@@ -43,6 +45,7 @@ struct SubtitleListView: View {
                                 isLooping: segment.id == loopingID,
                                 runs: readingRuns[segment.id],
                                 fontSize: fontSize,
+                                viewMode: viewMode,
                                 isMasked: isBlind && segment.id != revealedID,
                                 onTap: { onTap(segment) },
                                 onExplain: { onExplain(segment) },
@@ -120,6 +123,8 @@ struct SubtitleRow: View {
     let isLooping: Bool
     let runs: [ReadingRun]?
     let fontSize: Double
+    /// 原文 / 对照 / 只看译文。
+    var viewMode: ReaderViewMode = .original
     /// 盲听遮罩。用 `.redacted` 而不是把文本换成占位符：
     /// 版式宽高完全不变，揭晓时不会整列跳动。
     var isMasked = false
@@ -127,50 +132,41 @@ struct SubtitleRow: View {
     let onExplain: () -> Void
     let onToggleLoop: () -> Void
 
+    /// 这一行主体显示什么文本。
+    ///
+    /// 盲听时**强制回到原文**：把译文亮出来等于把答案写在脸上，遮罩就白做了。
+    /// 「只看译文」模式下没译文的句子回落到原文——不允许"正文消失"，
+    /// 与 `NativeChapterView` 是同一条规矩（设计文档 §6.4）。
+    private var primaryText: String {
+        guard !isMasked, viewMode == .translation else { return segment.text }
+        return segment.translation ?? segment.text
+    }
+
+    /// 对照模式下挂在原文底下的那行译文。盲听时不显示，理由同上。
+    private var bilingualTranslation: String? {
+        guard viewMode == .bilingual, !isMasked else { return nil }
+        return segment.translation
+    }
+
+    /// 时间徽章宽度。译文行要按它缩进，才能和上面的句子左对齐。
+    private static let timeColumnWidth: CGFloat = 46
+    private static let columnSpacing: CGFloat = 10
+
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(Self.timeText(segment.startTime))
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(isActive ? theme.primary : theme.mutedForeground)
-                .frame(width: 46, alignment: .trailing)
-                .padding(.top, 6)
-
-            SentenceChip(
-                text: segment.text,
-                state: segment.explanation != nil
-                    ? .explained : segment.translation != nil ? .translated : .plain,
-                isSelected: isSelected,
-                fontSize: fontSize,
-                // 遮住时连注音一起遮——留着读音等于没遮。
-                runs: isMasked
-                    ? nil : runs?.map { RubyRun(text: $0.text, reading: $0.reading) },
-                action: onTap
-            )
-            .redacted(reason: isMasked ? .placeholder : [])
-            // 遮住时把点击从 chip 挪到上面一层透明视图：SwiftUI 对 redacted 子树里的
-            // 控件是否还响应点击并没有承诺，而"点一下揭晓"恰恰是盲听的唯一操作，
-            // 不能押在这上面。
-            .allowsHitTesting(!isMasked)
-            .overlay {
-                if isMasked {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture(perform: onTap)
-                        // 遮罩是环境值，会往下传给 overlay 的内容；这里清掉，
-                        // 让这层纯粹只做"接住点击"。
-                        .unredacted()
-                }
-            }
-            .accessibilityLabel(Text(isMasked ? L("media.blind.hidden") : segment.text))
-            .accessibilityAddTraits(.isButton)
-
-            Spacer(minLength: 0)
-
-            if isLooping {
-                Image(systemName: "repeat.1")
-                    .font(.caption)
-                    .foregroundStyle(theme.primary)
-                    .padding(.top, 6)
+        // 译文**必须自己占一整行**，不能塞进上面那个 HStack。
+        //
+        // 塞进去的话它会和末尾的 `Spacer` 抢宽度：`TranslationBox` 内部是
+        // `.frame(maxWidth: .infinity)`，Spacer 也是无限可伸缩，SwiftUI 于是把剩余
+        // 宽度**平分**给两者——译文只拿到半行甚至更窄，长句直接被截成「…」。
+        // 对不懂外语的用户来说，看不全的译文等于没有译文。
+        VStack(alignment: .leading, spacing: 4) {
+            sentenceRow
+            if let bilingualTranslation {
+                TranslationBox(bilingualTranslation)
+                    .font(.system(size: fontSize * 0.9))
+                    // 保底：永远按理想高度排版，宁可把行撑高也不截断。
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, Self.timeColumnWidth + Self.columnSpacing)
             }
         }
         .padding(.vertical, 2)
@@ -189,6 +185,55 @@ struct SubtitleRow: View {
                 Label(
                     isLooping ? L("media.loop.stop") : L("media.loop.start"),
                     systemImage: "repeat.1")
+            }
+        }
+    }
+
+    private var sentenceRow: some View {
+        HStack(alignment: .top, spacing: Self.columnSpacing) {
+            Text(Self.timeText(segment.startTime))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(isActive ? theme.primary : theme.mutedForeground)
+                .frame(width: Self.timeColumnWidth, alignment: .trailing)
+                .padding(.top, 6)
+
+            SentenceChip(
+                text: primaryText,
+                state: segment.explanation != nil
+                    ? .explained : segment.translation != nil ? .translated : .plain,
+                isSelected: isSelected,
+                fontSize: fontSize,
+                // 遮住时连注音一起遮——留着读音等于没遮。
+                // 只看译文时也不给注音：注音是按原文切的词，配在译文上纯属错位。
+                runs: isMasked || viewMode == .translation
+                    ? nil : runs?.map { RubyRun(text: $0.text, reading: $0.reading) },
+                action: onTap
+            )
+            .redacted(reason: isMasked ? .placeholder : [])
+            // 遮住时把点击从 chip 挪到上面一层透明视图：SwiftUI 对 redacted 子树里的
+            // 控件是否还响应点击并没有承诺，而"点一下揭晓"恰恰是盲听的唯一操作，
+            // 不能押在这上面。
+            .allowsHitTesting(!isMasked)
+            .overlay {
+                if isMasked {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture(perform: onTap)
+                        // 遮罩是环境值，会往下传给 overlay 的内容；这里清掉，
+                        // 让这层纯粹只做"接住点击"。
+                        .unredacted()
+                }
+            }
+            .accessibilityLabel(Text(isMasked ? L("media.blind.hidden") : primaryText))
+            .accessibilityAddTraits(.isButton)
+
+            Spacer(minLength: 0)
+
+            if isLooping {
+                Image(systemName: "repeat.1")
+                    .font(.caption)
+                    .foregroundStyle(theme.primary)
+                    .padding(.top, 6)
             }
         }
     }

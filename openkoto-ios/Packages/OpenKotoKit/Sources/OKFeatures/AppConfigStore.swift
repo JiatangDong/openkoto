@@ -18,6 +18,7 @@ public final class AppConfigStore {
     @ObservationIgnored private let keychain: KeychainStore
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let explanationService: ExplanationService
+    @ObservationIgnored private let webCleaner: WebContentCleaner
 
     private static let configsKey = "ai.modelConfigs.v1"
     private static let targetLanguageKey = "learning.targetLanguage"
@@ -25,11 +26,13 @@ public final class AppConfigStore {
     public init(
         keychain: KeychainStore = KeychainStore(),
         defaults: UserDefaults = .standard,
-        explanationService: ExplanationService = ExplanationService()
+        explanationService: ExplanationService = ExplanationService(),
+        webCleaner: WebContentCleaner = WebContentCleaner()
     ) {
         self.keychain = keychain
         self.defaults = defaults
         self.explanationService = explanationService
+        self.webCleaner = webCleaner
         if let data = defaults.data(forKey: Self.configsKey),
            let saved = try? JSONDecoder().decode([ModelConfig].self, from: data) {
             configs = saved
@@ -148,6 +151,24 @@ public final class AppConfigStore {
             targetLanguage: targetLanguage,
             config: config,
             apiKey: apiKey(for: config.id)
+        )
+    }
+
+    /// 用当前生效模型清洗导入素材：删掉导航/广告/推荐位/评论等无关行，正文逐字不动。
+    /// 未配置模型抛 `.notConfigured`；清洗本身的失败抛 `WebContentCleaner.CleanError`，
+    /// 调用方据此保留原文。
+    public func cleanImportedContent(
+        title: String?,
+        content: String,
+        onProgress: (@Sendable (Int, Int) -> Void)? = nil
+    ) async throws -> WebContentCleaner.Result {
+        guard let config = activeConfig else { throw AIClientError.notConfigured }
+        return try await webCleaner.clean(
+            title: title,
+            content: content,
+            config: config,
+            apiKey: apiKey(for: config.id),
+            onProgress: onProgress
         )
     }
 

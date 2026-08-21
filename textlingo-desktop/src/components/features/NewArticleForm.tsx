@@ -4,9 +4,11 @@ import { useTranslation } from "react-i18next";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
-import { FileText, Loader2, Link, Clipboard, Cloud, Info } from "lucide-react";
+import { FileText, Loader2, Link, Clipboard, Cloud, Info, Sparkles } from "lucide-react";
 import { getApiClient } from "../../lib/api";
 import { Article } from "../../types";
+import { useAiClean, CLEAN_MIN_CHARS } from "../../lib/hooks";
+import { AiCleanPanel } from "./AiCleanPanel";
 
 interface NewArticleFormProps {
     onSave?: (article: Article) => void;
@@ -23,6 +25,39 @@ export function NewArticleForm({ onSave, onCancel, initialArticle }: NewArticleF
     const [isFetching, setIsFetching] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [useBackend, setUseBackend] = useState(false);
+    const {
+        aiReady,
+        isCleaning,
+        progress: cleanProgress,
+        result: cleanResult,
+        showingRaw,
+        clean,
+        toggleRaw,
+        reset: resetClean,
+        raw: cleanRaw,
+    } = useAiClean();
+
+    const isBusy = isSaving || isFetching || isCleaning;
+    const canClean = aiReady && !isBusy && content.trim().length >= CLEAN_MIN_CHARS;
+
+    /** 粘贴进来的正文往往也带着导航、版权尾巴——就地清一遍，正文逐字不动 */
+    const runClean = async (source: { title: string; content: string }) => {
+        setError(null);
+        const outcome = await clean(source);
+        setTitle(outcome.title);
+        setContent(outcome.content);
+        if (outcome.status === "failed") setError(outcome.error);
+    };
+
+    const handleToggleRaw = () => {
+        const next = toggleRaw();
+        if (!next) return;
+        setTitle(next.title);
+        setContent(next.content);
+    };
+
+    // 「重新清洗」从清洗前那一版重来，否则会在已删过的正文上再删一轮
+    const handleRetryClean = () => runClean(cleanRaw() ?? { title, content });
 
     // Load config and check if backend is available
     useEffect(() => {
@@ -75,6 +110,7 @@ export function NewArticleForm({ onSave, onCancel, initialArticle }: NewArticleF
     const handlePaste = async () => {
         try {
             const text = await navigator.clipboard.readText();
+            resetClean();
             setContent(text);
         } catch (err) {
             setError(t("newArticle.errors.clipboardError"));
@@ -118,6 +154,7 @@ export function NewArticleForm({ onSave, onCancel, initialArticle }: NewArticleF
 
         setIsFetching(true);
         setError(null);
+        resetClean();
         try {
             const fetched = await fetchFromUrl(url);
 
@@ -147,6 +184,7 @@ export function NewArticleForm({ onSave, onCancel, initialArticle }: NewArticleF
                 // Auto-fetch after pasting URL
                 setIsFetching(true);
                 setError(null);
+                resetClean();
                 try {
                     const fetched = await fetchFromUrl(url);
 
@@ -245,21 +283,51 @@ export function NewArticleForm({ onSave, onCancel, initialArticle }: NewArticleF
                     )}
                 </div>
 
+                <AiCleanPanel
+                    isCleaning={isCleaning}
+                    progress={cleanProgress}
+                    result={cleanResult}
+                    showingRaw={showingRaw}
+                    onToggleRaw={handleToggleRaw}
+                    onRetry={handleRetryClean}
+                    disabled={isBusy}
+                />
+
                 {/* Content */}
                 <div>
-                    <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center justify-between gap-2 mb-2">
                         <label className="block text-sm font-medium text-foreground">
-                            {t("newArticle.contentLabel")} <span className="text-red-500">{t("newArticle.required")}</span>
+                            {showingRaw ? t("webImport.contentLabelRaw") : t("newArticle.contentLabel")}{" "}
+                            <span className="text-red-500">{t("newArticle.required")}</span>
                         </label>
-                        <Button variant="ghost" size="sm" onClick={handlePaste}>
-                            {t("newArticle.pasteFromClipboard")}
-                        </Button>
+                        <div className="flex items-center gap-1">
+                            {/* 粘进来的网页正文常带导航/版权尾巴，就地清一遍再逐句精讲 */}
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                className="gap-1.5"
+                                onClick={() => runClean({ title, content })}
+                                disabled={!canClean}
+                                title={aiReady ? undefined : t("webImport.modes.smartUnavailable")}
+                            >
+                                {isCleaning ? (
+                                    <Loader2 size={14} className="animate-spin" />
+                                ) : (
+                                    <Sparkles size={14} />
+                                )}
+                                {t("webImport.clean.action")}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={handlePaste} disabled={isBusy}>
+                                {t("newArticle.pasteFromClipboard")}
+                            </Button>
+                        </div>
                     </div>
                     <Textarea
                         value={content}
                         onChange={(e) => setContent(e.target.value)}
                         placeholder={t("newArticle.contentPlaceholder")}
                         className="min-h-[300px] font-mono text-sm"
+                        disabled={isCleaning}
                     />
                 </div>
             </div>

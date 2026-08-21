@@ -583,7 +583,8 @@
       "partial": "一部のクリーニングに失敗し、原文のまま残しました。再実行できます。",
       "showRaw": "抽出結果の原文を表示",
       "showCleaned": "クリーニング結果を表示",
-      "retry": "再クリーニング"
+      "retry": "再クリーニング",
+      "action": "AI で整理"
     },
     "errors": {
       "urlRequired": "URLを入力してください",

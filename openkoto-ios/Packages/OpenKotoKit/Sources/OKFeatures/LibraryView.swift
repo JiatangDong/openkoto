@@ -1,5 +1,6 @@
 #if os(iOS)
 import SwiftUI
+import OKAIClient
 import OKModels
 import OKBooks
 import OKDesignSystem
@@ -344,6 +345,7 @@ private struct ArticleCard: View {
 /// 文件与网址导入解析后填入同一编辑区，用户可复核再保存。
 private struct ImportSheet: View {
     @Environment(ContentStore.self) private var store
+    @Environment(AppConfigStore.self) private var appConfig
     @Environment(\.dismiss) private var dismiss
     @Environment(\.theme) private var theme
 
@@ -400,6 +402,13 @@ private struct ImportSheet: View {
     @State private var pendingPicker: FilePicker?
     @State private var isFetching = false
     @State private var errorMessage: String?
+    /// AI 清洗态。`rawSnapshot` 是清洗前的原文——清洗失败或用户要看原文时回滚用，
+    /// 没有它的话「清洗把正文删没了」就是不可逆的。
+    @State private var isCleaning = false
+    @State private var cleanProgress: (done: Int, total: Int)?
+    @State private var cleanResult: WebContentCleaner.Result?
+    @State private var rawSnapshot: (title: String, content: String)?
+    @State private var showingRaw = false
     /// 视频/音频模式：字幕必选，媒体文件可选（只导字幕就是纯文稿，当文章读）。
     @State private var subtitleURL: URL?
     @State private var mediaURL: URL?
@@ -475,8 +484,10 @@ private struct ImportSheet: View {
                         .disabled(!canSave)
                 }
             }
+            // 标题保持中性：这个 alert 现在也承载选文件失败与 AI 清洗失败，
+            // 再挂「无法抓取该网页」会答非所问。
             .alert(
-                L("import.url.failed"),
+                L("import.failed"),
                 isPresented: Binding(
                     get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })
             ) {
@@ -537,6 +548,145 @@ private struct ImportSheet: View {
                             .allowsHitTesting(false)
                     }
                 }
+            cleanRows
+        }
+    }
+
+    // MARK: - AI 清洗
+
+    /// 抓回来的网页/粘贴进来的正文常常混着导航、推荐位、评论、页脚。
+    /// 这一条只做减法：模型判定哪些**行**是噪音，留下的每一行都还是原文那一行。
+    @ViewBuilder
+    private var cleanRows: some View {
+        if isCleaning {
+            HStack(spacing: 8) {
+                ProgressView()
+                Text(cleanProgressText)
+                    .font(.footnote)
+                    .foregroundStyle(theme.mutedForeground)
+            }
+        } else {
+            Button {
+                cleanWithAI()
+            } label: {
+                // Form 行里的 Button 光靠 `.disabled` 不会变灰（实测标签仍是纯黑），
+                // 于是"没配模型/正文太短"时看起来还是个能点的按钮，点了却毫无反应。
+                Label(
+                    L(cleanResult == nil ? "import.clean.button" : "import.clean.retry"),
+                    systemImage: "sparkles"
+                )
+                .foregroundStyle(canClean ? theme.foreground : theme.mutedForeground)
+            }
+            .disabled(!canClean)
+
+            if !appConfig.hasUsableModel {
+                Text(L("import.clean.noModel"))
+                    .font(.footnote)
+                    .foregroundStyle(theme.mutedForeground)
+            }
+        }
+
+        if let cleanResult, !isCleaning {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(
+                    cleanResult.removedLines > 0
+                        ? String(
+                            format: L("import.clean.summary"),
+                            cleanResult.removedLines, cleanResult.removedChars)
+                        : L("import.clean.nothingRemoved")
+                )
+                .font(.footnote)
+                if cleanResult.partial {
+                    Text(L("import.clean.partial"))
+                        .font(.footnote)
+                        .foregroundStyle(theme.destructive)
+                }
+                if cleanResult.removedLines > 0 {
+                    Button(L(showingRaw ? "import.clean.showCleaned" : "import.clean.showRaw")) {
+                        toggleRaw()
+                    }
+                    .font(.footnote)
+                }
+            }
+        }
+    }
+
+    /// 没配模型、正文为空、或正在忙时不给点——点了也只会失败。
+    private var canClean: Bool {
+        appConfig.hasUsableModel && !isFetching && !isCleaning
+            && content.trimmingCharacters(in: .whitespacesAndNewlines).count
+                >= WebContentCleaner.minResultChars
+    }
+
+    private var cleanProgressText: String {
+        guard let cleanProgress, cleanProgress.total > 1 else { return L("import.clean.running") }
+        return String(
+            format: L("import.clean.progress"), cleanProgress.done, cleanProgress.total)
+    }
+
+    private func cleanWithAI() {
+        // 每次清洗都从原文重来：在已清洗结果上再清一次会越删越少，
+        // 而用户点「重新清洗」的本意是"换个结果"，不是"再删一轮"。
+        let source = rawSnapshot ?? (title: title, content: content)
+        rawSnapshot = source
+        isCleaning = true
+        showingRaw = false
+        cleanResult = nil
+        cleanProgress = nil
+        errorMessage = nil
+
+        Task {
+            defer {
+                isCleaning = false
+                cleanProgress = nil
+            }
+            do {
+                let result = try await appConfig.cleanImportedContent(
+                    title: source.title.isEmpty ? nil : source.title,
+                    content: source.content,
+                    onProgress: { done, total in
+                        Task { @MainActor in cleanProgress = (done, total) }
+                    })
+                title = result.title ?? source.title
+                content = result.content
+                cleanResult = result
+            } catch {
+                // 清洗失败不能把正文弄丢——原样退回抓取/粘贴的结果。
+                title = source.title
+                content = source.content
+                errorMessage = ImportSheet.cleanFailureMessage(for: error)
+            }
+        }
+    }
+
+    private func toggleRaw() {
+        guard let cleanResult, let rawSnapshot else { return }
+        if showingRaw {
+            title = cleanResult.title ?? rawSnapshot.title
+            content = cleanResult.content
+        } else {
+            title = rawSnapshot.title
+            content = rawSnapshot.content
+        }
+        showingRaw.toggle()
+    }
+
+    /// 失败原因要说清楚：「没配模型」「模型把正文删没了」「网络/额度」三种的下一步动作完全不同。
+    static func cleanFailureMessage(for error: Error) -> String {
+        switch error {
+        case let aiError as AIClientError:
+            return userMessage(for: aiError)
+        case let failure as AIRequestFailure:
+            return userMessage(for: failure.error)
+        case WebContentCleaner.CleanError.noContent:
+            return L("import.clean.failed.noContent")
+        case WebContentCleaner.CleanError.tooShort:
+            return L("import.clean.failed.tooShort")
+        case WebContentCleaner.CleanError.allBatchesFailed(let underlying):
+            if let underlying { return userMessage(for: underlying) }
+            return L("import.clean.failed.generic")
+        default:
+            return LibraryView.message(for: error)
         }
     }
 
@@ -557,6 +707,7 @@ private struct ImportSheet: View {
                 }
                 do {
                     let parsed = try TextImport.readTextFile(at: url)
+                    resetCleanState()
                     title = parsed.title
                     content = parsed.content
                     mode = .paste
@@ -572,6 +723,7 @@ private struct ImportSheet: View {
     private func fetchURL() {
         isFetching = true
         errorMessage = nil
+        resetCleanState()
         Task {
             defer { isFetching = false }
             do {
@@ -583,6 +735,14 @@ private struct ImportSheet: View {
                 errorMessage = String(describing: error)
             }
         }
+    }
+
+    /// 换了一份正文，上一次的清洗结果与原文快照都作废——
+    /// 留着的话「查看原文」会把用户换掉的那篇文章又贴回来。
+    private func resetCleanState() {
+        cleanResult = nil
+        rawSnapshot = nil
+        showingRaw = false
     }
 
     /// 字幕必选，媒体文件可选：只导字幕也成立——那就是一篇带时间轴的文稿。

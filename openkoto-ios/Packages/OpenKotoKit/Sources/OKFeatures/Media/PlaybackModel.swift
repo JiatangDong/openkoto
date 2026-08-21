@@ -66,6 +66,10 @@ final class PlaybackModel {
         updateTimeline(segments: segments)
         releaseScopedAccess()
         isUnplayable = false
+        // 时长必须清零重来。留着上一次成功加载的值，会让"这次读不了"伪装成正常：
+        // 传输条照常显示 1:19:24，`saveProgress` 的 `duration > 0` 闸门也照常放行，
+        // 于是又把观看进度覆写成 0。
+        duration = 0
 
         guard let url else {
             // 没有媒体文件（只导了字幕，或引用失效）：文稿照常能读，只是不能播。

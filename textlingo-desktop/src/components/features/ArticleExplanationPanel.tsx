@@ -180,7 +180,9 @@ export const ArticleExplanationPanel: React.FC<ArticleExplanationPanelProps> = (
                         title={t("articleReader.translation") || "Translation"}
                     >
                         <div className="text-foreground leading-relaxed">
-                            {explanation?.translation || (
+                            {explanation?.translation ? (
+                                <MarkdownContent content={explanation.translation} />
+                            ) : (
                                 isLoading && streamingContent?.includes("Translation") ? (t("articleReader.translating") || "Translating...") : null
                             )}
                             {/* Fallback for streaming raw text if not parsed yet */}
@@ -219,7 +221,9 @@ export const ArticleExplanationPanel: React.FC<ArticleExplanationPanelProps> = (
                                                 {isFavorited ? <Check size={14} /> : <Star size={14} />}
                                             </Button>
                                         </div>
-                                        <div className="text-sm text-muted-foreground mb-1">{item.meaning}</div>
+                                        <div className="text-sm text-muted-foreground mb-1">
+                                            <MarkdownContent content={item.meaning} />
+                                        </div>
                                     </div>
                                 );
                             })}
@@ -250,7 +254,9 @@ export const ArticleExplanationPanel: React.FC<ArticleExplanationPanelProps> = (
                                                 {isFavorited ? <Check size={14} /> : <Star size={14} />}
                                             </Button>
                                         </div>
-                                        <p className="text-sm text-muted-foreground leading-relaxed">{point.explanation}</p>
+                                        <div className="text-sm text-muted-foreground leading-relaxed">
+                                            <MarkdownContent content={point.explanation} />
+                                        </div>
                                     </div>
                                 );
                             })}

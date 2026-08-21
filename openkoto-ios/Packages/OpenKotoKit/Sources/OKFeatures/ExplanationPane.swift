@@ -163,7 +163,7 @@ struct ExplanationPane: View {
             TranslationBox(explanation.translation)
         }
         section("explanation.explanation", icon: "text.book.closed") {
-            Text(explanation.explanation).font(.subheadline)
+            MarkdownText(explanation.explanation)
         }
         if !explanation.vocabulary.isEmpty {
             section("explanation.vocabulary", icon: "character.book.closed") {
@@ -200,12 +200,14 @@ struct ExplanationPane: View {
         }
         if let culture = explanation.culturalContext {
             section("explanation.culture", icon: "building.columns") {
-                Text(culture).font(.footnote).foregroundStyle(theme.mutedForeground)
+                MarkdownText(culture, font: .footnote)
+                    .foregroundStyle(theme.mutedForeground)
             }
         }
         if let tips = explanation.learningTips {
             section("explanation.tips", icon: "lightbulb") {
-                Text(tips).font(.footnote).foregroundStyle(theme.mutedForeground)
+                MarkdownText(tips, font: .footnote)
+                    .foregroundStyle(theme.mutedForeground)
             }
         }
     }
