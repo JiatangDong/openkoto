@@ -283,7 +283,7 @@
 				CODE_SIGN_ENTITLEMENTS = App/OpenKoto.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "App/OpenKoto-Catalyst.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = MJFP85U8HQ;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = OpenKoto-Info.plist;
@@ -327,7 +327,7 @@
 				CODE_SIGN_ENTITLEMENTS = App/OpenKoto.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "App/OpenKoto-Catalyst.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = MJFP85U8HQ;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = OpenKoto-Info.plist;
@@ -370,7 +370,7 @@
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "ShareExtension/ShareExtension-Catalyst.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = MJFP85U8HQ;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
@@ -400,7 +400,7 @@
 				CODE_SIGN_ENTITLEMENTS = ShareExtension/ShareExtension.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = "ShareExtension/ShareExtension-Catalyst.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = MJFP85U8HQ;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ShareExtension/Info.plist;
