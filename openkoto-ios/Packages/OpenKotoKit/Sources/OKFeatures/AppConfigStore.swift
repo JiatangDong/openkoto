@@ -143,6 +143,16 @@ public final class AppConfigStore {
             config: config, apiKey: apiKey(for: config.id))
     }
 
+    /// 查词缓存的失效上下文：prompt 版本 + 模型 + 目标语言。
+    /// 三者任一变化，旧释义必然过时（释义是用目标语言写的），缓存即视为 miss。
+    public var glossCacheContext: String {
+        [PromptLibrary.wordGlossVersion,
+         activeConfig?.apiProvider.rawValue ?? "none",
+         activeConfig?.model ?? "none",
+         targetLanguage,
+        ].joined(separator: "/")
+    }
+
     /// 用当前生效模型对一句原文只做翻译（快翻/全文翻译）。未配置模型抛 `.notConfigured`。
     public func translate(text: String) async throws -> String {
         guard let config = activeConfig else { throw AIClientError.notConfigured }

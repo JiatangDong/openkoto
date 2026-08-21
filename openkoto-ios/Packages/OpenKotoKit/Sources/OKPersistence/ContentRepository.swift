@@ -446,6 +446,32 @@ public struct ContentRepository: Sendable {
         }
     }
 
+    // MARK: - 查词缓存
+
+    /// 读一个词的缓存释义。返回 nil 表示没查过；context 是否过期由调用方比对。
+    public func fetchWordGloss(normalizedWord: String) async throws -> WordGlossHit? {
+        try await database.writer.read { db in
+            try WordGlossRecord
+                .filter(Column("normalized_word") == normalizedWord)
+                .fetchOne(db)
+        }
+        .map { WordGlossHit(item: $0.domainModel(), context: $0.context) }
+    }
+
+    /// 写入/覆盖一个词的缓存释义。同一个词只留最新一次查询结果。
+    public func upsertWordGloss(_ item: VocabularyItem, context: String, now: Date = .now) async throws {
+        let record = WordGlossRecord(item, context: context, now: now)
+        try await database.writer.write { db in
+            try record.save(db)
+        }
+    }
+
+    /// 查词缓存命中。`context` 供调用方做失效比对（prompt 版本 + 模型 + 目标语言）。
+    public struct WordGlossHit: Sendable, Equatable {
+        public var item: VocabularyItem
+        public var context: String
+    }
+
     // MARK: - 生词收藏
 
     /// 违反去重约束（normalized_word + source_article_id）时抛错，由调用方先查重。

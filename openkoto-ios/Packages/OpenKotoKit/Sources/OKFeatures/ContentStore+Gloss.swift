@@ -8,7 +8,9 @@ import OKSegmentation
 //
 // 阅读时最高频的动作是"这个词啥意思"，而在此之前唯一的路径是点整句做精讲——
 // 一次要吐 600–1200 token，而且**同一个词在别的文章里出现还要再付一次**。
-// 这里给它一条便宜的路，并且在会话内缓存。
+// 这里给它一条便宜的路，并且缓存：会话内走 `glossStates`，跨会话走 `word_gloss` 表。
+// 缓存失效不靠清理任务：库里的 `context`（prompt 版本 + 模型 + 目标语言）与当前
+// 不一致即视为 miss，重查并覆盖。
 
 extension ContentStore {
     /// 一次查词的结果。
@@ -27,17 +29,27 @@ extension ContentStore {
         glossStates[normalizedWord(word)]
     }
 
-    /// 查词。**同一个词在本次会话里只会付一次钱**——缓存命中直接返回。
+    /// 查词。**同一个词只会付一次钱**——内存、数据库依次命中都直接返回。
     ///
-    /// 不落库：落库要新表、新 migration、以及"换模型/换目标语言后缓存怎么失效"
-    /// 这一整套策略；而用户真正在意的词本来就会被收藏进生词本。
-    /// 没收藏的那些，说明看过就算了。
+    /// 落库的是缓存不是收藏：查过的词不进生词本、不参与复习、不同步云端；
+    /// 换模型/换目标语言/升级 prompt 后旧缓存自动失效（见 AppDatabase v11）。
     @discardableResult
     public func gloss(word: String, in sentence: String) async -> VocabularyItem? {
         let key = normalizedWord(word)
         guard !key.isEmpty else { return nil }
         if case .loaded(let cached) = glossStates[key] { return cached }
         if case .loading = glossStates[key] { return nil }
+
+        let context = glossCacheContext?()
+
+        // 库里查过了就直接用——重启 App 不该让同一个词再付一次费。
+        if let context,
+           let hit = try? await repository.fetchWordGloss(normalizedWord: key),
+           hit.context == context
+        {
+            glossStates[key] = .loaded(hit.item)
+            return hit.item
+        }
 
         guard let glossProvider else {
             glossStates[key] = .failed(.notConfigured)
@@ -48,6 +60,10 @@ extension ContentStore {
         do {
             let item = try await glossProvider(word, sentence)
             glossStates[key] = .loaded(item)
+            // 写库失败不告状：这只是缓存，下次再查一次就是了。
+            if let context {
+                try? await repository.upsertWordGloss(item, context: context)
+            }
             return item
         } catch is CancellationError {
             glossStates[key] = nil
@@ -76,6 +92,15 @@ extension ContentStore {
             let key = normalizedWord(item.word)
             guard !key.isEmpty, glossStates[key] == nil else { continue }
             glossStates[key] = .loaded(item)
+        }
+        // 精讲里的词同样落库：重新导入一篇精讲过的文章后，点词也不该再花钱。
+        if let context = glossCacheContext?() {
+            let items = explanation.vocabulary
+            Task {
+                for item in items {
+                    try? await repository.upsertWordGloss(item, context: context)
+                }
+            }
         }
     }
 }

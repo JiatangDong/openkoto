@@ -1200,7 +1200,12 @@ public final class ContentStore {
     @ObservationIgnored public var glossProvider:
         ((String, String) async throws -> VocabularyItem)?
 
-    /// 查词结果缓存，键是归一化后的词。**只在会话内有效**（见 ContentStore+Gloss 的说明）。
+    /// 查词缓存的失效上下文（App 壳注入）：prompt 版本 + 模型 + 目标语言。
+    /// 与库里存的值不一致时缓存视为 miss。未注入则不读写库（仅会话内缓存）。
+    @ObservationIgnored public var glossCacheContext: (() -> String)?
+
+    /// 查词结果缓存，键是归一化后的词。内存层之上还有 `word_gloss` 表兜底
+    /// （见 ContentStore+Gloss 的说明），这层只是省掉同一会话里的重复读库。
     public internal(set) var glossStates: [String: GlossState] = [:]
 
     /// 还有多少篇没进全文索引。> 0 时搜索结果可能不全，UI 要如实告知。

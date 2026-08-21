@@ -130,6 +130,7 @@ public struct RootTabView: View {
             store.glossProvider = { [appConfig] word, sentence in
                 try await appConfig.gloss(word: word, sentence: sentence)
             }
+            store.glossCacheContext = { [appConfig] in appConfig.glossCacheContext }
             await store.load()
             // 必须在 load 之后：favorites 还空着时排期会算出「没有任何到期卡」，
             // 把已经排好的提醒全撤掉。

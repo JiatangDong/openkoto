@@ -10,12 +10,17 @@ import Testing
 /// 不是优化。
 @MainActor
 @Suite struct GlossTests {
-    private func makeStore() throws -> ContentStore {
-        let repository = try ContentRepository(database: AppDatabase.inMemory())
+    private func makeStore(repository: ContentRepository? = nil) throws -> ContentStore {
+        let repo: ContentRepository
+        if let repository {
+            repo = repository
+        } else {
+            repo = try ContentRepository(database: AppDatabase.inMemory())
+        }
         let suite = "GlossTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
-        return ContentStore(repository: repository, defaults: defaults)
+        return ContentStore(repository: repo, defaults: defaults)
     }
 
     private func item(_ word: String) -> VocabularyItem {
@@ -80,6 +85,96 @@ import Testing
         let result = await store.gloss(word: "字幕", in: "これは字幕です。")
         #expect(result?.meaning == "来自精讲")
         #expect(await counter.value == 0)
+    }
+
+    // MARK: - 落库（跨会话缓存）
+
+    /// 重启后（新 Store、同一库）同一个词不再发请求——没配 provider 也能答出来。
+    /// 这是这个功能存在的意义：查过的词不该因为 App 重启就再付一次费。
+    @Test func glossResultSurvivesRestart() async throws {
+        let repository = try ContentRepository(database: AppDatabase.inMemory())
+        let store1 = try makeStore(repository: repository)
+        let counter = RequestCounter()
+        store1.glossProvider = { word, _ in
+            await counter.increment()
+            return self.item(word)
+        }
+        store1.glossCacheContext = { "gloss-v1/test-model/zh-CN" }
+
+        _ = await store1.gloss(word: "字幕", in: "これは日本語の字幕です。")
+        #expect(await counter.value == 1)
+
+        let store2 = try makeStore(repository: repository)
+        store2.glossCacheContext = { "gloss-v1/test-model/zh-CN" }
+        let cached = await store2.gloss(word: "字幕", in: "別の文にも字幕がある。")
+        #expect(cached == item("字幕"))
+        #expect(store2.glossState(for: "字幕") == .loaded(item("字幕")))
+    }
+
+    /// 换模型/换目标语言后旧释义必须作废：context 不同即 miss，重查并覆盖。
+    @Test func contextChangeInvalidatesCachedGloss() async throws {
+        let repository = try ContentRepository(database: AppDatabase.inMemory())
+        let store1 = try makeStore(repository: repository)
+        store1.glossProvider = { word, _ in self.item(word) }
+        store1.glossCacheContext = { "gloss-v1/model-a/zh-CN" }
+        _ = await store1.gloss(word: "字幕", in: "s")
+
+        let store2 = try makeStore(repository: repository)
+        let counter = RequestCounter()
+        store2.glossProvider = { word, _ in
+            await counter.increment()
+            return VocabularyItem(word: word, meaning: "新释义")
+        }
+        store2.glossCacheContext = { "gloss-v1/model-b/zh-CN" }
+
+        let fresh = await store2.gloss(word: "字幕", in: "s")
+        #expect(fresh?.meaning == "新释义")
+        #expect(await counter.value == 1)
+
+        // 覆盖已经发生：换回旧 context 的 Store 读到的也是新 context 的行，仍应 miss。
+        let store3 = try makeStore(repository: repository)
+        store3.glossCacheContext = { "gloss-v1/model-a/zh-CN" }
+        _ = await store3.gloss(word: "字幕", in: "s")
+        #expect(store3.glossState(for: "字幕") == .failed(.notConfigured))
+    }
+
+    /// 精讲里的生词同样落库（写库是异步的，轮询等待落盘）。
+    /// 重新导入一篇精讲过的文章后，点其中的词不该再花钱。
+    @Test func warmedGlossIsPersisted() async throws {
+        let repository = try ContentRepository(database: AppDatabase.inMemory())
+        let store1 = try makeStore(repository: repository)
+        store1.glossCacheContext = { "gloss-v1/test-model/zh-CN" }
+        store1.warmGlossCache(
+            from: SegmentExplanation(
+                translation: "t", explanation: "e",
+                vocabulary: [VocabularyItem(word: "字幕", meaning: "来自精讲", reading: "じまく")]))
+
+        var persisted = false
+        for _ in 0..<100 {
+            if try await repository.fetchWordGloss(normalizedWord: OKPersistence.normalizedWord("字幕")) != nil {
+                persisted = true
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(persisted)
+
+        let store2 = try makeStore(repository: repository)
+        store2.glossCacheContext = { "gloss-v1/test-model/zh-CN" }
+        let cached = await store2.gloss(word: "字幕", in: "これは字幕です。")
+        #expect(cached?.meaning == "来自精讲")
+    }
+
+    /// 失败的查询不落库——否则一次限流就会把"坏结果"永久缓存下来。
+    @Test func failedLookupIsNotPersisted() async throws {
+        let repository = try ContentRepository(database: AppDatabase.inMemory())
+        let store = try makeStore(repository: repository)
+        store.glossProvider = { _, _ in throw AIClientError.rateLimited }
+        store.glossCacheContext = { "gloss-v1/test-model/zh-CN" }
+
+        _ = await store.gloss(word: "字幕", in: "s")
+        let hit = try await repository.fetchWordGloss(normalizedWord: OKPersistence.normalizedWord("字幕"))
+        #expect(hit == nil)
     }
 
     // MARK: - 失败与重试

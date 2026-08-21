@@ -495,3 +495,45 @@ struct ReadingSessionRecord: Codable, FetchableRecord, PersistableRecord {
         )
     }
 }
+
+
+// MARK: - word_gloss
+
+/// 查词缓存行。主键即归一化词形——同一个词只留最新一次查询结果。
+struct WordGlossRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "word_gloss"
+
+    var normalizedWord: String
+    var word: String
+    var meaning: String
+    var usage: String?
+    var example: String?
+    var reading: String?
+    /// 失效维度（prompt 版本 + 模型 + 目标语言），见 AppDatabase v11 的注释。
+    var context: String
+    var createdAt: Date
+    var updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case word, meaning, usage, example, reading, context
+        case normalizedWord = "normalized_word"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    init(_ item: VocabularyItem, context: String, now: Date) {
+        normalizedWord = OKPersistence.normalizedWord(item.word)
+        word = item.word
+        meaning = item.meaning
+        usage = item.usage
+        example = item.example
+        reading = item.reading
+        self.context = context
+        createdAt = now
+        updatedAt = now
+    }
+
+    func domainModel() -> VocabularyItem {
+        VocabularyItem(word: word, meaning: meaning, usage: usage, example: example, reading: reading)
+    }
+}

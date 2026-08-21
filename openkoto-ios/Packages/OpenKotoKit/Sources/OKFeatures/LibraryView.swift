@@ -360,6 +360,22 @@ private struct ImportSheet: View {
             case .media: "import.method.media"
             }
         }
+        var descKey: String.LocalizationValue {
+            switch self {
+            case .paste: "import.type.paste.desc"
+            case .file: "import.type.file.desc"
+            case .url: "import.type.url.desc"
+            case .media: "import.type.media.desc"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .paste: "doc.on.clipboard"
+            case .file: "doc.badge.plus"
+            case .url: "link"
+            case .media: "play.rectangle"
+            }
+        }
     }
 
     /// 要选哪一类文件。
@@ -386,6 +402,9 @@ private struct ImportSheet: View {
     }
 
     @State private var mode: Mode = .paste
+    /// 向导步骤：1 选类型 → 2 填内容 → 3 确认并完成。
+    /// 一页塞四个模式的输入区太挤了，用户不知道该先碰哪个。
+    @State private var step = 1
     @State private var title = ""
     @State private var content = ""
     @State private var urlText = ""
@@ -421,23 +440,14 @@ private struct ImportSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Picker("", selection: $mode) {
-                    ForEach(Mode.allCases) { Text(L($0.titleKey)).tag($0) }
+            Group {
+                switch step {
+                case 1: typeStep
+                case 2: contentStep
+                default: confirmStep
                 }
-                .pickerStyle(.segmented)
-                .listRowBackground(Color.clear)
-
-                switch mode {
-                case .file: fileSection
-                case .url: urlSection
-                case .paste: EmptyView()
-                case .media: mediaSection
-                }
-
-                if mode != .media { editorSection }
             }
-            .navigationTitle(L("import.title"))
+            .navigationTitle(L(stepTitleKey))
             .navigationBarTitleDisplayMode(.inline)
             // **只能有一个。** 见 `FilePicker` 的注释：叠多个的话在 Catalyst 上
             // 会有 importer 永远打不开，而且按钮会卡死在 isPresented == true。
@@ -479,11 +489,20 @@ private struct ImportSheet: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(L("common.cancel")) { dismiss() }
+                    if step == 1 {
+                        Button(L("common.cancel")) { dismiss() }
+                    } else {
+                        Button(L("common.back")) { step -= 1 }
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(L("common.save")) { save() }
-                        .disabled(!canSave)
+                    if step == 3 {
+                        Button(L("common.done")) { save() }
+                            .disabled(!canSave)
+                    } else if step == 2 {
+                        Button(L("common.next")) { step = 3 }
+                            .disabled(!canSave)
+                    }
                 }
             }
             // 标题保持中性：这个 alert 现在也承载选文件失败与 AI 清洗失败，
@@ -501,6 +520,84 @@ private struct ImportSheet: View {
             // 这里目前只有这一个，加新弹窗时收敛进同一个。
             .sheet(isPresented: $showingDownloadGuide) {
                 MediaDownloadGuideSheet()
+            }
+        }
+    }
+
+    private var stepTitleKey: String.LocalizationValue {
+        switch step {
+        case 1: "import.step.type.title"
+        case 2: "import.step.content.title"
+        default: "import.step.confirm.title"
+        }
+    }
+
+    // MARK: - 第一步：选类型
+
+    private var typeStep: some View {
+        List {
+            ForEach(Mode.allCases) { mode in
+                Button {
+                    self.mode = mode
+                    step = 2
+                } label: {
+                    Label {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L(mode.titleKey))
+                            Text(L(mode.descKey))
+                                .font(.footnote)
+                                .foregroundStyle(theme.mutedForeground)
+                        }
+                    } icon: {
+                        Image(systemName: mode.icon)
+                            .foregroundStyle(theme.accent)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+    }
+
+    // MARK: - 第二步：填内容
+
+    private var contentStep: some View {
+        Form {
+            switch mode {
+            case .file: fileSection
+            case .url: urlSection
+            case .paste: editorSection
+            case .media: mediaSection
+            }
+        }
+    }
+
+    // MARK: - 第三步：确认并完成
+
+    /// 网页抓取/文件解析/清洗之后都可能改标题——确认页留一个可编辑的标题，
+    /// 加上内容预览，让用户知道即将入库的是什么。
+    private var confirmStep: some View {
+        Form {
+            Section {
+                TextField(L("import.field.title"), text: $title)
+            }
+            Section {
+                if mode == .media {
+                    LabeledContent(
+                        L("import.media.subtitle"),
+                        value: subtitleURL?.lastPathComponent ?? L("import.media.optional"))
+                    LabeledContent(
+                        L("import.media.file"),
+                        value: pickedMediaName ?? L("import.media.optional"))
+                } else {
+                    Text(String(format: L("import.confirm.charCount"), content.count))
+                        .font(.footnote)
+                        .foregroundStyle(theme.mutedForeground)
+                    Text(String(content.prefix(160)))
+                        .font(.footnote)
+                        .foregroundStyle(theme.mutedForeground)
+                        .lineLimit(4)
+                    cleanRows
+                }
             }
         }
     }
@@ -717,7 +814,7 @@ private struct ImportSheet: View {
                     resetCleanState()
                     title = parsed.title
                     content = parsed.content
-                    mode = .paste
+                    step = 3
                 } catch {
                     errorMessage = error.localizedDescription
                 }
@@ -737,7 +834,7 @@ private struct ImportSheet: View {
                 let result = try await TextImport.fetchArticle(from: urlText)
                 title = result.title
                 content = result.content
-                mode = .paste
+                step = 3
             } catch {
                 errorMessage = String(describing: error)
             }

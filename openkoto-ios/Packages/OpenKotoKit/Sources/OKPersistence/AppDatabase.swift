@@ -433,6 +433,27 @@ public struct AppDatabase: Sendable {
                 t.column("attempts", .integer).notNull().defaults(to: 0)
             }
         }
+        // 查词缓存。用户点过的每个词都付过费，重启 App 不该再付一次。
+        //
+        // **这是缓存，不是用户数据**：不同步云端（换设备重查一次即可），也不进生词本
+        // （收藏与否仍是用户的主动选择，查过 ≠ 要复习）。
+        //
+        // `context` 是失效维度：prompt 版本 + 模型 + 目标语言拼成的一个串。
+        // 三者任一变化后旧释义必然过时（释义是用目标语言写的），应用层比对不等即 miss，
+        // 重查并覆盖——没有独立的失效流程。
+        migrator.registerMigration("v11") { db in
+            try db.create(table: "word_gloss") { t in
+                t.primaryKey("normalized_word", .text)
+                t.column("word", .text).notNull()
+                t.column("meaning", .text).notNull()
+                t.column("usage", .text)
+                t.column("example", .text)
+                t.column("reading", .text)
+                t.column("context", .text).notNull()
+                t.column("created_at", .datetime).notNull()
+                t.column("updated_at", .datetime).notNull()
+            }
+        }
         return migrator
     }
 }
