@@ -416,6 +416,8 @@ private struct ImportSheet: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var photoURL: URL?
     @State private var isLoadingPhoto = false
+    /// 视频下载导引（YouTube/B 站链接没法在 App 里直接下，见 `MediaDownloadGuideSheet`）。
+    @State private var showingDownloadGuide = false
 
     var body: some View {
         NavigationStack {
@@ -494,6 +496,11 @@ private struct ImportSheet: View {
                 Button(L("common.ok"), role: .cancel) {}
             } message: {
                 if let errorMessage { Text(errorMessage) }
+            }
+            // 一个 view 只挂一个 presentation 的教训同样适用于 sheet——
+            // 这里目前只有这一个，加新弹窗时收敛进同一个。
+            .sheet(isPresented: $showingDownloadGuide) {
+                MediaDownloadGuideSheet()
             }
         }
     }
@@ -780,6 +787,13 @@ private struct ImportSheet: View {
                 } label: {
                     Label(L("import.media.photoLibrary"), systemImage: "photo.on.rectangle")
                 }
+            }
+            // 视频从哪来是导入页最高频的疑问——链接没法直接下（审核不允许），
+            // 与其让用户猜，不如给一份"自己拿到文件再导进来"的导引。
+            Button {
+                showingDownloadGuide = true
+            } label: {
+                Label(L("import.media.guide.button"), systemImage: "questionmark.circle")
             }
             // 旧系统上「只选媒体」确实存不了（转写要 iOS 26）。但光把按钮灰掉
             // 等于不解释，用户只会以为导入坏了 —— 明说缺什么。

@@ -9246,6 +9246,167 @@
           }
         }
       }
+    },
+    "import.media.guide.button": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "How do I download a video?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "视频怎么下载？"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "動画のダウンロード方法は？"
+          }
+        }
+      }
+    },
+    "import.media.guide.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Download in 3 Steps"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "三步下载视频"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3ステップでダウンロード"
+          }
+        }
+      }
+    },
+    "import.media.guide.step1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy the video link from the YouTube or Bilibili app (Share → Copy Link)."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 YouTube / B 站 App 里点「分享 → 复制链接」。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YouTube / Bilibili アプリで「共有 → リンクをコピー」。"
+          }
+        }
+      }
+    },
+    "import.media.guide.step2": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open cobalt.tools in Safari (tap the button below), paste the link and download the MP4. Works for both YouTube and Bilibili. Free, no sign-up."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 Safari 打开 cobalt.tools（点下面按钮直达），粘贴链接，下载 MP4。YouTube 和 B 站都支持。免费，不用注册。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Safari で cobalt.tools を開き（下のボタンから移動できます）、リンクを貼って MP4 をダウンロード。YouTube と Bilibili の両方に対応。無料・登録不要。"
+          }
+        }
+      }
+    },
+    "import.media.guide.step3": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When the download finishes, tap \"Save to Files\". Then come back here and pick it under \"Video or audio\" above."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下载完成后选「存储到文件」，然后回到这里，点上面的「视频或音频」选进来。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ダウンロードが完了したら「ファイルに保存」を選び、ここに戻って上の「動画または音声」から選択。"
+          }
+        }
+      }
+    },
+    "import.media.guide.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open cobalt.tools"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开 cobalt.tools"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "cobalt.tools を開く"
+          }
+        }
+      }
+    },
+    "import.media.guide.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No subtitle file? No problem — import just the video and generate subtitles on device afterwards (requires iOS 26)."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有字幕文件也没关系——只导视频，进来后可以用本机语音识别生成字幕（需要 iOS 26）。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "字幕ファイルがなくても大丈夫——動画だけ取り込み、後から端末内の音声認識で字幕を生成できます（iOS 26 以降）。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
