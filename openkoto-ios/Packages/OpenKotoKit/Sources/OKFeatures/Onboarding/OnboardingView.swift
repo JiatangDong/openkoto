@@ -3,7 +3,7 @@ import SwiftUI
 import OKDesignSystem
 import OKLocalization
 
-/// 首启引导容器（设计文档 §6.2）：返回箭头 + 进度点 + 五个步骤。
+/// 首启引导容器（设计文档 §6.2）：返回箭头 + 进度点 + 七个步骤。
 /// 状态全在 `OnboardingState`（RootTabView 持有），语言切换重建后自动恢复原步骤。
 struct OnboardingView: View {
     @Bindable var state: OnboardingState
@@ -82,6 +82,8 @@ struct OnboardingView: View {
             OnboardingThemeStep(state: state)
         case .model:
             OnboardingModelStep(state: state)
+        case .reminder:
+            OnboardingReminderStep(state: state)
         case .done:
             OnboardingDoneStep(state: state, onFinish: onFinish)
         }

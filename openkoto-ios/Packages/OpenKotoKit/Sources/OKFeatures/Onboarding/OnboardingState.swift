@@ -14,7 +14,7 @@ final class OnboardingState {
     /// 而系统语言不在 en/zh/ja 里时（韩语、法语…）整页会退回英文。
     /// 先让用户挑一次界面语言，后面所有文案才有意义。
     enum Step: Int, CaseIterable {
-        case appLanguage, welcome, language, theme, model, done
+        case appLanguage, welcome, language, theme, model, reminder, done
 
         static var first: Step { .appLanguage }
     }
@@ -28,7 +28,7 @@ final class OnboardingState {
     private(set) var movingForward = true
 
     /// 截图/UI 测试用（同 RootTabView 的 -startTab*）：
-    /// `-onboardingStep welcome|language|theme|model|done` 启动直达指定步骤；
+    /// `-onboardingStep welcome|language|theme|model|reminder|done` 启动直达指定步骤；
     /// `-onboardingProvider <ProviderID.rawValue>` 预选精选 Provider（配合 model 步截图）。
     init() {
         let args = ProcessInfo.processInfo.arguments
@@ -39,6 +39,7 @@ final class OnboardingState {
             case "language": step = .language
             case "theme": step = .theme
             case "model": step = .model
+            case "reminder": step = .reminder
             case "done": step = .done
             default: break
             }

@@ -126,6 +126,22 @@ import OKAIClient
         #expect(state.step == .appLanguage)
     }
 
+    /// 提醒步在模型步之后、完成页之前：让用户离开向导前就知道有每日提醒。
+    @Test func reminderStepSitsBetweenModelAndDone() {
+        #expect(OnboardingState.Step.allCases.count == 7)
+        let state = OnboardingState()
+        state.step = .model
+        state.advance()
+        #expect(state.step == .reminder)
+        state.advance()
+        #expect(state.step == .done)
+        // 完成页是终点，不能再往前
+        state.advance()
+        #expect(state.step == .done)
+        state.goBack()
+        #expect(state.step == .reminder)
+    }
+
     /// 从设置页重看引导：回到第一步，且模型步草稿清空
     /// （Key 早已进 Keychain，留着草稿会让人以为要重填）。
     @Test func resetReturnsToFirstStepAndClearsDraft() {

@@ -357,6 +357,8 @@ struct OnboardingDoneStep: View {
 
     @AppStorage("app.interfaceLanguage") private var interfaceLanguage = "system"
     @AppStorage("learning.targetLanguage") private var targetLanguage = "zh-CN"
+    @AppStorage(ReviewReminder.enabledKey) private var reminderEnabled = false
+    @AppStorage(ReviewReminder.minutesKey) private var reminderMinutes = ReviewReminder.defaultMinutes
 
     var body: some View {
         OnboardingStepLayout(
@@ -370,6 +372,8 @@ struct OnboardingDoneStep: View {
                     summaryRow(L("onboarding.done.summary.theme"), themeSummary)
                     Divider()
                     summaryRow(L("onboarding.done.summary.model"), modelSummary)
+                    Divider()
+                    summaryRow(L("onboarding.done.summary.reminder"), reminderSummary)
                 }
             }
 
@@ -418,6 +422,11 @@ struct OnboardingDoneStep: View {
             return "\(provider.capability.displayName) · \(state.modelName)"
         }
         return L("onboarding.done.summary.modelSkipped")
+    }
+
+    private var reminderSummary: String {
+        guard reminderEnabled else { return L("onboarding.done.summary.reminderOff") }
+        return String(format: "%d:%02d", reminderMinutes / 60, reminderMinutes % 60)
     }
 }
 #endif
