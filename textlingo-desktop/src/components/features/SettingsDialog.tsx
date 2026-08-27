@@ -19,6 +19,11 @@ import {
   LEGACY_KIMI_PROVIDER,
   normalizeKimiProvider,
 } from "../../lib/kimiProvider";
+import {
+  getMetaModelsUrl,
+  isMetaProvider,
+  META_PROVIDER,
+} from "../../lib/metaProvider";
 
 interface OpenRouterModel {
   id: string;
@@ -31,13 +36,14 @@ interface OpenRouterModel {
   };
 }
 
-const SUPPORTED_PROVIDERS = ["openai", "anthropic", "openrouter", "deepseek", "siliconflow", "302ai", "google", "google-ai-studio", KIMI_CHINA_PROVIDER, KIMI_GLOBAL_PROVIDER, "openai-compatible", "ollama", "lmstudio"] as const;
+const SUPPORTED_PROVIDERS = ["openai", "anthropic", "openrouter", "deepseek", "siliconflow", "302ai", "google", "google-ai-studio", KIMI_CHINA_PROVIDER, KIMI_GLOBAL_PROVIDER, META_PROVIDER, "openai-compatible", "ollama", "lmstudio"] as const;
 
 // Default base URLs for local providers
 const DEFAULT_BASE_URLS: Record<string, string> = {
   "openai": "https://api.openai.com/v1",
   "ollama": "http://localhost:11434/v1",
   "lmstudio": "http://localhost:1234/v1",
+  "meta": "https://api.meta.ai/v1",
 };
 
 const DEFAULT_BATCH_TRANSLATION_CONCURRENCY = 3;
@@ -222,6 +228,11 @@ const DEFAULT_MODELS = {
     { value: "moonshot-v1-32k", labelKey: "settings.models.moonshot.moonshot-v1-32k" },
     { value: "moonshot-v1-8k", labelKey: "settings.models.moonshot.moonshot-v1-8k" },
   ],
+  [META_PROVIDER]: [
+    { value: "muse-spark-1.2", labelKey: "settings.models.meta.muse-spark-1.2" },
+    { value: "muse-spark-1.1", labelKey: "settings.models.meta.muse-spark-1.1" },
+    { value: "muse-spark-1.2-contributor", labelKey: "settings.models.meta.muse-spark-1.2-contributor" },
+  ],
   ollama: [
     { value: "qwen2.5:7b-instruct", labelKey: "settings.models.ollama.qwen2_5_7b_instruct" },
     { value: "llama3.1:8b-instruct", labelKey: "settings.models.ollama.llama3_1_8b_instruct" },
@@ -279,6 +290,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
     [LEGACY_KIMI_PROVIDER]: DEFAULT_MODELS[LEGACY_KIMI_PROVIDER].map(m => ({ value: m.value, label: t(m.labelKey) })),
     [KIMI_CHINA_PROVIDER]: DEFAULT_MODELS[KIMI_CHINA_PROVIDER].map(m => ({ value: m.value, label: t(m.labelKey) })),
     [KIMI_GLOBAL_PROVIDER]: DEFAULT_MODELS[KIMI_GLOBAL_PROVIDER].map(m => ({ value: m.value, label: t(m.labelKey) })),
+    [META_PROVIDER]: DEFAULT_MODELS[META_PROVIDER].map(m => ({ value: m.value, label: t(m.labelKey) })),
     ollama: DEFAULT_MODELS.ollama.map(m => ({ value: m.value, label: t(m.labelKey) })),
   });
   const [modelFilter, setModelFilter] = useState("");
@@ -660,7 +672,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
 
     const provider = editingConfig.api_provider;
     // Ensure provider is defined and valid
-    if (!provider || !["openrouter", "openai", "openai-compatible", "deepseek", "siliconflow", "302ai", "google", "google-ai-studio", KIMI_CHINA_PROVIDER, KIMI_GLOBAL_PROVIDER, LEGACY_KIMI_PROVIDER, "ollama"].includes(provider)) {
+    if (!provider || !["openrouter", "openai", "openai-compatible", "deepseek", "siliconflow", "302ai", "google", "google-ai-studio", KIMI_CHINA_PROVIDER, KIMI_GLOBAL_PROVIDER, LEGACY_KIMI_PROVIDER, META_PROVIDER, "ollama"].includes(provider)) {
       if (!isAuto) setSyncError(t("settings.syncErrors.providerNotSupported") || "Provider not supported for sync");
       return;
     }
@@ -720,6 +732,12 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
         };
       } else if (isKimiProvider(provider)) {
         url = getKimiModelsUrl(provider) || "";
+        headers = {
+          "Authorization": `Bearer ${editingConfig.api_key}`,
+          "Content-Type": "application/json",
+        };
+      } else if (isMetaProvider(provider)) {
+        url = getMetaModelsUrl(provider) || "";
         headers = {
           "Authorization": `Bearer ${editingConfig.api_key}`,
           "Content-Type": "application/json",
@@ -800,6 +818,14 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
             .filter((m: { value: string }) => m.value.includes("gemini"));
         }
       } else if (isKimiProvider(provider)) {
+        if (data.data && Array.isArray(data.data)) {
+          syncedModels = data.data
+            .map((m: any) => ({
+              value: m.id,
+              label: m.id,
+            }));
+        }
+      } else if (isMetaProvider(provider)) {
         if (data.data && Array.isArray(data.data)) {
           syncedModels = data.data
             .map((m: any) => ({
