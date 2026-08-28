@@ -229,6 +229,7 @@ const DEFAULT_MODELS = {
     { value: "moonshot-v1-8k", labelKey: "settings.models.moonshot.moonshot-v1-8k" },
   ],
   [META_PROVIDER]: [
+    { value: "rl-muse-spark-1-2-playground", labelKey: "settings.models.meta.rl-muse-spark-1-2-playground" },
     { value: "muse-spark-1.2", labelKey: "settings.models.meta.muse-spark-1.2" },
     { value: "muse-spark-1.1", labelKey: "settings.models.meta.muse-spark-1.1" },
     { value: "muse-spark-1.2-contributor", labelKey: "settings.models.meta.muse-spark-1.2-contributor" },
@@ -727,9 +728,6 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
           "Authorization": `Bearer ${editingConfig.api_key}`,
           "Content-Type": "application/json",
         };
-        headers = {
-          "Content-Type": "application/json",
-        };
       } else if (isKimiProvider(provider)) {
         url = getKimiModelsUrl(provider) || "";
         headers = {
@@ -851,11 +849,15 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
           }));
         }
 
-        // If current model is not in list (e.g. initial setup), potentially select first one?
-        // Let's NOT auto-select to avoid overwriting user choice unless it's empty.
-        if (!editingConfig.model && syncedModels.length > 0) {
-          setEditingConfig(prev => ({ ...prev, model: syncedModels[0].value }));
-        }
+        setEditingConfig(prev => {
+          if (!prev || prev.api_provider !== provider) return prev as any;
+          const cur = prev.model;
+          const isValid = syncedModels.some(m => m.value === cur);
+          if (!cur || !isValid) {
+            return { ...prev, model: syncedModels[0].value };
+          }
+          return prev;
+        });
       }
 
     } catch (err) {
@@ -1210,7 +1212,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
                     <label className="block text-sm font-medium text-foreground">
                       {t("settings.model")}
                     </label>
-                    {(["openrouter", "openai", "deepseek", "google", "google-ai-studio", "302ai", "siliconflow", "ollama"].includes(editingConfig.api_provider || "") || isKimiProvider(editingConfig.api_provider || "")) && (
+                    {(["openrouter", "openai", "deepseek", "google", "google-ai-studio", "302ai", "siliconflow", "ollama"].includes(editingConfig.api_provider || "") || isKimiProvider(editingConfig.api_provider || "") || isMetaProvider(editingConfig.api_provider || "")) && (
                       <Button
                         type="button"
                         variant="ghost"
@@ -1243,7 +1245,7 @@ export function SettingsDialog({ isOpen, onClose, onSave }: SettingsDialogProps)
                         if (e.target.value === "__custom__") {
                           setUseCustomModel(true);
                         } else {
-                          setEditingConfig({ ...editingConfig, model: e.target.value });
+                          setEditingConfig(prev => ({ ...prev, model: e.target.value } as any));
                         }
                       }}
                     >
