@@ -101,6 +101,7 @@ pub fn run() {
             commands::export_ktv_video_cmd,
             // 书籍导入
             commands::import_book_cmd,
+            commands::read_book_text_cmd,
             // 字幕提取
             commands::extract_subtitles_cmd,
             // 文件操作

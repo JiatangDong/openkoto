@@ -63,6 +63,22 @@ function normalizeBatchTranslationConcurrency(value: unknown): number {
   );
 }
 
+// 判断元素是否完整落在最近的滚动容器可视区内
+function isElementVisibleInScrollContainer(el: HTMLElement): boolean {
+  let parent = el.parentElement;
+  while (parent) {
+    const style = window.getComputedStyle(parent);
+    if (/(auto|scroll)/.test(style.overflowY)) {
+      const rect = el.getBoundingClientRect();
+      const box = parent.getBoundingClientRect();
+      return rect.top >= box.top && rect.bottom <= box.bottom;
+    }
+    parent = parent.parentElement;
+  }
+  const rect = el.getBoundingClientRect();
+  return rect.top >= 0 && rect.bottom <= window.innerHeight;
+}
+
 interface ArticleReaderProps {
   article: Article;
   onBack?: () => void;
@@ -270,10 +286,13 @@ export function ArticleReader({
     return () => document.removeEventListener("mouseup", handleSelection);
   }, []);
 
-  // 自动滚动到激活的段落（非视频模式）
+  // 自动滚动到激活的段落（非视频模式）。
+  // 仅当目标段落不在可视区内时才滚动，避免点击页面上可见句子时页面跳动。
   useEffect(() => {
     if (selectedSegmentId && activeSegmentRef.current && !article.media_path) {
-      activeSegmentRef.current.scrollIntoView({
+      const el = activeSegmentRef.current;
+      if (isElementVisibleInScrollContainer(el)) return;
+      el.scrollIntoView({
         behavior: "smooth",
         block: "center",
       });

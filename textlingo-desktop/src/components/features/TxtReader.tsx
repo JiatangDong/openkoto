@@ -14,6 +14,8 @@ import {
     Plus,
     Bookmark as BookmarkIcon,
     BookmarkPlus,
+    Languages,
+    Loader2,
 } from "lucide-react";
 import { BookmarkSidebar } from "./BookmarkSidebar";
 import { Bookmark } from "../../types";
@@ -35,6 +37,8 @@ interface TxtReaderProps {
     title?: string;
     /** 书籍文件路径 */
     bookPath?: string;
+    /** 译文目标语言（如 "zh-CN"），不传则隐藏翻译功能 */
+    targetLanguage?: string;
     /** 选中文本时的回调 */
     onTextSelect?: (text: string) => void;
     /** 初始字体大小 */
@@ -46,10 +50,13 @@ interface TxtReaderProps {
 // 每页大约显示的字符数
 const CHARS_PER_PAGE = 2000;
 
+type TxtViewMode = "original" | "translated" | "bilingual";
+
 export function TxtReader({
     content,
     title,
     bookPath,
+    targetLanguage,
     onTextSelect,
     fontSize: initialFontSize = 18,
     onBack,
@@ -61,6 +68,12 @@ export function TxtReader({
 
     // 字体大小
     const [fontSize, setFontSize] = useState(initialFontSize);
+
+    // 翻译相关状态：按页缓存译文
+    const [pageTranslations, setPageTranslations] = useState<Record<number, string>>({});
+    const [isTranslatingPage, setIsTranslatingPage] = useState(false);
+    const [translateError, setTranslateError] = useState<string | null>(null);
+    const [viewMode, setViewMode] = useState<TxtViewMode>("original");
 
     // 书签相关状态
     const [isBookmarkSidebarOpen, setIsBookmarkSidebarOpen] = useState(false);
@@ -99,6 +112,36 @@ export function TxtReader({
 
     // 总页数
     const totalPages = pages.length;
+
+    // 内容变化（如重新加载书籍文本）时回到第一页
+    useEffect(() => {
+        setCurrentPage(0);
+    }, [content]);
+
+    // 翻译当前页
+    const handleTranslatePage = useCallback(async () => {
+        if (!targetLanguage || isTranslatingPage) return;
+        const text = pages[currentPage];
+        if (!text?.trim()) return;
+
+        setIsTranslatingPage(true);
+        setTranslateError(null);
+        try {
+            const result = await invoke<{ translated_text: string }>("translate_text", {
+                request: {
+                    text,
+                    target_language: targetLanguage,
+                },
+            });
+            setPageTranslations((prev) => ({ ...prev, [currentPage]: result.translated_text }));
+            setViewMode("bilingual");
+        } catch (e) {
+            console.error("Failed to translate page:", e);
+            setTranslateError(String(e));
+        } finally {
+            setIsTranslatingPage(false);
+        }
+    }, [currentPage, pages, targetLanguage, isTranslatingPage]);
 
     // 翻页
     const handlePrevPage = useCallback(() => {
@@ -224,6 +267,53 @@ export function TxtReader({
                 </div>
 
                 <div className="flex items-center gap-3 shrink-0">
+                    {/* 翻译 */}
+                    {targetLanguage && (
+                        <div className="flex items-center gap-1">
+                            {pageTranslations[currentPage] ? (
+                                <div className="flex items-center gap-0.5 bg-muted/50 rounded-lg p-1 border border-border">
+                                    {([
+                                        ["original", t("txtReader.viewOriginal", "原文")],
+                                        ["translated", t("txtReader.viewTranslated", "译文")],
+                                        ["bilingual", t("txtReader.viewBilingual", "对照")],
+                                    ] as [TxtViewMode, string][]).map(([mode, label]) => (
+                                        <button
+                                            key={mode}
+                                            onClick={() => setViewMode(mode)}
+                                            className={`px-2 py-0.5 text-xs rounded-md transition-colors ${
+                                                viewMode === mode
+                                                    ? "bg-background text-foreground shadow-sm font-medium"
+                                                    : "text-muted-foreground hover:text-foreground"
+                                            }`}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                            ) : (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={handleTranslatePage}
+                                    disabled={isTranslatingPage}
+                                    className="h-8 px-2 gap-1"
+                                    title={t("txtReader.translatePage", "翻译本页")}
+                                >
+                                    {isTranslatingPage ? (
+                                        <Loader2 size={16} className="animate-spin" />
+                                    ) : (
+                                        <Languages size={16} />
+                                    )}
+                                    <span className="text-xs">
+                                        {isTranslatingPage
+                                            ? t("txtReader.translating", "翻译中...")
+                                            : t("txtReader.translatePage", "翻译本页")}
+                                    </span>
+                                </Button>
+                            )}
+                        </div>
+                    )}
+
                     {/* 书签按钮 */}
                     {bookPath && (
                         <div className="flex items-center gap-1">
@@ -297,15 +387,60 @@ export function TxtReader({
                     className="flex-1 overflow-y-auto px-12 py-8 md:px-20 lg:px-32"
                     onMouseUp={handleMouseUp}
                 >
-                    <div
-                        className="max-w-3xl mx-auto whitespace-pre-wrap text-foreground leading-relaxed"
-                        style={{
-                            fontSize: `${fontSize}px`,
-                            lineHeight: 2,
-                        }}
-                    >
-                        {pages[currentPage]}
-                    </div>
+                    {viewMode === "translated" && pageTranslations[currentPage] ? (
+                        <div
+                            className="max-w-3xl mx-auto whitespace-pre-wrap text-foreground leading-relaxed"
+                            style={{
+                                fontSize: `${fontSize}px`,
+                                lineHeight: 2,
+                            }}
+                        >
+                            {pageTranslations[currentPage]}
+                        </div>
+                    ) : viewMode === "bilingual" && pageTranslations[currentPage] ? (
+                        <div className="max-w-3xl mx-auto">
+                            <div
+                                className="whitespace-pre-wrap text-foreground leading-relaxed"
+                                style={{
+                                    fontSize: `${fontSize}px`,
+                                    lineHeight: 2,
+                                }}
+                            >
+                                {pages[currentPage]}
+                            </div>
+                            <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground">
+                                <div className="h-px flex-1 bg-border" />
+                                <Languages size={14} />
+                                <div className="h-px flex-1 bg-border" />
+                            </div>
+                            <div
+                                className="whitespace-pre-wrap text-muted-foreground leading-relaxed border-l-2 border-primary/30 pl-4"
+                                style={{
+                                    fontSize: `${Math.max(12, fontSize - 2)}px`,
+                                    lineHeight: 1.9,
+                                }}
+                            >
+                                {pageTranslations[currentPage]}
+                            </div>
+                        </div>
+                    ) : (
+                        <div
+                            className="max-w-3xl mx-auto whitespace-pre-wrap text-foreground leading-relaxed"
+                            style={{
+                                fontSize: `${fontSize}px`,
+                                lineHeight: 2,
+                            }}
+                        >
+                            {pages[currentPage]}
+                        </div>
+                    )}
+
+                    {/* 翻译失败提示 */}
+                    {translateError && (
+                        <div className="max-w-3xl mx-auto mt-4 p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-destructive text-sm">
+                            {t("txtReader.translationFailed", "翻译失败")}: {translateError}
+                        </div>
+                    )}
                 </div>
 
                 {/* 翻页按钮 - 右 */}

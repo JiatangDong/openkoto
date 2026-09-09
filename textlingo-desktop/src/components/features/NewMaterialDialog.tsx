@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog } from "../ui/dialog";
 import { Button } from "../ui/button";
@@ -36,7 +36,8 @@ export function NewMaterialDialog({ isOpen, onClose, onSave, editingArticle }: N
     const inactiveTabClassName = "hover:bg-muted text-muted-foreground hover:text-foreground";
 
     // Initialize/Reset tab when dialog opens or editingArticle changes
-    useState(() => {
+    useEffect(() => {
+        if (!isOpen) return;
         if (editingArticle) {
             if (editingArticle.source_type === "web") setActiveTab("web");
             else if (editingArticle.book_path) setActiveTab("book");
@@ -47,7 +48,7 @@ export function NewMaterialDialog({ isOpen, onClose, onSave, editingArticle }: N
         } else {
             setActiveTab("article");
         }
-    });
+    }, [isOpen, editingArticle]);
 
     const handleClose = () => {
         onClose();

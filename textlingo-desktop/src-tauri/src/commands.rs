@@ -3198,6 +3198,41 @@ pub async fn extract_subtitles_cmd(
 
 const BOOKS_DIR: &str = "books";
 
+/// 读取 TXT 文件内容，UTF-8 优先，非 UTF-8 时自动检测编码（GBK/GB2312/Big5 等）。
+/// 中文小说 txt 常见 GBK 编码，直接 read_to_string 会失败。
+fn read_txt_decoded(path: &std::path::Path) -> Result<String, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("读取文件失败: {}", e))?;
+
+    // 去掉 UTF-8 BOM 的快速路径
+    if let Some(s) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF][..]) {
+        return Ok(String::from_utf8_lossy(s).into_owned());
+    }
+    if let Ok(s) = std::str::from_utf8(&bytes) {
+        return Ok(s.to_string());
+    }
+    // GB18030 与 Big5 的双字节编码区间重叠，固定顺序解码会把 Big5 误判成 GBK，
+    // 因此用 chardetng 做频率分析检测；检测解码失败再回退 GB18030 宽松解码。
+    let mut detector = chardetng::EncodingDetector::new();
+    detector.feed(&bytes, true);
+    let encoding = detector.guess(None, true);
+    let (cow, _, had_errors) = encoding.decode(&bytes);
+    if had_errors {
+        let (cow, _, _) = encoding_rs::GB18030.decode(&bytes);
+        return Ok(cow.into_owned());
+    }
+    Ok(cow.into_owned())
+}
+
+/// 读取已导入书籍的纯文本内容（供前端自愈旧占位符数据）
+#[tauri::command]
+pub async fn read_book_text_cmd(book_path: String) -> Result<String, String> {
+    let path = std::path::Path::new(&book_path);
+    if !path.exists() {
+        return Err(format!("文件不存在: {}", book_path));
+    }
+    read_txt_decoded(path)
+}
+
 /// 确保书籍存储目录存在
 fn ensure_books_dir(app_handle: &AppHandle) -> Result<PathBuf, String> {
     let app_data_dir = app_handle
@@ -3267,11 +3302,8 @@ pub async fn import_book_cmd(
 
     // 读取 TXT 文件内容作为 content，EPUB/PDF 使用占位符
     let content = match book_type {
-        "txt" => {
-            // 尝试读取 TXT 文件内容
-            std::fs::read_to_string(&dest_path)
-                .unwrap_or_else(|_| format!("[书籍已导入] {}", book_title))
-        }
+        "txt" => read_txt_decoded(&dest_path)
+            .unwrap_or_else(|_| format!("[书籍已导入] {}", book_title)),
         "epub" => format!("[EPUB 书籍] {}", book_title),
         "pdf" => format!("[PDF 书籍] {}", book_title),
         _ => format!("[书籍已导入] {}", book_title),
@@ -4158,4 +4190,64 @@ pub async fn export_transfer_bundle_cmd(
         review_events: bundle.review_events.len(),
         skipped: skipped.total(),
     })
+}
+
+#[cfg(test)]
+mod txt_decode_tests {
+    use super::read_txt_decoded;
+
+    #[test]
+    fn decodes_utf8() {
+        let dir = std::env::temp_dir().join("openkoto_txt_decode_utf8.txt");
+        std::fs::write(&dir, "中文小说\n第一章").unwrap();
+        assert_eq!(read_txt_decoded(&dir).unwrap(), "中文小说\n第一章");
+        std::fs::remove_file(&dir).ok();
+    }
+
+    #[test]
+    fn decodes_utf8_bom() {
+        let dir = std::env::temp_dir().join("openkoto_txt_decode_bom.txt");
+        std::fs::write(&dir, [0xEF, 0xBB, 0xBF].iter().copied()
+            .chain("中文".bytes()).collect::<Vec<u8>>()).unwrap();
+        assert_eq!(read_txt_decoded(&dir).unwrap(), "中文");
+        std::fs::remove_file(&dir).ok();
+    }
+
+    #[test]
+    fn decodes_gbk() {
+        let dir = std::env::temp_dir().join("openkoto_txt_decode_gbk.txt");
+        // "这是一本简体中文的小说，用来测试编码检测功能是否正常运作。" 的 GBK 编码字节
+        let gbk: Vec<u8> = vec![
+            0xD5, 0xE2, 0xCA, 0xC7, 0xD2, 0xBB, 0xB1, 0xBE, 0xBC, 0xF2, 0xCC, 0xE5, 0xD6, 0xD0,
+            0xCE, 0xC4, 0xB5, 0xC4, 0xD0, 0xA1, 0xCB, 0xB5, 0xA3, 0xAC, 0xD3, 0xC3, 0xC0, 0xB4,
+            0xB2, 0xE2, 0xCA, 0xD4, 0xB1, 0xE0, 0xC2, 0xEB, 0xBC, 0xEC, 0xB2, 0xE2, 0xB9, 0xA6,
+            0xC4, 0xDC, 0xCA, 0xC7, 0xB7, 0xF1, 0xD5, 0xFD, 0xB3, 0xA3, 0xD4, 0xCB, 0xD7, 0xF7,
+            0xA1, 0xA3,
+        ];
+        std::fs::write(&dir, &gbk).unwrap();
+        assert_eq!(
+            read_txt_decoded(&dir).unwrap(),
+            "这是一本简体中文的小说，用来测试编码检测功能是否正常运作。"
+        );
+        std::fs::remove_file(&dir).ok();
+    }
+
+    #[test]
+    fn decodes_big5() {
+        let dir = std::env::temp_dir().join("openkoto_txt_decode_big5.txt");
+        // "這是一本繁體中文的小說，用來測試編碼偵測功能是否正常運作。" 的 Big5 编码字节
+        let big5: Vec<u8> = vec![
+            0xB3, 0x6F, 0xAC, 0x4F, 0xA4, 0x40, 0xA5, 0xBB, 0xC1, 0x63, 0xC5, 0xE9, 0xA4, 0xA4,
+            0xA4, 0xE5, 0xAA, 0xBA, 0xA4, 0x70, 0xBB, 0xA1, 0xA1, 0x41, 0xA5, 0xCE, 0xA8, 0xD3,
+            0xB4, 0xFA, 0xB8, 0xD5, 0xBD, 0x73, 0xBD, 0x58, 0xB0, 0xBB, 0xB4, 0xFA, 0xA5, 0x5C,
+            0xAF, 0xE0, 0xAC, 0x4F, 0xA7, 0x5F, 0xA5, 0xBF, 0xB1, 0x60, 0xB9, 0x42, 0xA7, 0x40,
+            0xA1, 0x43,
+        ];
+        std::fs::write(&dir, &big5).unwrap();
+        assert_eq!(
+            read_txt_decoded(&dir).unwrap(),
+            "這是一本繁體中文的小說，用來測試編碼偵測功能是否正常運作。"
+        );
+        std::fs::remove_file(&dir).ok();
+    }
 }

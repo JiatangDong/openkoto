@@ -95,7 +95,8 @@ export function ArticleChatAssistant({
     const [showSlowTip, setShowSlowTip] = useState(false);
     const slowTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const messagesContainerRef = useRef<HTMLDivElement>(null);
+    const isPinnedToBottomRef = useRef(true);
     const abortControllerRef = useRef<AbortController | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -159,14 +160,21 @@ export function ArticleChatAssistant({
         }
     }, [selectedText, t, isFastTranslateEnabled, appConfig]);
 
-    // Auto-scroll to bottom
+    // Auto-scroll to bottom, scoped to the message list container.
+    // Never use scrollIntoView here: it also scrolls overflow:hidden ancestors
+    // and makes the whole assistant panel jump upward.
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-        // Also scroll when attachment changes to keep input visible
-        if (attachment) {
-            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        const el = messagesContainerRef.current;
+        if (el && isPinnedToBottomRef.current && typeof el.scrollTo === "function") {
+            el.scrollTo({ top: el.scrollHeight });
         }
     }, [messages, attachment]);
+
+    const handleMessagesScroll = () => {
+        const el = messagesContainerRef.current;
+        if (!el) return;
+        isPinnedToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    };
 
     const fetchActiveModel = async () => {
         try {
@@ -298,6 +306,7 @@ export function ArticleChatAssistant({
                 } : undefined
             }
         };
+        isPinnedToBottomRef.current = true;
         setMessages(prev => [...prev, userMessage]);
 
         const assistantMessage: ChatMessage = {
@@ -531,6 +540,7 @@ export function ArticleChatAssistant({
                 timestamp: new Date(),
                 isStreaming: true
             };
+            isPinnedToBottomRef.current = true;
             setMessages(prev => [...prev, assistantMessage]);
 
             setIsLoading(true);
@@ -693,7 +703,11 @@ export function ArticleChatAssistant({
                 )}
 
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto pr-2 space-y-4 mb-4">
+                <div
+                    ref={messagesContainerRef}
+                    onScroll={handleMessagesScroll}
+                    className="flex-1 overflow-y-auto pr-2 space-y-4 mb-4"
+                >
                     {messages.map((message) => (
                         <div
                             key={message.id}
@@ -753,7 +767,6 @@ export function ArticleChatAssistant({
                             )}
                         </div>
                     ))}
-                    <div ref={messagesEndRef} />
                 </div>
 
                 {/* Attachment Preview in Input Area */}

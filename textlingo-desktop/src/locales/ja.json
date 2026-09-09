@@ -714,7 +714,13 @@
     "prevPage": "前のページ",
     "nextPage": "次のページ",
     "decreaseFontSize": "フォントを小さく",
-    "increaseFontSize": "フォントを大きく"
+    "increaseFontSize": "フォントを大きく",
+    "translatePage": "このページを翻訳",
+    "translating": "翻訳中...",
+    "translationFailed": "翻訳に失敗しました",
+    "viewOriginal": "原文",
+    "viewTranslated": "翻訳",
+    "viewBilingual": "対訳"
   },
   "pdfReader": {
     "untitled": "無題のPDF",

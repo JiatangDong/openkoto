@@ -725,7 +725,13 @@
     "prevPage": "上一页",
     "nextPage": "下一页",
     "decreaseFontSize": "减小字体",
-    "increaseFontSize": "增大字体"
+    "increaseFontSize": "增大字体",
+    "translatePage": "翻译本页",
+    "translating": "翻译中...",
+    "translationFailed": "翻译失败",
+    "viewOriginal": "原文",
+    "viewTranslated": "译文",
+    "viewBilingual": "对照"
   },
   "pdfReader": {
     "untitled": "未命名PDF",

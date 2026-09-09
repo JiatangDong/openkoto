@@ -32,13 +32,16 @@ interface BookReaderProps {
     onUpdate?: () => void;
 }
 
-export function BookReader({ article, onBack }: BookReaderProps) {
+export function BookReader({ article, onBack, onUpdate }: BookReaderProps) {
     const { t } = useTranslation();
     const assistantModeStorageKey = "book-reader-assistant-mode";
     const backToMaterialsLabel = t("bookReader.backToMaterials", "返回素材列表");
 
     // 选中的文本（用于 AI 分析）
     const [selectedText, setSelectedText] = useState("");
+
+    // TXT 正文（旧版本 GBK 导入会写入占位符，打开时自动重读修复）
+    const [txtContent, setTxtContent] = useState(article.content);
 
     // 显示 AI 助手面板
     const [showAssistant, setShowAssistant] = useState(true);
@@ -66,6 +69,31 @@ export function BookReader({ article, onBack }: BookReaderProps) {
     const isEpub = article.book_type === "epub";
     const isTxt = article.book_type === "txt";
     const isPdf = article.book_type === "pdf";
+
+    // 旧版本导入非 UTF-8（如 GBK）TXT 时 content 是占位符，打开时重读文件修复
+    useEffect(() => {
+        setTxtContent(article.content);
+        if (
+            isTxt
+            && article.book_path
+            && article.content.trimStart().startsWith("[书籍已导入]")
+        ) {
+            let cancelled = false;
+            invoke<string>("read_book_text_cmd", { bookPath: article.book_path })
+                .then((text) => {
+                    if (cancelled || !text?.trim()) return;
+                    setTxtContent(text);
+                    return invoke("update_article", { id: article.id, content: text })
+                        .then(() => onUpdate?.())
+                        .catch((e) => console.error("Failed to persist re-read txt content:", e));
+                })
+                .catch((e) => console.error("Failed to re-read txt content:", e));
+            return () => {
+                cancelled = true;
+            };
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [article.id, article.content, article.book_path, isTxt]);
 
     // 检查已存在的翻译文件
     useEffect(() => {
@@ -438,8 +466,10 @@ export function BookReader({ article, onBack }: BookReaderProps) {
                     )}
                     {isTxt && (
                         <TxtReader
-                            content={article.content}
+                            content={txtContent}
                             title={article.title}
+                            bookPath={article.book_path ?? undefined}
+                            targetLanguage={targetLanguage}
                             onTextSelect={handleTextSelect}
                         />
                     )}

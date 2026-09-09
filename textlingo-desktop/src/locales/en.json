@@ -720,7 +720,13 @@
     "prevPage": "Previous Page",
     "nextPage": "Next Page",
     "decreaseFontSize": "Decrease Font Size",
-    "increaseFontSize": "Increase Font Size"
+    "increaseFontSize": "Increase Font Size",
+    "translatePage": "Translate Page",
+    "translating": "Translating...",
+    "translationFailed": "Translation failed",
+    "viewOriginal": "Original",
+    "viewTranslated": "Translation",
+    "viewBilingual": "Bilingual"
   },
   "pdfReader": {
     "untitled": "Untitled PDF",

@@ -243,6 +243,18 @@ function App() {
     }
   };
 
+  // 新建素材弹窗保存后：刷新列表；新导入的书籍素材直接打开，避免被误认为进入了精读
+  const handleMaterialSaved = async (article: Article) => {
+    const refreshedArticles = await loadData();
+    if (!editingArticle && article.book_path) {
+      const fresh = refreshedArticles.find(a => a.id === article.id) ?? article;
+      setSelectedIndex(refreshedArticles.findIndex(a => a.id === fresh.id));
+      setShowFavorites(false);
+      setSelectedArticle(fresh);
+      setActiveScreen("reader");
+    }
+  };
+
   const handleDeleteArticle = async (id: string) => {
     console.log("App: handleDeleteArticle called for id:", id);
     try {
@@ -331,7 +343,7 @@ function App() {
         <NewMaterialDialog
           isOpen={isEditDialogOpen}
           onClose={() => { setIsEditDialogOpen(false); setEditingArticle(null) }}
-          onSave={handleArticleUpdate}
+          onSave={handleMaterialSaved}
           editingArticle={editingArticle}
         />
         <OnboardingDialog
