@@ -26,6 +26,25 @@ class CiWorkflowTests(unittest.TestCase):
         self.assertLess(verify_index, rust_tests_index)
         self.assertLess(executable_verify_index, rust_tests_index)
 
+    def test_backend_job_stages_agent_worker_before_rust_tests(self) -> None:
+        content = CI_WORKFLOW.read_text()
+        backend_job = content[content.index("  backend:"):content.index("  frontend:")]
+
+        self.assertIn("uses: actions/setup-node@v5", backend_job)
+        self.assertIn("textlingo-desktop/agent-worker/package-lock.json", backend_job)
+        self.assertIn("name: install agent worker dependencies", backend_job)
+        self.assertIn("name: stage bundled agent worker", backend_job)
+        self.assertIn("working-directory: ./textlingo-desktop/agent-worker", backend_job)
+
+        rust_tests_index = backend_job.index("name: Rust tests")
+        setup_node_index = backend_job.index("uses: actions/setup-node@v5")
+        install_index = backend_job.index("name: install agent worker dependencies")
+        stage_index = backend_job.index("name: stage bundled agent worker")
+
+        self.assertLess(setup_node_index, install_index)
+        self.assertLess(install_index, stage_index)
+        self.assertLess(stage_index, rust_tests_index)
+
 
 if __name__ == "__main__":
     unittest.main()
