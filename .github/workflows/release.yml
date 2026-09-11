@@ -277,3 +277,28 @@ jobs:
             echo "::error::disable-library-validation entitlement missing on PDF sidecar — PDF translation will fail at runtime"
             exit 1
           fi
+
+      - name: assert packaged agent worker runtimes (windows only)
+        if: startsWith(matrix.platform, 'windows-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET_DIR=$(cd textlingo-desktop/src-tauri/target/release && pwd)
+          echo "Target dir: $TARGET_DIR"
+          AGENT_NODE="$TARGET_DIR/openkoto-agent-node.exe"
+          AGENT_WORKER="$TARGET_DIR/resources/agent-worker/dist/index.js"
+          OPENCODE="$TARGET_DIR/opencode.exe"
+          for REQUIRED in "$AGENT_NODE" "$AGENT_WORKER" "$OPENCODE"; do
+            if [ ! -f "$REQUIRED" ]; then
+              echo "::error::Agent worker runtime not found at $REQUIRED"
+              find "$TARGET_DIR" -maxdepth 4 -type f | sort
+              exit 1
+            fi
+          done
+          "$AGENT_NODE" --version
+          WORKER_SMOKE=$(cd "$(dirname "$AGENT_WORKER")/.." && "$AGENT_NODE" dist/index.js </dev/null)
+          echo "$WORKER_SMOKE"
+          if ! grep -q '"event":"worker.ready"' <<<"$WORKER_SMOKE"; then
+            echo "::error::Packaged agent worker did not emit worker.ready"
+            exit 1
+          fi

@@ -67,6 +67,23 @@ jobs:
           ls -la textlingo-desktop/src-tauri/binaries
         shell: bash
 
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            textlingo-desktop/package-lock.json
+            textlingo-desktop/agent-worker/package-lock.json
+
+      - name: install agent worker dependencies
+        run: npm ci
+        working-directory: ./textlingo-desktop/agent-worker
+
+      - name: stage bundled agent worker
+        run: npm run stage
+        working-directory: ./textlingo-desktop/agent-worker
+
       - name: Prepare frontend dist for Tauri context
         working-directory: .
         run: mkdir -p textlingo-desktop/dist

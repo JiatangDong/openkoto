@@ -98,6 +98,26 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 f"{workflow} must smoke-test the packaged worker entry",
             )
 
+    def test_release_workflows_assert_packaged_worker_on_windows(self) -> None:
+        expected_paths = (
+            'AGENT_NODE="$TARGET_DIR/openkoto-agent-node.exe"',
+            'AGENT_WORKER="$TARGET_DIR/resources/agent-worker/dist/index.js"',
+            'OPENCODE="$TARGET_DIR/opencode.exe"',
+        )
+        for workflow in RELEASE_WORKFLOWS:
+            content = workflow.read_text()
+            self.assertIn(
+                "if: startsWith(matrix.platform, 'windows-')",
+                content,
+                f"{workflow} must gate the Windows assertion on the windows matrix platform",
+            )
+            for expected_path in expected_paths:
+                self.assertIn(
+                    expected_path,
+                    content,
+                    f"{workflow} must verify packaged agent worker artifact `{expected_path}`",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
