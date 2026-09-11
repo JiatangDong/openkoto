@@ -113,6 +113,8 @@ jobs:
             args: "--target aarch64-apple-darwin --bundles app,dmg"
           - platform: "macos-15-intel"
             args: "--target x86_64-apple-darwin --bundles app,dmg"
+          - platform: "ubuntu-22.04"
+            args: "--target x86_64-unknown-linux-gnu --bundles appimage,deb"
           - platform: "windows-latest"
             args: ""
 
@@ -132,6 +134,20 @@ jobs:
 
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
+
+      - name: install system dependencies (linux only)
+        if: startsWith(matrix.platform, 'ubuntu-')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
 
       - name: install dependencies (macos only)
         if: startsWith(matrix.platform, 'macos-')
@@ -297,3 +313,42 @@ jobs:
             echo "::error::Packaged agent worker did not emit worker.ready"
             exit 1
           fi
+
+      - name: assert packaged runtimes and Linux bundles (linux only)
+        if: startsWith(matrix.platform, 'ubuntu-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          TARGET_DIR=$(cd textlingo-desktop/src-tauri/target/x86_64-unknown-linux-gnu/release && pwd)
+          echo "Target dir: $TARGET_DIR"
+          AGENT_NODE="$TARGET_DIR/openkoto-agent-node"
+          OPENCODE="$TARGET_DIR/opencode"
+          SIDECAR="$TARGET_DIR/openkoto-pdf-translator"
+          for REQUIRED in "$AGENT_NODE" "$OPENCODE" "$SIDECAR"; do
+            if [ ! -f "$REQUIRED" ]; then
+              echo "::error::Packaged runtime not found at $REQUIRED"
+              find "$TARGET_DIR" -maxdepth 2 -type f | sort
+              exit 1
+            fi
+          done
+          "$AGENT_NODE" --version
+          WORKER_SMOKE=$(cd textlingo-desktop/src-tauri/resources/agent-worker && "$AGENT_NODE" dist/index.js </dev/null)
+          echo "$WORKER_SMOKE"
+          if ! grep -q '"event":"worker.ready"' <<<"$WORKER_SMOKE"; then
+            echo "::error::Packaged agent worker did not emit worker.ready"
+            exit 1
+          fi
+          APPIMAGE=$(find textlingo-desktop/src-tauri/target -type f -name "*.AppImage" -path "*/release/bundle/appimage/*" | head -1)
+          DEB=$(find textlingo-desktop/src-tauri/target -type f -name "*.deb" -path "*/release/bundle/deb/*" | head -1)
+          if [ -z "$APPIMAGE" ]; then echo "::error::No .AppImage bundle found"; exit 1; fi
+          if [ -z "$DEB" ]; then echo "::error::No .deb bundle found"; exit 1; fi
+          echo "AppImage bundle: $APPIMAGE"
+          echo "Debian bundle: $DEB"
+          DEB_CONTENTS=$(dpkg-deb -c "$DEB")
+          for REQUIRED in "openkoto-agent-node" "opencode" "openkoto-pdf-translator" "agent-worker/dist/index.js"; do
+            if ! grep -q "$REQUIRED" <<<"$DEB_CONTENTS"; then
+              echo "::error::$REQUIRED missing from .deb bundle"
+              echo "$DEB_CONTENTS"
+              exit 1
+            fi
+          done
