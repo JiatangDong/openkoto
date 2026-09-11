@@ -193,18 +193,22 @@ jobs:
           releaseName: "OpenKoto Desktop ${{ github.ref_name }}"
           releaseBody: |
             ## Release Highlights
-            - Subtitle extraction now runs on real Whisper ASR instead of LLM listening, with word-level timestamps and smarter line segmentation for far more accurate subtitles.
-            - Added a dedicated transcription (ASR) section in Settings supporting multiple providers (302.AI, OpenAI, Groq, SiliconFlow, OpenAI-compatible), with model presets, API sync, and one-click links to each provider's docs.
-            - You can now pick which ASR model to use right from the "Extract" / "Re-extract" subtitle buttons — the chosen model is remembered as the default.
-            - Added drag-and-drop import: drop a video, audio, PDF, EPUB, or `.srt` file onto the main window to import it instantly.
+            - Smarter vocabulary review: the spaced-repetition engine is now unified on FSRS-6 (replacing SM-2), with a one-time automatic migration, review statistics, and Anki TSV export so you can move your vocabulary anywhere.
+            - AI web cleaning: when importing articles from the web, Smart mode asks the AI to remove navigation, ads, recommendation links, comments, and footers — keeping only the real content. Classic rule-based extraction remains available.
+            - TXT novel reading is much better: automatic detection of GBK/GB2312/Big5 encodings, per-page translation with original / translated / bilingual views, and imported books now open directly in the book reader.
+            - New `.okdata` transfer bundle export to share content with Apple devices.
+            - Media player: subtitles now support original / bilingual / translation view modes.
 
             ## Improved
-            - Long audio/video is automatically split into duration-based chunks before transcription, fixing timeouts on lengthy recordings.
-            - Audio is downmixed and compressed before upload to stay within ASR file-size limits.
-            - 302.AI transcription requests are auto-normalized to the supported `whisper-1` model to avoid provider errors.
+            - Vocabulary management: edit dialog, word-pack selection, recite mode, and favorites refinements.
+            - Chat assistant auto-scroll is scoped to the message list and no longer jumps around while you read history.
+            - Article reader only scrolls to the selected sentence when it is off-screen.
 
             ## Fixed
-            - Fixed PDF translation stalling when a model rejects a non-default temperature (now self-heals and retries).
+            - Fixed TXT imports showing garbled text for non-UTF-8 files, and self-heal for legacy placeholder book content.
+            - Fixed scroll jumps in the chat panel and article reader.
+            - Fixed the media player sheet that could not be closed after cancelling.
+            - Fixed the OpenAI provider input.
 
             > Desktop version `${{ github.ref_name }}`. Multi-platform release publishing remains tag-driven through this workflow.
           releaseDraft: false
