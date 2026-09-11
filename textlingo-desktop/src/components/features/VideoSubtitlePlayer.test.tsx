@@ -131,4 +131,102 @@ describe("VideoSubtitlePlayer", () => {
 
     expect(screen.getByText("Beta")).toBeInTheDocument();
   });
+
+  function renderPlayingVideo(segments: ArticleSegment[]) {
+    const onSegmentClick = vi.fn();
+    render(
+      <VideoSubtitlePlayer
+        videoUrl="http://localhost/video.mp4"
+        segments={segments}
+        selectedSegmentId={null}
+        onSegmentClick={onSegmentClick}
+        fontSize={18}
+        viewMode="original"
+      />
+    );
+
+    const video = document.querySelector("video") as HTMLVideoElement;
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      value: 1,
+      writable: true,
+    });
+    Object.defineProperty(video, "paused", {
+      configurable: true,
+      value: false,
+      writable: true,
+    });
+    fireEvent.timeUpdate(video);
+
+    return { video, onSegmentClick };
+  }
+
+  it("toggles play/pause with the Space key", () => {
+    const { video } = renderPlayingVideo([createSegment()]);
+
+    fireEvent.keyDown(window, { key: " " });
+    expect(video.pause).toHaveBeenCalledTimes(1);
+
+    Object.defineProperty(video, "paused", { configurable: true, value: true });
+    fireEvent.keyDown(window, { key: " " });
+    expect(video.play).toHaveBeenCalled();
+  });
+
+  it("ignores keyboard shortcuts while typing in an input", () => {
+    const { video } = renderPlayingVideo([createSegment()]);
+
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    fireEvent.keyDown(input, { key: " " });
+    input.remove();
+
+    expect(video.pause).not.toHaveBeenCalled();
+    expect(video.play).not.toHaveBeenCalled();
+  });
+
+  it("seeks to the next/previous subtitle sentence with Arrow keys", () => {
+    const segments = [
+      createSegment(),
+      createSegment({ id: "seg-2", order: 1, text: "Gamma", start_time: 2, end_time: 4 }),
+      createSegment({ id: "seg-3", order: 2, text: "Delta", start_time: 4, end_time: 6 }),
+    ];
+    const { video, onSegmentClick } = renderPlayingVideo(segments);
+
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(onSegmentClick).toHaveBeenCalledWith("seg-2");
+    expect(video.currentTime).toBe(2);
+
+    // 模拟 seek 后媒体触发 timeupdate,组件内播放进度随之更新
+    fireEvent.timeUpdate(video);
+
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    expect(onSegmentClick).toHaveBeenLastCalledWith("seg-1");
+    expect(video.currentTime).toBe(0);
+  });
+
+  it("pauses when clicking the currently playing subtitle instead of replaying it", () => {
+    const { video, onSegmentClick } = renderPlayingVideo([createSegment()]);
+
+    fireEvent.click(screen.getByText("Alpha"));
+
+    expect(video.pause).toHaveBeenCalledTimes(1);
+    expect(onSegmentClick).not.toHaveBeenCalled();
+  });
+
+  it("keeps seek-and-play behavior when clicking a different subtitle sentence", async () => {
+    const segments = [
+      createSegment(),
+      createSegment({ id: "seg-2", order: 1, text: "Gamma", start_time: 2, end_time: 4 }),
+    ];
+    const { video, onSegmentClick } = renderPlayingVideo(segments);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "videoPlayer.showAllSubtitles (2)" })
+    );
+    fireEvent.click(screen.getByText("Gamma"));
+
+    expect(onSegmentClick).toHaveBeenCalledWith("seg-2");
+    expect(video.currentTime).toBe(2);
+    expect(video.play).toHaveBeenCalled();
+  });
 });

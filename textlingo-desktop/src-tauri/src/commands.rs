@@ -2,6 +2,7 @@ use crate::agent_worker::{
     default_base_url, resolve_runtime_provider_config, AgentWorkerManager, AgentWorkerStatusSnapshot,
 };
 use crate::ai_service::{get_ai_service, get_or_create_ai_service, AIServiceCache};
+use crate::ffmpeg::run_ffmpeg;
 use crate::ktv_export::{export_ktv_video, prepare_ktv_segments, KtvExportConfig, KtvExportResult};
 use crate::moonshot::is_moonshot_provider;
 use crate::storage::{
@@ -2890,6 +2891,125 @@ pub async fn import_youtube_video_cmd(
     Ok(article)
 }
 
+/// 判断容器格式是否无法被 WebView(macOS WebKit / Windows WebView2)直接播放,
+/// 需要在导入时用 FFmpeg 转封装为 MP4。mp4/mov/webm 等不在此列。
+fn needs_remux_container(ext: &str) -> bool {
+    matches!(
+        ext.to_lowercase().as_str(),
+        "mkv" | "avi" | "wmv" | "flv" | "ts" | "m2ts" | "mpg" | "mpeg" | "vob"
+    )
+}
+
+/// 用打包的 FFmpeg 将 WebView 不支持的容器转封装为 MP4:
+/// 视频流 copy(不重编码),音频转 AAC 保证浏览器兼容,多音轨取第一条。
+async fn remux_video_to_mp4(
+    app_handle: &AppHandle,
+    src: &std::path::Path,
+    dest: &std::path::Path,
+) -> Result<(), String> {
+    let src_str = src.to_str().ok_or("Invalid source file path")?;
+    let dest_str = dest.to_str().ok_or("Invalid destination file path")?;
+
+    let output = run_ffmpeg(
+        app_handle,
+        vec![
+            "-y".to_string(),
+            "-i".to_string(),
+            src_str.to_string(),
+            "-map".to_string(),
+            "0:v:0".to_string(),
+            "-map".to_string(),
+            "0:a:0?".to_string(),
+            "-c:v".to_string(),
+            "copy".to_string(),
+            "-c:a".to_string(),
+            "aac".to_string(),
+            "-b:a".to_string(),
+            "192k".to_string(),
+            "-movflags".to_string(),
+            "+faststart".to_string(),
+            dest_str.to_string(),
+        ],
+    )
+    .await?;
+
+    if !output.success {
+        let _ = std::fs::remove_file(dest);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let tail = stderr
+            .lines()
+            .rev()
+            .take(5)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Err(format!(
+            "Failed to convert video to MP4 (the video codec may not be supported). FFmpeg output: {}",
+            tail
+        ));
+    }
+
+    if !dest.exists() {
+        return Err("Failed to convert video to MP4: output file was not created".to_string());
+    }
+
+    Ok(())
+}
+
+/// 尝试从源视频中抽取第一条内嵌文本字幕流为 SRT。
+/// 失败(无字幕流/图像字幕等)仅记录日志,不阻塞导入。
+async fn try_extract_embedded_subtitles(
+    app_handle: &AppHandle,
+    src: &std::path::Path,
+    dest: &std::path::Path,
+) -> Option<PathBuf> {
+    let (Some(src_str), Some(dest_str)) = (src.to_str(), dest.to_str()) else {
+        return None;
+    };
+
+    let output = run_ffmpeg(
+        app_handle,
+        vec![
+            "-y".to_string(),
+            "-i".to_string(),
+            src_str.to_string(),
+            "-map".to_string(),
+            "0:s:0".to_string(),
+            "-c:s".to_string(),
+            "srt".to_string(),
+            dest_str.to_string(),
+        ],
+    )
+    .await;
+
+    match output {
+        Ok(out)
+            if out.success
+                && dest.exists()
+                && std::fs::metadata(dest).map(|m| m.len() > 0).unwrap_or(false) =>
+        {
+            Some(dest.to_path_buf())
+        }
+        Ok(out) => {
+            let _ = std::fs::remove_file(dest);
+            println!(
+                "[Import] No extractable embedded text subtitle stream: {}",
+                String::from_utf8_lossy(&out.stderr)
+                    .lines()
+                    .last()
+                    .unwrap_or("")
+            );
+            None
+        }
+        Err(e) => {
+            println!("[Import] Failed to extract embedded subtitles: {}", e);
+            None
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn import_local_video_cmd(
     app_handle: AppHandle,
@@ -2923,16 +3043,38 @@ pub async fn import_local_video_cmd(
         .unwrap_or_else(|| "mp4".to_string());
 
     let id = Uuid::new_v4().to_string();
-    let dest_name = format!("{}.{}", id, ext);
-    let dest_path = videos_dir.join(&dest_name);
 
-    std::fs::copy(src_path, &dest_path).map_err(|e| format!("Failed to copy file: {}", e))?;
-
-    let created_at = chrono::Utc::now().to_rfc3339();
     let is_audio = matches!(
         ext.to_lowercase().as_str(),
         "mp3" | "wav" | "m4a" | "aac" | "flac" | "ogg" | "wma"
     );
+
+    let mut subtitle_path = subtitle_path;
+
+    let dest_path = if !is_audio && needs_remux_container(&ext) {
+        // WebView 不支持该容器(如 mkv/avi):转封装为 mp4,标题仍用原文件名
+        let dest_path = videos_dir.join(format!("{}.mp4", id));
+        remux_video_to_mp4(&app_handle, src_path, &dest_path).await?;
+
+        // 用户未手动选字幕时,尝试抽取内嵌字幕并复用现有字幕导入管线
+        if subtitle_path.is_none() {
+            let srt_path = videos_dir.join(format!("{}.srt", id));
+            if let Some(path) =
+                try_extract_embedded_subtitles(&app_handle, src_path, &srt_path).await
+            {
+                subtitle_path = Some(path.to_string_lossy().into_owned());
+            }
+        }
+
+        dest_path
+    } else {
+        let dest_name = format!("{}.{}", id, ext);
+        let dest_path = videos_dir.join(&dest_name);
+        std::fs::copy(src_path, &dest_path).map_err(|e| format!("Failed to copy file: {}", e))?;
+        dest_path
+    };
+
+    let created_at = chrono::Utc::now().to_rfc3339();
 
     // Initial content placeholder
     let content = if is_audio {
@@ -4249,5 +4391,24 @@ mod txt_decode_tests {
             "這是一本繁體中文的小說，用來測試編碼偵測功能是否正常運作。"
         );
         std::fs::remove_file(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod video_remux_tests {
+    use super::needs_remux_container;
+
+    #[test]
+    fn remux_required_for_webview_unsupported_containers() {
+        for ext in ["mkv", "MKV", "avi", "wmv", "flv", "ts", "m2ts", "mpg", "mpeg", "vob"] {
+            assert!(needs_remux_container(ext), "{} should need remux", ext);
+        }
+    }
+
+    #[test]
+    fn remux_skipped_for_webview_supported_containers() {
+        for ext in ["mp4", "MP4", "mov", "webm", "m4v", "mp3", "m4a"] {
+            assert!(!needs_remux_container(ext), "{} should not need remux", ext);
+        }
     }
 }

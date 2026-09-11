@@ -640,6 +640,8 @@
     "clickToTranslate": "Click to Quick Translate all subtitles",
     "hideSubtitles": "Hide Subtitles",
     "showAllSubtitles": "Show All Subtitles",
+    "togglePlaybackHint": "Click to play/pause",
+    "shortcutsHint": "Space: play/pause · ←/→: previous/next subtitle",
     "exportOptions": {
       "original": "Original",
       "translation": "Translation",

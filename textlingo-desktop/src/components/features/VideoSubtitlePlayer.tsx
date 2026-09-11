@@ -9,7 +9,7 @@
  * 5. SRT 字幕导出
  */
 
-import React, { useRef, useState, useEffect, useCallback } from "react";
+import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "../ui/button";
 import { ChevronDown, ChevronUp, Loader2, FileText, Minimize2, Download, X, FileJson, FileType, FolderOpen, Music, Eye, Languages, Split, Check, Mic } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -463,6 +463,110 @@ export function VideoSubtitlePlayer({
             currentTime >= s.start_time && currentTime < s.end_time
     );
 
+    // 排序后的字幕列表(提前计算,供快捷键、点击、列表渲染共用)
+    const sortedSegments = useMemo(() => [...segments].sort((a, b) => a.order - b.order), [segments]);
+
+    // 播放/暂停切换
+    const togglePlayPause = useCallback(() => {
+        const video = videoRef.current;
+        if (!video) return;
+        if (video.paused) {
+            video.play().catch(() => { });
+        } else {
+            video.pause();
+        }
+    }, []);
+
+    // 跳转到指定字幕句并播放
+    const seekToSegment = useCallback((segment: ArticleSegment) => {
+        if (segment.start_time === undefined) return;
+        onSegmentClick(segment.id);
+        if (videoRef.current) {
+            videoRef.current.currentTime = segment.start_time;
+            videoRef.current.play().catch(() => { });
+        }
+    }, [onSegmentClick]);
+
+    // 按字幕句前后跳转(offset: -1 上一句 / 1 下一句)
+    const seekSegmentByOffset = useCallback((offset: number) => {
+        if (sortedSegments.length === 0) return;
+
+        const currentIndex = currentSubtitle
+            ? sortedSegments.findIndex(s => s.id === currentSubtitle.id)
+            : -1;
+
+        let targetIndex: number;
+        if (currentIndex >= 0) {
+            targetIndex = Math.min(Math.max(currentIndex + offset, 0), sortedSegments.length - 1);
+        } else if (offset < 0) {
+            // 当前不在任何字幕区间:上一句 → 最后一个不晚于当前时间的句
+            targetIndex = sortedSegments.reduce(
+                (acc, s, i) => (s.start_time !== undefined && s.start_time <= currentTime ? i : acc),
+                -1
+            );
+            if (targetIndex < 0) targetIndex = 0;
+        } else {
+            // 下一句 → 第一个晚于当前时间的句
+            targetIndex = sortedSegments.findIndex(
+                s => s.start_time !== undefined && s.start_time > currentTime
+            );
+            if (targetIndex < 0) return;
+        }
+
+        const target = sortedSegments[targetIndex];
+        if (target && target.id !== currentSubtitle?.id) {
+            seekToSegment(target);
+        }
+    }, [sortedSegments, currentSubtitle, currentTime, seekToSegment]);
+
+    // 键盘快捷键:Space 播放/暂停,←/→ 上一句/下一句
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.defaultPrevented) return;
+
+            // 焦点在输入控件或媒体元素(原生 controls 自带快捷键)上时不拦截
+            const target = e.target as HTMLElement | null;
+            if (target) {
+                const tag = target.tagName;
+                if (
+                    tag === "INPUT" ||
+                    tag === "TEXTAREA" ||
+                    tag === "SELECT" ||
+                    tag === "VIDEO" ||
+                    tag === "AUDIO" ||
+                    target.isContentEditable
+                ) {
+                    return;
+                }
+            }
+
+            if (e.key === " ") {
+                e.preventDefault();
+                togglePlayPause();
+            } else if (e.key === "ArrowLeft") {
+                e.preventDefault();
+                seekSegmentByOffset(-1);
+            } else if (e.key === "ArrowRight") {
+                e.preventDefault();
+                seekSegmentByOffset(1);
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown);
+        return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [togglePlayPause, seekSegmentByOffset]);
+
+    // 播放句变化时,字幕列表自动滚动到当前句,保持与播放进度同步
+    // TODO: 右侧解释面板(ArticleExplanationPanel)展示的是「选中句」而非「播放句」,
+    // 与解释面板的深度联动(如播放句变化时同步滚动解释面板)需在 ArticleReader 层改造。
+    const activeSegmentId = currentSubtitle?.id;
+    useEffect(() => {
+        const el = activeSegmentRef.current;
+        if (el && typeof el.scrollIntoView === "function") {
+            el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+    }, [activeSegmentId]);
+
     // 检查是否有缺失的翻译
     const hasMissingTranslations = segments.some(s => !s.translation || !s.translation.trim());
 
@@ -486,17 +590,15 @@ export function VideoSubtitlePlayer({
 
 
 
-    // 点击字幕跳转视频
+    // 点击字幕:点击当前正在播放的句 → 播放/暂停切换;点击其他句 → 跳过去播
     const handleSubtitleClick = (segment: ArticleSegment) => {
-        onSegmentClick(segment.id);
-        if (videoRef.current && segment.start_time !== undefined) {
-            videoRef.current.currentTime = segment.start_time;
-            videoRef.current.play().catch(() => { });
+        if (currentSubtitle?.id === segment.id) {
+            togglePlayPause();
+            return;
         }
+        seekToSegment(segment);
     };
 
-    // 排序后的字幕列表
-    const sortedSegments = [...segments].sort((a, b) => a.order - b.order);
     const viewModeLabel = t(`articleReader.viewMode.${viewMode}`) || (
         viewMode === "original" ? "Original" : viewMode === "bilingual" ? "Bilingual" : "Translation"
     );
@@ -723,6 +825,7 @@ export function VideoSubtitlePlayer({
                     <div
                         className="p-4 bg-card/60 backdrop-blur-sm rounded-xl border border-border shadow-sm cursor-pointer hover:bg-card/80 transition-all active:scale-[0.99]"
                         onClick={() => handleSubtitleClick(currentSubtitle)}
+                        title={t("videoPlayer.togglePlaybackHint", "Click to play/pause")}
                     >
                         {/* 内容显示：根据视图模式调整 */}
                         {viewMode === 'translation' && currentSubtitle.translation ? (
@@ -822,6 +925,7 @@ export function VideoSubtitlePlayer({
                         size="sm"
                         onClick={() => setShowFullSubtitles(!showFullSubtitles)}
                         className="flex-1 justify-center gap-2"
+                        title={t("videoPlayer.shortcutsHint", "Space: play/pause · ←/→: previous/next subtitle")}
                     >
                         {showFullSubtitles ? (
                             <>

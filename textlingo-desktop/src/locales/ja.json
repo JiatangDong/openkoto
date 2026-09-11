@@ -635,6 +635,8 @@
     "clickToTranslate": "クリックして全字幕を翻訳",
     "hideSubtitles": "字幕を非表示",
     "showAllSubtitles": "すべての字幕を表示",
+    "togglePlaybackHint": "クリックで再生/一時停止",
+    "shortcutsHint": "スペース:再生/一時停止 · ←/→:前/次の字幕",
     "exportOptions": {
       "original": "原文",
       "translation": "翻訳",

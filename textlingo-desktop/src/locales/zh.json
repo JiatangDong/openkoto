@@ -645,6 +645,8 @@
     "clickToTranslate": "点击以快速翻译所有字幕",
     "hideSubtitles": "收起字幕列表",
     "showAllSubtitles": "查看全部字幕",
+    "togglePlaybackHint": "点击播放/暂停",
+    "shortcutsHint": "空格:播放/暂停 · ←/→:上一句/下一句",
     "exportOptions": {
       "original": "原文",
       "translation": "译文",
