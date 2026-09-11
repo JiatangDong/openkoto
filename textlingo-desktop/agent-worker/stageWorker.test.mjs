@@ -14,6 +14,55 @@ test("platformTargetTriple maps supported release targets", () => {
   assert.equal(platformTargetTriple("win32", "x64"), "x86_64-pc-windows-msvc");
 });
 
+test("stageAgentWorker stages linux x64 runtimes", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "openkoto-stage-worker-linux-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const desktopDir = join(root, "textlingo-desktop");
+  const workerDir = join(root, "agent-worker");
+  const nodeExecutable = join(root, "node");
+  await mkdir(join(workerDir, "dist"), { recursive: true });
+  await mkdir(join(workerDir, "node_modules", "@opencode-ai", "sdk"), { recursive: true });
+  await mkdir(join(workerDir, "node_modules", "zod"), { recursive: true });
+  await mkdir(
+    join(workerDir, "node_modules", "opencode-linux-x64-baseline", "bin"),
+    { recursive: true },
+  );
+  await writeFile(join(workerDir, "dist", "index.js"), "console.log('worker');\n");
+  await writeFile(join(workerDir, "package.json"), '{"type":"module"}\n');
+  await writeFile(
+    join(workerDir, "node_modules", "@opencode-ai", "sdk", "package.json"),
+    '{"name":"@opencode-ai/sdk"}\n',
+  );
+  await writeFile(
+    join(workerDir, "node_modules", "zod", "package.json"),
+    '{"name":"zod"}\n',
+  );
+  await writeFile(
+    join(workerDir, "node_modules", "opencode-linux-x64-baseline", "bin", "opencode"),
+    "opencode-linux-runtime",
+  );
+  await writeFile(nodeExecutable, "node-runtime");
+  let verifiedNodeRuntime = null;
+
+  const result = await stageAgentWorker({
+    desktopDir,
+    workerDir,
+    nodeExecutable,
+    platform: "linux",
+    arch: "x64",
+    async verifyNodeRuntime(stagedNodeRuntime) {
+      verifiedNodeRuntime = stagedNodeRuntime;
+      assert.equal(await readFile(stagedNodeRuntime, "utf8"), "node-runtime");
+    },
+  });
+
+  assert.equal(await readFile(result.opencodeDestination, "utf8"), "opencode-linux-runtime");
+  assert.equal(await readFile(result.nodeDestination, "utf8"), "node-runtime");
+  assert.equal(verifiedNodeRuntime, result.nodeDestination);
+  assert.match(result.opencodeDestination, /opencode-x86_64-unknown-linux-gnu$/);
+  assert.match(result.nodeDestination, /openkoto-agent-node-x86_64-unknown-linux-gnu$/);
+});
+
 test("stageAgentWorker copies worker project and node runtime", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "openkoto-stage-worker-"));
   t.after(() => rm(root, { recursive: true, force: true }));

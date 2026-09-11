@@ -129,6 +129,57 @@ class PdfSidecarBuildScriptTests(unittest.TestCase):
             "freeze_support must run before importing pdf2zh so frozen multiprocessing children do not re-enter the CLI",
         )
 
+    def test_build_script_maps_linux_platform_to_linux_x64_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            pyinstaller_package = temp_path / "PyInstaller"
+            pyinstaller_package.mkdir()
+            (pyinstaller_package / "__init__.py").write_text("", encoding="utf-8")
+            (pyinstaller_package / "__main__.py").write_text(
+                "def run(args):\n    return None\n",
+                encoding="utf-8",
+            )
+
+            env = os.environ.copy()
+            existing_pythonpath = env.get("PYTHONPATH")
+            env["PYTHONPATH"] = (
+                f"{temp_path}{os.pathsep}{existing_pythonpath}"
+                if existing_pythonpath
+                else str(temp_path)
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    textwrap.dedent(
+                        f"""
+                        import importlib.util
+                        from unittest import mock
+
+                        spec = importlib.util.spec_from_file_location("pdf_sidecar_build", {str(BUILD_SCRIPT)!r})
+                        module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(module)
+                        with mock.patch("platform.system", return_value="Linux"), \\
+                                mock.patch("platform.machine", return_value="x86_64"):
+                            print(module.get_platform_name())
+                        """
+                    ),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip(),
+                "linux-x64",
+                "build.py must name the Linux sidecar openkoto-pdf-translator-linux-x64 "
+                "so script/sync_pdf_sidecar_binaries.sh can sync it to x86_64-unknown-linux-gnu",
+            )
+
     def test_sidecar_pins_cryptography_below_macos_openssl_abi_break(self) -> None:
         pyproject = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
         dependencies = pyproject["project"]["dependencies"]

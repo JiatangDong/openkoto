@@ -30,6 +30,10 @@ REQUIRED_MACOS_MATRIX_ROWS = (
     '- platform: "macos-15-intel"\n            args: "--target x86_64-apple-darwin --bundles app,dmg"',
 )
 
+REQUIRED_LINUX_MATRIX_ROWS = (
+    '- platform: "ubuntu-22.04"\n            args: "--target x86_64-unknown-linux-gnu --bundles appimage,deb"',
+)
+
 LEGACY_MACOS_PLATFORM_SNIPPETS = (
     'matrix.platform == \'macos-latest\'',
     'matrix.platform == "macos-latest"',
@@ -70,6 +74,9 @@ def main() -> int:
         for row in REQUIRED_MACOS_MATRIX_ROWS:
             if row not in publish_tauri_body:
                 missing.append(f"{workflow_path}: publish-tauri missing macOS matrix row `{row}`")
+        for row in REQUIRED_LINUX_MATRIX_ROWS:
+            if row not in publish_tauri_body:
+                missing.append(f"{workflow_path}: publish-tauri missing Linux matrix row `{row}`")
 
         for legacy_snippet in LEGACY_MACOS_PLATFORM_SNIPPETS:
             if legacy_snippet in publish_tauri_body:
