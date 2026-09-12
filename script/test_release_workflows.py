@@ -17,7 +17,7 @@ EXPECTED_MACOS_ARGS = (
 
 EXPECTED_LINUX_MATRIX_ROW = (
     '- platform: "ubuntu-22.04"\n'
-    '            args: "--target x86_64-unknown-linux-gnu --bundles appimage,deb"'
+    '            args: "--target x86_64-unknown-linux-gnu --bundles deb"'
 )
 
 LINUX_SYSTEM_DEPENDENCIES = (
@@ -38,6 +38,15 @@ LEGACY_MACOS_ARGS = (
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_release_workflows_declare_contents_write_permission(self) -> None:
+        for workflow in RELEASE_WORKFLOWS:
+            content = workflow.read_text()
+            self.assertIn(
+                "permissions:\n  contents: write",
+                content,
+                f"{workflow} must declare top-level `contents: write` so tauri-action can create the GitHub release",
+            )
+
     def test_release_workflows_publish_app_and_dmg_for_macos(self) -> None:
         for workflow in RELEASE_WORKFLOWS:
             content = workflow.read_text()
@@ -140,7 +149,12 @@ class ReleaseWorkflowTests(unittest.TestCase):
             self.assertIn(
                 EXPECTED_LINUX_MATRIX_ROW,
                 content,
-                f"{workflow} must include an ubuntu-22.04 matrix row building appimage and deb bundles",
+                f"{workflow} must include an ubuntu-22.04 matrix row building the deb bundle",
+            )
+            self.assertNotIn(
+                "--bundles appimage",
+                content,
+                f"{workflow} must not build AppImage bundles (linuxdeploy fails for GTK/WebKitGTK apps in CI)",
             )
 
     def test_release_workflows_install_linux_system_dependencies_on_linux_only(self) -> None:
@@ -176,11 +190,6 @@ class ReleaseWorkflowTests(unittest.TestCase):
                 "if: startsWith(matrix.platform, 'ubuntu-')",
                 content,
                 f"{workflow} must gate the Linux assertion on the ubuntu matrix platform",
-            )
-            self.assertIn(
-                'find textlingo-desktop/src-tauri/target -type f -name "*.AppImage"',
-                content,
-                f"{workflow} must assert the .AppImage bundle exists",
             )
             self.assertIn(
                 'find textlingo-desktop/src-tauri/target -type f -name "*.deb"',

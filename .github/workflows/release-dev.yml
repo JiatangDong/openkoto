@@ -8,6 +8,9 @@ on:
     tags:
       - 'dev-*'   # 匹配 dev-xxx 格式的 tag
 
+permissions:
+  contents: write
+
 jobs:
   ci-gate:
     runs-on: ubuntu-latest
@@ -114,7 +117,7 @@ jobs:
           - platform: "macos-15-intel"
             args: "--target x86_64-apple-darwin --bundles app,dmg"
           - platform: "ubuntu-22.04"
-            args: "--target x86_64-unknown-linux-gnu --bundles appimage,deb"
+            args: "--target x86_64-unknown-linux-gnu --bundles deb"
           - platform: "windows-latest"
             args: ""
 
@@ -338,11 +341,8 @@ jobs:
             echo "::error::Packaged agent worker did not emit worker.ready"
             exit 1
           fi
-          APPIMAGE=$(find textlingo-desktop/src-tauri/target -type f -name "*.AppImage" -path "*/release/bundle/appimage/*" | head -1)
           DEB=$(find textlingo-desktop/src-tauri/target -type f -name "*.deb" -path "*/release/bundle/deb/*" | head -1)
-          if [ -z "$APPIMAGE" ]; then echo "::error::No .AppImage bundle found"; exit 1; fi
           if [ -z "$DEB" ]; then echo "::error::No .deb bundle found"; exit 1; fi
-          echo "AppImage bundle: $APPIMAGE"
           echo "Debian bundle: $DEB"
           DEB_CONTENTS=$(dpkg-deb -c "$DEB")
           for REQUIRED in "openkoto-agent-node" "opencode" "openkoto-pdf-translator" "agent-worker/dist/index.js"; do
