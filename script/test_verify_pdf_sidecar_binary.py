@@ -19,6 +19,12 @@ class VerifyPdfSidecarBinaryTests(unittest.TestCase):
             text=True,
         )
 
+    def test_verify_supports_linux_host_and_target(self) -> None:
+        script = SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn("Linux:x86_64)", script)
+        self.assertIn("x86_64-unknown-linux-gnu", script)
+
     def test_verify_executes_expected_binary_for_requested_target(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             target_dir = Path(temp_dir)

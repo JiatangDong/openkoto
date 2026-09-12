@@ -15,6 +15,22 @@ EXPECTED_MACOS_ARGS = (
     'args: "--target x86_64-apple-darwin --bundles app,dmg"',
 )
 
+EXPECTED_LINUX_MATRIX_ROW = (
+    '- platform: "ubuntu-22.04"\n'
+    '            args: "--target x86_64-unknown-linux-gnu --bundles deb"'
+)
+
+LINUX_SYSTEM_DEPENDENCIES = (
+    "libglib2.0-dev",
+    "libgtk-3-dev",
+    "libsoup-3.0-dev",
+    "libwebkit2gtk-4.1-dev",
+    "libjavascriptcoregtk-4.1-dev",
+    "libayatana-appindicator3-dev",
+    "librsvg2-dev",
+    "patchelf",
+)
+
 LEGACY_MACOS_ARGS = (
     'args: "--target aarch64-apple-darwin --bundles app"',
     'args: "--target x86_64-apple-darwin --bundles app"',
@@ -22,6 +38,15 @@ LEGACY_MACOS_ARGS = (
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
+    def test_release_workflows_declare_contents_write_permission(self) -> None:
+        for workflow in RELEASE_WORKFLOWS:
+            content = workflow.read_text()
+            self.assertIn(
+                "permissions:\n  contents: write",
+                content,
+                f"{workflow} must declare top-level `contents: write` so tauri-action can create the GitHub release",
+            )
+
     def test_release_workflows_publish_app_and_dmg_for_macos(self) -> None:
         for workflow in RELEASE_WORKFLOWS:
             content = workflow.read_text()
@@ -117,6 +142,76 @@ class ReleaseWorkflowTests(unittest.TestCase):
                     content,
                     f"{workflow} must verify packaged agent worker artifact `{expected_path}`",
                 )
+
+    def test_release_workflows_include_linux_matrix_entry(self) -> None:
+        for workflow in RELEASE_WORKFLOWS:
+            content = workflow.read_text()
+            self.assertIn(
+                EXPECTED_LINUX_MATRIX_ROW,
+                content,
+                f"{workflow} must include an ubuntu-22.04 matrix row building the deb bundle",
+            )
+            self.assertNotIn(
+                "--bundles appimage",
+                content,
+                f"{workflow} must not build AppImage bundles (linuxdeploy fails for GTK/WebKitGTK apps in CI)",
+            )
+
+    def test_release_workflows_install_linux_system_dependencies_on_linux_only(self) -> None:
+        for workflow in RELEASE_WORKFLOWS:
+            content = workflow.read_text()
+            publish_job_index = content.index("  publish-tauri:")
+            publish_body = content[publish_job_index:]
+
+            step_index = publish_body.index("- name: install system dependencies (linux only)")
+            step_body = publish_body[step_index:]
+            self.assertIn(
+                "if: startsWith(matrix.platform, 'ubuntu-')",
+                step_body,
+                f"{workflow} must gate the Linux system dependency install on the ubuntu matrix platform",
+            )
+            for package in LINUX_SYSTEM_DEPENDENCIES:
+                self.assertIn(
+                    package,
+                    step_body,
+                    f"{workflow} must install `{package}` for Linux Tauri builds",
+                )
+
+    def test_release_workflows_assert_packaged_runtimes_and_bundles_on_linux(self) -> None:
+        expected_snippets = (
+            'AGENT_NODE="$TARGET_DIR/openkoto-agent-node"',
+            'OPENCODE="$TARGET_DIR/opencode"',
+            'SIDECAR="$TARGET_DIR/openkoto-pdf-translator"',
+            '"$AGENT_NODE" --version',
+        )
+        for workflow in RELEASE_WORKFLOWS:
+            content = workflow.read_text()
+            self.assertIn(
+                "if: startsWith(matrix.platform, 'ubuntu-')",
+                content,
+                f"{workflow} must gate the Linux assertion on the ubuntu matrix platform",
+            )
+            self.assertIn(
+                'find textlingo-desktop/src-tauri/target -type f -name "*.deb"',
+                content,
+                f"{workflow} must assert the .deb bundle exists",
+            )
+            self.assertIn(
+                'dpkg-deb -c "$DEB"',
+                content,
+                f"{workflow} must inspect the .deb contents for packaged runtimes",
+            )
+            for snippet in expected_snippets:
+                self.assertIn(
+                    snippet,
+                    content,
+                    f"{workflow} must verify packaged Linux runtime `{snippet}`",
+                )
+            self.assertIn(
+                """grep -q '"event":"worker.ready"'""",
+                content,
+                f"{workflow} must smoke-test the packaged worker entry on Linux",
+            )
 
 
 if __name__ == "__main__":

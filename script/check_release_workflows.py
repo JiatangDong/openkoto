@@ -30,6 +30,12 @@ REQUIRED_MACOS_MATRIX_ROWS = (
     '- platform: "macos-15-intel"\n            args: "--target x86_64-apple-darwin --bundles app,dmg"',
 )
 
+REQUIRED_LINUX_MATRIX_ROWS = (
+    '- platform: "ubuntu-22.04"\n            args: "--target x86_64-unknown-linux-gnu --bundles deb"',
+)
+
+REQUIRED_TOP_LEVEL_PERMISSIONS = "permissions:\n  contents: write"
+
 LEGACY_MACOS_PLATFORM_SNIPPETS = (
     'matrix.platform == \'macos-latest\'',
     'matrix.platform == "macos-latest"',
@@ -46,6 +52,8 @@ def main() -> int:
     missing = []
     for workflow_path in workflow_paths:
         content = workflow_path.read_text()
+        if REQUIRED_TOP_LEVEL_PERMISSIONS not in content:
+            missing.append(f"{workflow_path}: missing top-level `permissions: contents: write`")
         ci_gate_match = re.search(r"(?ms)^  ci-gate:\n(?P<body>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)", content)
         if ci_gate_match is None:
             missing.append(f"{workflow_path}: missing `ci-gate` job")
@@ -70,6 +78,9 @@ def main() -> int:
         for row in REQUIRED_MACOS_MATRIX_ROWS:
             if row not in publish_tauri_body:
                 missing.append(f"{workflow_path}: publish-tauri missing macOS matrix row `{row}`")
+        for row in REQUIRED_LINUX_MATRIX_ROWS:
+            if row not in publish_tauri_body:
+                missing.append(f"{workflow_path}: publish-tauri missing Linux matrix row `{row}`")
 
         for legacy_snippet in LEGACY_MACOS_PLATFORM_SNIPPETS:
             if legacy_snippet in publish_tauri_body:

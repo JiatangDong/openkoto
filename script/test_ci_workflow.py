@@ -9,6 +9,27 @@ CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 
 class CiWorkflowTests(unittest.TestCase):
+    def test_backend_job_installs_linux_system_dependencies(self) -> None:
+        content = CI_WORKFLOW.read_text()
+        backend_job = content[content.index("  backend:"):content.index("  frontend:")]
+
+        self.assertIn("name: Install Linux system dependencies", backend_job)
+        for package in (
+            "libglib2.0-dev",
+            "libgtk-3-dev",
+            "libsoup-3.0-dev",
+            "libwebkit2gtk-4.1-dev",
+            "libjavascriptcoregtk-4.1-dev",
+            "libayatana-appindicator3-dev",
+            "librsvg2-dev",
+            "patchelf",
+        ):
+            self.assertIn(
+                package,
+                backend_job,
+                f"ci backend must install `{package}` so Linux Tauri builds have the required system libraries",
+            )
+
     def test_backend_job_builds_and_verifies_pdf_sidecar_before_rust_tests(self) -> None:
         content = CI_WORKFLOW.read_text()
 
