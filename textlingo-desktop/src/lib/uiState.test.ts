@@ -10,9 +10,6 @@ import {
   useGlobalFontSize,
   useGlobalShowFullSubtitles,
   useGlobalViewMode,
-  useScopedShowFullSubtitles,
-  useScopedUiState,
-  useScopedViewMode,
 } from "./uiState";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -64,11 +61,11 @@ describe("uiState", () => {
   });
 
   it("falls back to the default when nothing is stored", () => {
-    const { result } = renderHook(() => useScopedUiState(UI_VIEW_MODE_KEY, "a1", "original"));
+    const { result } = renderHook(() => useGlobalViewMode());
     expect(result.current[0]).toBe("original");
   });
 
-  it("global settings are identical in every article and write one key", async () => {
+  it("shares one global value and writes one key", async () => {
     const { result, unmount } = renderHook(() => useGlobalViewMode());
     act(() => {
       result.current[1]("bilingual");
@@ -76,7 +73,6 @@ describe("uiState", () => {
     await flushPromises();
     unmount();
 
-    // A different article sees the same value with no per-article key.
     const { result: next } = renderHook(() => useGlobalViewMode());
     expect(next.current[0]).toBe("bilingual");
 
@@ -85,32 +81,6 @@ describe("uiState", () => {
     const last = calls[calls.length - 1];
     expect(last).toEqual({ [UI_VIEW_MODE_KEY]: "bilingual" });
     expect(fakeBackend).toEqual({ [UI_VIEW_MODE_KEY]: "bilingual" });
-  });
-
-  it("a never-before-seen article inherits the last-used global setting", async () => {
-    const { result, unmount } = renderHook(() => useScopedViewMode("article-a"));
-    act(() => {
-      result.current[1]("bilingual");
-    });
-    await flushPromises();
-    unmount();
-
-    const { result: next } = renderHook(() => useScopedViewMode("article-b"));
-    expect(next.current[0]).toBe("bilingual");
-  });
-
-  it("persists scoped and global keys to the backend immediately", async () => {
-    const { result } = renderHook(() => useScopedShowFullSubtitles("article-a"));
-    act(() => {
-      result.current[1](true);
-    });
-    await flushPromises();
-
-    const calls = setUiStateCalls();
-    expect(calls.length).toBeGreaterThan(0);
-    const last = calls[calls.length - 1];
-    expect(last[`${UI_SHOW_FULL_SUBTITLES_KEY}_article-a`]).toBe("true");
-    expect(last[UI_SHOW_FULL_SUBTITLES_KEY]).toBe("true");
   });
 
   it("hydration never overwrites a setting changed while the request was in flight", async () => {
@@ -131,7 +101,7 @@ describe("uiState", () => {
       }) as typeof invoke,
     );
 
-    const { result } = renderHook(() => useScopedViewMode("article-a"));
+    const { result } = renderHook(() => useGlobalViewMode());
 
     // User acts before the stale backend snapshot arrives.
     act(() => {
@@ -218,61 +188,6 @@ describe("uiState", () => {
     },
   );
 
-  it("drops stale per-article leftovers instead of resurrecting them", async () => {
-    // Adjacent entries: removing entries during iteration used to shift
-    // indices and silently skip neighbours — the snapshot pass fixes that.
-    window.localStorage.setItem("article-reader-view-mode", "bilingual");
-    window.localStorage.setItem("textlingo_font_size_article-a", "24");
-    window.localStorage.setItem(`${UI_VIEW_MODE_KEY}_article-a`, "original");
-
-    renderHook(() => useGlobalViewMode());
-    await flushPromises();
-    await flushPromises();
-
-    // Legacy global migrates; scoped leftovers never reach the backend…
-    expect(fakeBackend[UI_VIEW_MODE_KEY]).toBe("bilingual");
-    expect(fakeBackend[`${UI_FONT_SIZE_KEY}_article-a`]).toBeUndefined();
-    expect(fakeBackend[`${UI_VIEW_MODE_KEY}_article-a`]).toBeUndefined();
-    // …and are dropped from the read cache.
-    expect(window.localStorage.getItem(`${UI_VIEW_MODE_KEY}_article-a`)).toBeNull();
-    expect(window.localStorage.getItem("textlingo_font_size_article-a")).toBeNull();
-  });
-
-  it("promotes a scoped leftover when the global is missing everywhere", async () => {
-    window.localStorage.setItem(`${UI_FONT_SIZE_KEY}_article-a`, "24");
-
-    const { result } = renderHook(() => useGlobalFontSize());
-    await flushPromises();
-    await flushPromises();
-
-    expect(result.current[0]).toBe(24);
-    expect(fakeBackend[UI_FONT_SIZE_KEY]).toBe("24");
-  });
-
-  it("deletes stale per-article backend keys on hydrate", async () => {
-    mockBackend({
-      [UI_VIEW_MODE_KEY]: "bilingual",
-      [`${UI_VIEW_MODE_KEY}_article-a`]: "original",
-      [`${UI_SHOW_FULL_SUBTITLES_KEY}_article-a`]: "true",
-    });
-
-    renderHook(() => useGlobalViewMode());
-    await flushPromises();
-    await flushPromises();
-
-    // Globals survive; scoped keys are queued as deletions.
-    expect(fakeBackend[UI_VIEW_MODE_KEY]).toBe("bilingual");
-    expect(fakeBackend[`${UI_VIEW_MODE_KEY}_article-a`]).toBeUndefined();
-    expect(fakeBackend[`${UI_SHOW_FULL_SUBTITLES_KEY}_article-a`]).toBeUndefined();
-    const deletes = setUiStateCalls().flatMap((updates) =>
-      Object.entries(updates)
-        .filter(([, value]) => value === null)
-        .map(([key]) => key),
-    );
-    expect(deletes).toContain(`${UI_VIEW_MODE_KEY}_article-a`);
-    expect(deletes).toContain(`${UI_SHOW_FULL_SUBTITLES_KEY}_article-a`);
-  });
-
   it("keeps legacy data until the backend confirms the migrated write", async () => {
     window.localStorage.setItem("article-reader-view-mode", "bilingual");
     invokeMock.mockImplementation((cmd: string) => {
@@ -280,7 +195,7 @@ describe("uiState", () => {
       return Promise.reject(new Error("backend down"));
     });
 
-    renderHook(() => useScopedViewMode("article-a"));
+    renderHook(() => useGlobalViewMode());
     await flushPromises();
 
     // Migration queued but unconfirmed: the value is visible via cache…
@@ -298,7 +213,7 @@ describe("uiState", () => {
       throw new DOMException("denied", "SecurityError");
     });
     try {
-      const { result } = renderHook(() => useScopedViewMode("article-a"));
+      const { result } = renderHook(() => useGlobalViewMode());
       await flushPromises();
       await flushPromises();
       expect(result.current[0]).toBe("bilingual");
@@ -317,7 +232,7 @@ describe("uiState", () => {
       });
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-      const { result } = renderHook(() => useScopedViewMode("article-a"));
+      const { result } = renderHook(() => useGlobalViewMode());
       act(() => {
         result.current[1]("bilingual");
       });

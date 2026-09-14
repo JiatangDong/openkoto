@@ -4,19 +4,17 @@ import { invoke } from "@tauri-apps/api/core";
 /**
  * Durable UI state for the article learning page.
  *
- * Rust (`ui_state.json`, via `get_ui_state` / `set_ui_state`) is the source
- * of truth. localStorage is only a synchronous read cache so first paint has
+ * Reader preferences are global: one value shared by every article. Rust
+ * (`ui_state.json`, via `get_ui_state` / `set_ui_state`) is the source of
+ * truth. localStorage is only a synchronous read cache so first paint has
  * something before the async backend hydrate resolves — in packaged Tauri
  * builds the webview origin (`tauri://localhost`, WKWebView custom schemes)
  * has no disk-backed localStorage bucket, so localStorage alone never
  * survives a restart.
  *
- * Scoping: `useScopedUiState(baseKey, scope, fallback)` resolves
- * `<key>_<scope>` → `<key>` → fallback on every render, and writes update
- * both the scoped and the global key so a never-before-seen article inherits
- * the last-used setting. Deriving on every render (instead of reload/persist
- * effects) eliminates the effect-ordering clobber bug where switching articles
- * persisted article A's state under article B's key.
+ * Values are derived from the store on every render (instead of reload/persist
+ * effects), which eliminates the class of effect-ordering bugs where switching
+ * articles persisted article A's state under article B's key.
  *
  * The backend file is dedicated to UI state (separate from config.json) and
  * mutex-serialized per read-modify-write cycle, so overlapping persists are
@@ -35,15 +33,15 @@ export const FONT_SIZE_DEFAULT = 18;
 export const FONT_SIZE_MIN = 12;
 export const FONT_SIZE_MAX = 32;
 
-// Keys written by the previous localStorage-only implementation. Migrated
-// into the backend store on first hydrate (see migrateLocalCacheToBackend).
+// Keys written by earlier localStorage-only builds. Migrated into the backend
+// store on first hydrate (see migrateLocalCacheToBackend).
 const LEGACY_KEY_MAP: Record<string, string[]> = {
   [UI_VIEW_MODE_KEY]: ["article-reader-view-mode"],
   [UI_SHOW_FULL_SUBTITLES_KEY]: ["video-player-show-full-subtitles"],
   [UI_FONT_SIZE_KEY]: ["article-reader-font-size"],
 };
 
-const MIGRATABLE_PREFIXES = ["textlingo_view_mode", "textlingo_show_full_subtitles", "textlingo_font_size"];
+const MANAGED_KEYS = [UI_VIEW_MODE_KEY, UI_SHOW_FULL_SUBTITLES_KEY, UI_FONT_SIZE_KEY];
 
 // Retry policy for failed persists: bounded, so a permanently broken backend
 // cannot spin IPC attempts (and console spam) forever.
@@ -116,11 +114,6 @@ function notify(): void {
   });
 }
 
-function scopedKey(baseKey: string, scope: string | undefined): string | null {
-  if (!scope) return null;
-  return `${baseKey}_${scope}`;
-}
-
 function readLegacy(baseKey: string): string | null {
   const legacyKeys = LEGACY_KEY_MAP[baseKey];
   if (!legacyKeys) return null;
@@ -131,35 +124,17 @@ function readLegacy(baseKey: string): string | null {
   return null;
 }
 
-/** Resolve scoped → global → legacy → fallback. Runs on every render. */
-function readEffective(
-  baseKey: string,
-  scope: string | undefined,
-  fallback: string,
-): string {
-  const scoped = scopedKey(baseKey, scope);
-  if (scoped) {
-    const cached = cache[scoped];
-    if (cached !== undefined) return cached;
-    const stored = safeStorageGet(scoped);
-    if (stored !== null) return stored;
-  }
-  const cachedGlobal = cache[baseKey];
-  if (cachedGlobal !== undefined) return cachedGlobal;
-  const storedGlobal = safeStorageGet(baseKey);
-  if (storedGlobal !== null) return storedGlobal;
+/** Resolve cache → read cache → legacy → fallback. Runs on every render. */
+function readEffective(baseKey: string, fallback: string): string {
+  const cached = cache[baseKey];
+  if (cached !== undefined) return cached;
+  const stored = safeStorageGet(baseKey);
+  if (stored !== null) return stored;
   return readLegacy(baseKey) ?? fallback;
 }
 
-/** Write scoped + global keys, update cache + read cache, notify, persist. */
-function writeScoped(baseKey: string, scope: string | undefined, value: string): void {
-  const scoped = scopedKey(baseKey, scope);
-  if (scoped) {
-    cache[scoped] = value;
-    safeStorageSet(scoped, value);
-    locallyWritten.add(scoped);
-    unsynced[scoped] = value;
-  }
+/** Write the single global key, update cache + read cache, notify, persist. */
+function writeGlobal(baseKey: string, value: string): void {
   cache[baseKey] = value;
   safeStorageSet(baseKey, value);
   locallyWritten.add(baseKey);
@@ -246,17 +221,10 @@ async function persistUnsynced(): Promise<void> {
 }
 
 /**
- * Push localStorage-only values (legacy keys and any global key the backend
- * doesn't know yet) into the backend, and reconcile the read cache with
- * backend values. This is what makes migration real instead of a fallback
- * read: after this runs, the backend holds every known setting.
- *
- * Per-article (`<base>_<articleId>`) leftovers from the earlier scoped
- * implementation are NOT migrated: every write always updated the global key
- * too, so the global already holds the latest value. They are dropped from
- * the read cache here (see cleanupStaleScopedKeys for the backend side) —
- * except when the global is missing everywhere, in which case the first
- * scoped value is promoted so no setting is silently lost.
+ * Push localStorage-only values (legacy keys and any managed global key the
+ * backend doesn't know yet) into the backend. This is what makes migration
+ * real instead of a fallback read: after this runs, the backend holds every
+ * known setting.
  */
 function migrateLocalCacheToBackend(backendKeys: Set<string>): void {
   // Phase 1 (read-only): snapshot every storage entry first. Mutating
@@ -279,22 +247,13 @@ function migrateLocalCacheToBackend(backendKeys: Set<string>): void {
     return;
   }
   // Phase 2: compute the migration purely from the snapshot, then apply.
+  // Classify first, apply in fixed order — canonical global keys, then legacy
+  // aliases — so the winner never depends on localStorage insertion order.
   try {
     const legacyMap: Record<string, string> = {};
     for (const [newKey, legacyKeys] of Object.entries(LEGACY_KEY_MAP)) {
       for (const legacy of legacyKeys) legacyMap[legacy] = newKey;
     }
-    const isScopedKey = (key: string): string | null => {
-      for (const prefix of MIGRATABLE_PREFIXES) {
-        if (key !== prefix && key.startsWith(`${prefix}_`)) return prefix;
-      }
-      return null;
-    };
-    const migrate: Record<string, string> = {};
-    const scopedFallback: Record<string, string> = {};
-    // Classify the snapshot first. Application order below is fixed —
-    // canonical global keys, then legacy aliases — so the winner never
-    // depends on localStorage insertion order.
     const canonicalGlobals: [target: string, value: string][] = [];
     const legacyAliases: [target: string, value: string, legacy: string][] = [];
     for (const [key, value] of entries) {
@@ -302,22 +261,11 @@ function migrateLocalCacheToBackend(backendKeys: Set<string>): void {
         legacyAliases.push([legacyMap[key], value, key]);
         continue;
       }
-      if (MIGRATABLE_PREFIXES.includes(key)) {
+      if (MANAGED_KEYS.includes(key)) {
         canonicalGlobals.push([key, value]);
-        continue;
-      }
-      // Scoped leftover: drop from the read cache (stale the moment
-      // settings went global). Keep the first value per base key as a
-      // promotion candidate in case the global is missing everywhere.
-      const base = isScopedKey(key);
-      if (base !== null) {
-        delete cache[key];
-        safeStorageRemove(key);
-        if (!(base in scopedFallback)) {
-          scopedFallback[base] = value;
-        }
       }
     }
+    const migrate: Record<string, string> = {};
     const claimGlobal = (target: string, value: string) => {
       // Migrate when the backend lacks the key.
       if (backendKeys.has(target) || target in migrate) return;
@@ -343,15 +291,6 @@ function migrateLocalCacheToBackend(backendKeys: Set<string>): void {
       claimGlobal(target, value);
       migratedLegacy.push({ legacy, target });
     }
-    // Promote only when the global is absent from both backend and cache:
-    // otherwise the global (written on every change) is already authoritative.
-    for (const [base, value] of Object.entries(scopedFallback)) {
-      if (!backendKeys.has(base) && !(base in migrate) && !(base in cache)) {
-        migrate[base] = value;
-        cache[base] = value;
-        safeStorageSet(base, value);
-      }
-    }
     if (Object.keys(migrate).length > 0) {
       for (const [key, value] of Object.entries(migrate)) {
         unsynced[key] = value;
@@ -359,37 +298,10 @@ function migrateLocalCacheToBackend(backendKeys: Set<string>): void {
       }
       notify();
       void persistUnsynced();
-    } else {
-      notify();
     }
   } catch {
     // Best-effort.
   }
-}
-
-/**
- * Delete per-article backend keys left over from the earlier scoped
- * implementation. Settings are global now: nothing reads scoped keys, so
- * they are dead weight (and a future debugging trap). Queued as `None`
- * updates through the normal persist path, so a failed backend keeps them
- * until confirmation succeeds.
- */
-function cleanupStaleScopedKeys(backendKeys: Set<string>): void {
-  const stale = [...backendKeys].filter((key) => {
-    if (key in unsynced) return false;
-    return MIGRATABLE_PREFIXES.some(
-      (prefix) => key !== prefix && key.startsWith(`${prefix}_`),
-    );
-  });
-  if (stale.length === 0) return;
-  for (const key of stale) {
-    delete cache[key];
-    safeStorageRemove(key);
-    unsynced[key] = null;
-    locallyWritten.add(key);
-  }
-  notify();
-  void persistUnsynced();
 }
 
 function ensureHydrate(): Promise<void> {
@@ -415,7 +327,6 @@ function ensureHydrate(): Promise<void> {
       if (changed) notify();
     }
     migrateLocalCacheToBackend(backendKeys);
-    cleanupStaleScopedKeys(backendKeys);
   })().catch(() => {
     // Null the memo so a later mount retries (the IPC bridge may not be
     // ready at first bundle-eval / first-mount time).
@@ -437,29 +348,19 @@ export function resetUiStateForTests(): void {
 
 // --- hooks ------------------------------------------------------------------
 
-/**
- * String-valued scoped UI state. Resolves `<key>_<scope>` → `<key>` →
- * fallback on every render; the setter writes both scoped and global keys.
- */
-export function useScopedUiState(
-  baseKey: string,
-  scope: string | undefined,
-  fallback: string,
-): [string, (value: string) => void] {
+/** String-valued global UI state with the given fallback. */
+function useUiState(baseKey: string, fallback: string): [string, (value: string) => void] {
   useEffect(() => {
     void ensureHydrate();
   }, []);
 
-  const value = useSyncExternalStore(
-    subscribe,
-    () => readEffective(baseKey, scope, fallback),
-  );
+  const value = useSyncExternalStore(subscribe, () => readEffective(baseKey, fallback));
 
   const setValue = useCallback(
     (next: string) => {
-      writeScoped(baseKey, scope, next);
+      writeGlobal(baseKey, next);
     },
-    [baseKey, scope],
+    [baseKey],
   );
 
   return [value, setValue];
@@ -492,68 +393,20 @@ function resolveAction<T>(action: SetStateAction<T>, current: T): T {
     : action;
 }
 
-export function useScopedViewMode(
-  articleId: string | undefined,
-): [UiViewMode, (action: SetStateAction<UiViewMode>) => void] {
-  const [raw, setRaw] = useScopedUiState(UI_VIEW_MODE_KEY, articleId, "original");
-  const setMode = useCallback(
-    (action: SetStateAction<UiViewMode>) => {
-      const current = parseViewMode(readEffective(UI_VIEW_MODE_KEY, articleId, "original"));
-      const next = resolveAction(action, current);
-      setRaw(parseViewMode(next));
-    },
-    [articleId, setRaw],
-  );
-  return [parseViewMode(raw), setMode];
-}
-
-export function useScopedFontSize(
-  articleId: string | undefined,
-): [number, (action: SetStateAction<number>) => void] {
-  const [raw, setRaw] = useScopedUiState(
-    UI_FONT_SIZE_KEY,
-    articleId,
-    String(FONT_SIZE_DEFAULT),
-  );
-  const setSize = useCallback(
-    (action: SetStateAction<number>) => {
-      const current = parseFontSize(
-        readEffective(UI_FONT_SIZE_KEY, articleId, String(FONT_SIZE_DEFAULT)),
-      );
-      setRaw(String(clampFontSize(resolveAction(action, current))));
-    },
-    [articleId, setRaw],
-  );
-  return [parseFontSize(raw), setSize];
-}
-
-export function useScopedShowFullSubtitles(
-  articleId: string | undefined,
-): [boolean, (action: SetStateAction<boolean>) => void] {
-  const [raw, setRaw] = useScopedUiState(UI_SHOW_FULL_SUBTITLES_KEY, articleId, "false");
-  const setFlag = useCallback(
-    (action: SetStateAction<boolean>) => {
-      const current = parseBoolean(
-        readEffective(UI_SHOW_FULL_SUBTITLES_KEY, articleId, "false"),
-        false,
-      );
-      setRaw(resolveAction(action, current) ? "true" : "false");
-    },
-    [articleId, setRaw],
-  );
-  return [parseBoolean(raw, false), setFlag];
-}
-
-// --- global settings --------------------------------------------------------
-// Reader preferences are identical in every article: one value, no scope.
-// The useScoped* hooks above remain as the (tested) underlying mechanism.
-
 /** View mode shared by every article. */
 export function useGlobalViewMode(): [
   UiViewMode,
   (action: SetStateAction<UiViewMode>) => void,
 ] {
-  return useScopedViewMode(undefined);
+  const [raw, setRaw] = useUiState(UI_VIEW_MODE_KEY, "original");
+  const setMode = useCallback(
+    (action: SetStateAction<UiViewMode>) => {
+      const current = parseViewMode(readEffective(UI_VIEW_MODE_KEY, "original"));
+      setRaw(parseViewMode(resolveAction(action, current)));
+    },
+    [setRaw],
+  );
+  return [parseViewMode(raw), setMode];
 }
 
 /** Font size shared by every article. */
@@ -561,7 +414,17 @@ export function useGlobalFontSize(): [
   number,
   (action: SetStateAction<number>) => void,
 ] {
-  return useScopedFontSize(undefined);
+  const [raw, setRaw] = useUiState(UI_FONT_SIZE_KEY, String(FONT_SIZE_DEFAULT));
+  const setSize = useCallback(
+    (action: SetStateAction<number>) => {
+      const current = parseFontSize(
+        readEffective(UI_FONT_SIZE_KEY, String(FONT_SIZE_DEFAULT)),
+      );
+      setRaw(String(clampFontSize(resolveAction(action, current))));
+    },
+    [setRaw],
+  );
+  return [parseFontSize(raw), setSize];
 }
 
 /** Subtitle-list visibility shared by every article. */
@@ -569,5 +432,16 @@ export function useGlobalShowFullSubtitles(): [
   boolean,
   (action: SetStateAction<boolean>) => void,
 ] {
-  return useScopedShowFullSubtitles(undefined);
+  const [raw, setRaw] = useUiState(UI_SHOW_FULL_SUBTITLES_KEY, "false");
+  const setFlag = useCallback(
+    (action: SetStateAction<boolean>) => {
+      const current = parseBoolean(
+        readEffective(UI_SHOW_FULL_SUBTITLES_KEY, "false"),
+        false,
+      );
+      setRaw(resolveAction(action, current) ? "true" : "false");
+    },
+    [setRaw],
+  );
+  return [parseBoolean(raw, false), setFlag];
 }
