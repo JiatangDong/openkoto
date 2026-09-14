@@ -36,6 +36,8 @@ pub fn run() {
             // Configuration
             commands::get_config,
             commands::save_config_cmd,
+            commands::get_ui_state,
+            commands::set_ui_state,
             commands::set_api_key,
             commands::save_model_config,
             commands::delete_model_config,

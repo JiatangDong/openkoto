@@ -1,10 +1,12 @@
 use crate::types::{merge_missing_builtin_prompt_features, AgentTask, AppConfig, Artifact, Article};
 use serde_json;
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 const CONFIG_FILE: &str = "config.json";
+const UI_STATE_FILE: &str = "ui_state.json";
 const ARTICLES_DIR: &str = "articles";
 const AGENT_TASKS_DIR: &str = "agent_tasks";
 const ARTIFACTS_DIR: &str = "artifacts/articles";
@@ -66,6 +68,204 @@ pub fn load_config(app_handle: &AppHandle) -> Result<Option<AppConfig>, String> 
     config.prompt_features = merge_missing_builtin_prompt_features(config.prompt_features);
 
     Ok(Some(config))
+}
+
+// ============================================================================
+// UI state storage - 阅读器偏好等轻量 UI 状态
+// ============================================================================
+//
+// Deliberately a SEPARATE file from config.json: set_ui_state used to do an
+// unlocked read-modify-write of the whole config, so a concurrent (or stale)
+// save_config_cmd could silently drop UI state, model settings, or API keys.
+// Isolating the file removes that cross-overwrite class entirely. A process-
+// wide mutex serializes concurrent set_ui_state calls, and writes go through
+// a temp-file rename so readers never see a torn file.
+
+/// Serializes all ui_state.json read-modify-write cycles in this process.
+static UI_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn ui_state_path(data_dir: &Path) -> PathBuf {
+    data_dir.join(UI_STATE_FILE)
+}
+
+/// Atomic file replacement via a temp file in the same directory (same
+/// filesystem, so the final move is atomic) plus a cross-platform
+/// replace-over-existing move: plain `fs::rename` fails on Windows when the
+/// destination exists, which would break every save after the first.
+/// `tempfile::persist` uses Windows replace semantics there.
+fn write_atomic(path: &Path, contents: &str) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "File path has no parent directory".to_string())?;
+    let mut tmp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|e| format!("Failed to create temp file: {}", e))?;
+    use std::io::Write as _;
+    tmp.write_all(contents.as_bytes())
+        .map_err(|e| format!("Failed to write temp file: {}", e))?;
+    tmp.persist(path)
+        .map_err(|e| format!("Failed to replace file: {}", e))?;
+    Ok(())
+}
+
+fn write_ui_state_file(data_dir: &Path, state: &HashMap<String, String>) -> Result<(), String> {
+    let content = serde_json::to_string_pretty(state)
+        .map_err(|e| format!("Failed to serialize ui_state: {}", e))?;
+    write_atomic(&ui_state_path(data_dir), &content)
+}
+
+/// One-time migration from pre-separate-file builds that kept ui_state inside
+/// config.json. Unknown serde fields are ignored on load, so removing the
+/// AppConfig field stays backward compatible; this picks the values up once.
+fn migrate_legacy_config_ui_state(data_dir: &Path) -> HashMap<String, String> {
+    let config_path = data_dir.join(CONFIG_FILE);
+    let content = match fs::read_to_string(&config_path) {
+        Ok(c) => c,
+        Err(_) => return HashMap::new(),
+    };
+    let value: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return HashMap::new(),
+    };
+    match value.get("ui_state").and_then(|u| u.as_object()) {
+        Some(obj) => obj
+            .iter()
+            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+            .collect(),
+        None => HashMap::new(),
+    }
+}
+
+fn read_ui_state_file(data_dir: &Path) -> Result<HashMap<String, String>, String> {
+    let path = ui_state_path(data_dir);
+    if !path.exists() {
+        let migrated = migrate_legacy_config_ui_state(data_dir);
+        if !migrated.is_empty() {
+            write_ui_state_file(data_dir, &migrated)?;
+        }
+        return Ok(migrated);
+    }
+    let content =
+        fs::read_to_string(&path).map_err(|e| format!("Failed to read ui_state: {}", e))?;
+    match serde_json::from_str(&content) {
+        Ok(map) => Ok(map),
+        Err(_) => {
+            // Preferences are non-critical: quarantine the corrupt file and
+            // start empty rather than failing the whole app init.
+            let backup = path.with_extension("json.bak");
+            let _ = fs::rename(&path, &backup);
+            Ok(HashMap::new())
+        }
+    }
+}
+
+/// Pure merge used by set_ui_state: `None` values delete the key, everything
+/// else is preserved untouched.
+pub fn merge_ui_state(
+    mut base: HashMap<String, String>,
+    updates: HashMap<String, Option<String>>,
+) -> HashMap<String, String> {
+    for (key, value) in updates {
+        match value {
+            Some(v) => {
+                base.insert(key, v);
+            }
+            None => {
+                base.remove(&key);
+            }
+        }
+    }
+    base
+}
+
+pub fn load_ui_state(app_handle: &AppHandle) -> Result<HashMap<String, String>, String> {
+    let _guard = UI_STATE_LOCK
+        .lock()
+        .map_err(|e| format!("ui_state lock poisoned: {}", e))?;
+    let data_dir = get_app_data_dir(app_handle)?;
+    read_ui_state_file(&data_dir)
+}
+
+/// Whole read-modify-write cycle under one lock so concurrent callers cannot
+/// lose each other's keys. Returns the merged map.
+pub fn update_ui_state(
+    app_handle: &AppHandle,
+    updates: HashMap<String, Option<String>>,
+) -> Result<HashMap<String, String>, String> {
+    let _guard = UI_STATE_LOCK
+        .lock()
+        .map_err(|e| format!("ui_state lock poisoned: {}", e))?;
+    let data_dir = get_app_data_dir(app_handle)?;
+    let current = read_ui_state_file(&data_dir)?;
+    let merged = merge_ui_state(current, updates);
+    write_ui_state_file(&data_dir, &merged)?;
+    Ok(merged)
+}
+
+#[cfg(test)]
+mod ui_state_tests {
+    use super::*;
+
+    fn map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn merge_preserves_unrelated_keys() {
+        let base = map(&[("a", "1"), ("b", "2")]);
+        let mut updates = HashMap::new();
+        updates.insert("b".to_string(), Some("3".to_string()));
+        let merged = merge_ui_state(base, updates);
+        assert_eq!(merged.get("a"), Some(&"1".to_string()));
+        assert_eq!(merged.get("b"), Some(&"3".to_string()));
+    }
+
+    #[test]
+    fn merge_none_deletes_key_and_missing_delete_is_noop() {
+        let base = map(&[("a", "1")]);
+        let mut updates = HashMap::new();
+        updates.insert("a".to_string(), None);
+        updates.insert("ghost".to_string(), None);
+        let merged = merge_ui_state(base, updates);
+        assert!(!merged.contains_key("a"));
+        assert!(!merged.contains_key("ghost"));
+    }
+
+    #[test]
+    fn merge_empty_updates_is_identity() {
+        let base = map(&[("a", "1")]);
+        let merged = merge_ui_state(base.clone(), HashMap::new());
+        assert_eq!(merged, base);
+    }
+
+    #[test]
+    fn file_roundtrip_and_corrupt_file_quarantined() {
+        let dir = std::env::temp_dir().join(format!("openkoto-ui-state-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        let state = map(&[("textlingo_view_mode", "bilingual")]);
+        write_ui_state_file(&dir, &state).expect("write");
+        assert_eq!(read_ui_state_file(&dir).expect("read"), state);
+
+        // Second write must replace the EXISTING file: plain fs::rename
+        // fails here on Windows (destination exists), so this is the
+        // regression test for the cross-platform atomic write.
+        let updated = map(&[
+            ("textlingo_view_mode", "translation"),
+            ("textlingo_font_size", "20"),
+        ]);
+        write_ui_state_file(&dir, &updated).expect("overwrite");
+        assert_eq!(read_ui_state_file(&dir).expect("re-read"), updated);
+
+        fs::write(ui_state_path(&dir), "{ not valid json").expect("corrupt");
+        assert_eq!(
+            read_ui_state_file(&dir).expect("read after corrupt"),
+            HashMap::new()
+        );
+        assert!(ui_state_path(&dir).with_extension("json.bak").exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
 
 pub fn save_article(app_handle: &AppHandle, article_id: &str, content: &str) -> Result<(), String> {

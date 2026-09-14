@@ -25,6 +25,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { ArticleSegment } from "../../types";
 import type { ModelConfig } from "../../lib/tauri";
+import { useGlobalShowFullSubtitles } from "../../lib/uiState";
 
 export interface AsrExtractOptions {
     configs: ModelConfig[];
@@ -209,7 +210,7 @@ export function VideoSubtitlePlayer({
     const videoRef = useRef<HTMLVideoElement & HTMLAudioElement>(null);
     const videoContainerRef = useRef<HTMLDivElement>(null);
     const [currentTime, setCurrentTime] = useState(0);
-    const [showFullSubtitles, setShowFullSubtitles] = useState(false);
+    const [showFullSubtitles, setShowFullSubtitles] = useGlobalShowFullSubtitles();
     const [isMiniMode, setIsMiniMode] = useState(false);
     const activeSegmentRef = useRef<HTMLDivElement>(null);
     const hasRestoredPosition = useRef(false);

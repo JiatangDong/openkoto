@@ -35,7 +35,7 @@ import { ArticleExplanationPanel } from "./ArticleExplanationPanel";
 import { ArticleMindMapPanel } from "./ArticleMindMapPanel";
 import { AssistantSidebarShell, type AssistantPanelMode } from "./AssistantSidebarShell";
 import { MarkdownContent } from "../ui/MarkdownContent";
-import { VideoSubtitlePlayer, ViewMode } from "./VideoSubtitlePlayer";
+import { VideoSubtitlePlayer } from "./VideoSubtitlePlayer";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -46,6 +46,7 @@ import {
 } from "../ui/dropdown-menu";
 import { useConfig } from "../../lib/hooks";
 import { buildMediaResourceUrl } from "../../lib/media";
+import { useGlobalFontSize, useGlobalViewMode } from "../../lib/uiState";
 
 const DEFAULT_BATCH_TRANSLATION_CONCURRENCY = 3;
 const MIN_BATCH_TRANSLATION_CONCURRENCY = 1;
@@ -115,8 +116,8 @@ export function ArticleReader({
   const [error, setError] = useState<string | null>(null);
   const [showAssistant, setShowAssistant] = useState(true);
   const [selectedText, setSelectedText] = useState<string>("");
-  const [viewMode, setViewMode] = useState<ViewMode>("original");
-  const [fontSize, setFontSize] = useState(18);
+  const [viewMode, setViewMode] = useGlobalViewMode();
+  const [fontSize, setFontSize] = useGlobalFontSize();
 
   // Segment Explorer State
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);

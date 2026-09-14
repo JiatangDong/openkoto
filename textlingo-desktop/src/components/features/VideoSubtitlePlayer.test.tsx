@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { VideoSubtitlePlayer } from "./VideoSubtitlePlayer";
+import { resetUiStateForTests, UI_SHOW_FULL_SUBTITLES_KEY } from "../../lib/uiState";
 import type { ArticleSegment } from "../../types";
 
 const saveMock = vi.fn();
@@ -228,5 +229,49 @@ describe("VideoSubtitlePlayer", () => {
     expect(onSegmentClick).toHaveBeenCalledWith("seg-2");
     expect(video.currentTime).toBe(2);
     expect(video.play).toHaveBeenCalled();
+  });
+
+  it("restores subtitle list visibility from the backend after remount", async () => {
+    // Cold module store: earlier tests in this file leave it expanded.
+    resetUiStateForTests();
+    let backend: Record<string, string> = {};
+    invokeMock.mockImplementation((cmd: string, args?: { updates?: Record<string, string> }) => {
+      if (cmd === "get_ui_state") return Promise.resolve({ ...backend });
+      if (cmd === "set_ui_state") {
+        Object.assign(backend, args?.updates ?? {});
+        return Promise.resolve({ ...backend });
+      }
+      return Promise.resolve(undefined);
+    });
+
+    const props = {
+      videoUrl: "http://localhost/video.mp4",
+      segments: [
+        createSegment(),
+        createSegment({ id: "seg-2", order: 1, text: "Gamma", start_time: 2, end_time: 4 }),
+      ],
+      selectedSegmentId: null,
+      onSegmentClick: vi.fn(),
+      fontSize: 18,
+      viewMode: "original" as const,
+    };
+
+    const { unmount } = render(<VideoSubtitlePlayer {...props} />);
+    await userEvent.click(
+      screen.getByRole("button", { name: "videoPlayer.showAllSubtitles (2)" })
+    );
+
+    expect(screen.getByRole("button", { name: "videoPlayer.hideSubtitles" })).toBeInTheDocument();
+    expect(backend).toEqual({ [UI_SHOW_FULL_SUBTITLES_KEY]: "true" });
+
+    // Cold caches: neither memory nor localStorage may serve the value.
+    unmount();
+    resetUiStateForTests();
+    localStorageStore.clear();
+    render(<VideoSubtitlePlayer {...props} />);
+
+    expect(
+      await screen.findByRole("button", { name: "videoPlayer.hideSubtitles" })
+    ).toBeInTheDocument();
   });
 });

@@ -1206,6 +1206,28 @@ pub async fn save_config_cmd(
     Ok("Configuration saved".to_string())
 }
 
+/// Read durable UI state (reader preferences). Stored in a dedicated
+/// ui_state.json — NOT config.json — so UI writes can never clobber model
+/// settings and config saves can never drop UI state. Frontend keeps
+/// localStorage only as a synchronous read cache; this file is the source of
+/// truth because packaged-webview origins (tauri://localhost, WKWebView
+/// custom schemes) do not give localStorage a disk-backed bucket.
+#[tauri::command]
+pub async fn get_ui_state(app_handle: AppHandle) -> Result<HashMap<String, String>, String> {
+    crate::storage::load_ui_state(&app_handle)
+}
+
+/// Merge UI state updates. `None` values delete the key. The whole
+/// read-modify-write cycle is mutex-serialized inside storage, so concurrent
+/// callers cannot lose each other's keys.
+#[tauri::command]
+pub async fn set_ui_state(
+    app_handle: AppHandle,
+    updates: HashMap<String, Option<String>>,
+) -> Result<HashMap<String, String>, String> {
+    crate::storage::update_ui_state(&app_handle, updates)
+}
+
 /// Add or update a model configuration
 #[tauri::command]
 pub async fn save_model_config(
