@@ -46,7 +46,7 @@ import {
 } from "../ui/dropdown-menu";
 import { useConfig } from "../../lib/hooks";
 import { buildMediaResourceUrl } from "../../lib/media";
-import { useGlobalFontSize, useGlobalViewMode } from "../../lib/uiState";
+import { useScopedFontSize, useScopedViewMode } from "../../lib/uiState";
 
 const DEFAULT_BATCH_TRANSLATION_CONCURRENCY = 3;
 const MIN_BATCH_TRANSLATION_CONCURRENCY = 1;
@@ -116,8 +116,8 @@ export function ArticleReader({
   const [error, setError] = useState<string | null>(null);
   const [showAssistant, setShowAssistant] = useState(true);
   const [selectedText, setSelectedText] = useState<string>("");
-  const [viewMode, setViewMode] = useGlobalViewMode();
-  const [fontSize, setFontSize] = useGlobalFontSize();
+  const [viewMode, setViewMode] = useScopedViewMode(article.id);
+  const [fontSize, setFontSize] = useScopedFontSize(article.id);
 
   // Segment Explorer State
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);

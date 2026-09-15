@@ -4,9 +4,11 @@ import { invoke } from "@tauri-apps/api/core";
 /**
  * Durable UI state for the article learning page.
  *
- * Reader preferences are global: one value shared by every article. Rust
- * (`ui_state.json`, via `get_ui_state` / `set_ui_state`) is the source of
- * truth. localStorage is only a synchronous read cache so first paint has
+ * Reader preferences are per-article: each article remembers its own font
+ * size, view mode, and subtitle visibility, while an article opened for the
+ * first time inherits whatever was last used anywhere (global fallback).
+ * Rust (`ui_state.json`, via `get_ui_state` / `set_ui_state`) is the source
+ * of truth. localStorage is only a synchronous read cache so first paint has
  * something before the async backend hydrate resolves — in packaged Tauri
  * builds the webview origin (`tauri://localhost`, WKWebView custom schemes)
  * has no disk-backed localStorage bucket, so localStorage alone never
@@ -124,17 +126,44 @@ function readLegacy(baseKey: string): string | null {
   return null;
 }
 
-/** Resolve cache → read cache → legacy → fallback. Runs on every render. */
-function readEffective(baseKey: string, fallback: string): string {
-  const cached = cache[baseKey];
-  if (cached !== undefined) return cached;
-  const stored = safeStorageGet(baseKey);
-  if (stored !== null) return stored;
+function scopedKey(baseKey: string, scope: string | undefined): string | null {
+  if (!scope) return null;
+  return `${baseKey}_${scope}`;
+}
+
+/** Resolve scoped → global → legacy → fallback. Runs on every render. */
+function readEffective(
+  baseKey: string,
+  scope: string | undefined,
+  fallback: string,
+): string {
+  const scoped = scopedKey(baseKey, scope);
+  if (scoped) {
+    const cached = cache[scoped];
+    if (cached !== undefined) return cached;
+    const stored = safeStorageGet(scoped);
+    if (stored !== null) return stored;
+  }
+  const cachedGlobal = cache[baseKey];
+  if (cachedGlobal !== undefined) return cachedGlobal;
+  const storedGlobal = safeStorageGet(baseKey);
+  if (storedGlobal !== null) return storedGlobal;
   return readLegacy(baseKey) ?? fallback;
 }
 
-/** Write the single global key, update cache + read cache, notify, persist. */
-function writeGlobal(baseKey: string, value: string): void {
+/**
+ * Write scoped + global keys, update cache + read cache, notify, persist.
+ * The scoped key gives the article its own memory; the global key lets
+ * never-before-seen articles inherit the last-used setting.
+ */
+function writeScoped(baseKey: string, scope: string | undefined, value: string): void {
+  const scoped = scopedKey(baseKey, scope);
+  if (scoped) {
+    cache[scoped] = value;
+    safeStorageSet(scoped, value);
+    locallyWritten.add(scoped);
+    unsynced[scoped] = value;
+  }
   cache[baseKey] = value;
   safeStorageSet(baseKey, value);
   locallyWritten.add(baseKey);
@@ -348,19 +377,30 @@ export function resetUiStateForTests(): void {
 
 // --- hooks ------------------------------------------------------------------
 
-/** String-valued global UI state with the given fallback. */
-function useUiState(baseKey: string, fallback: string): [string, (value: string) => void] {
+/**
+ * String-valued UI state for one article. Resolves `<key>_<scope>` →
+ * `<key>` → fallback on every render; the setter writes both scoped and
+ * global keys so a never-before-seen article inherits the last-used setting.
+ */
+function useScopedUiState(
+  baseKey: string,
+  scope: string | undefined,
+  fallback: string,
+): [string, (value: string) => void] {
   useEffect(() => {
     void ensureHydrate();
   }, []);
 
-  const value = useSyncExternalStore(subscribe, () => readEffective(baseKey, fallback));
+  const value = useSyncExternalStore(
+    subscribe,
+    () => readEffective(baseKey, scope, fallback),
+  );
 
   const setValue = useCallback(
     (next: string) => {
-      writeGlobal(baseKey, next);
+      writeScoped(baseKey, scope, next);
     },
-    [baseKey],
+    [baseKey, scope],
   );
 
   return [value, setValue];
@@ -393,55 +433,57 @@ function resolveAction<T>(action: SetStateAction<T>, current: T): T {
     : action;
 }
 
-/** View mode shared by every article. */
-export function useGlobalViewMode(): [
-  UiViewMode,
-  (action: SetStateAction<UiViewMode>) => void,
-] {
-  const [raw, setRaw] = useUiState(UI_VIEW_MODE_KEY, "original");
+/** View mode remembered per article. */
+export function useScopedViewMode(
+  articleId: string | undefined,
+): [UiViewMode, (action: SetStateAction<UiViewMode>) => void] {
+  const [raw, setRaw] = useScopedUiState(UI_VIEW_MODE_KEY, articleId, "original");
   const setMode = useCallback(
     (action: SetStateAction<UiViewMode>) => {
-      const current = parseViewMode(readEffective(UI_VIEW_MODE_KEY, "original"));
-      setRaw(parseViewMode(resolveAction(action, current)));
+      const current = parseViewMode(readEffective(UI_VIEW_MODE_KEY, articleId, "original"));
+      const next = resolveAction(action, current);
+      setRaw(parseViewMode(next));
     },
-    [setRaw],
+    [articleId, setRaw],
   );
   return [parseViewMode(raw), setMode];
 }
 
-/** Font size shared by every article. */
-export function useGlobalFontSize(): [
-  number,
-  (action: SetStateAction<number>) => void,
-] {
-  const [raw, setRaw] = useUiState(UI_FONT_SIZE_KEY, String(FONT_SIZE_DEFAULT));
+/** Font size remembered per article. */
+export function useScopedFontSize(
+  articleId: string | undefined,
+): [number, (action: SetStateAction<number>) => void] {
+  const [raw, setRaw] = useScopedUiState(
+    UI_FONT_SIZE_KEY,
+    articleId,
+    String(FONT_SIZE_DEFAULT),
+  );
   const setSize = useCallback(
     (action: SetStateAction<number>) => {
       const current = parseFontSize(
-        readEffective(UI_FONT_SIZE_KEY, String(FONT_SIZE_DEFAULT)),
+        readEffective(UI_FONT_SIZE_KEY, articleId, String(FONT_SIZE_DEFAULT)),
       );
       setRaw(String(clampFontSize(resolveAction(action, current))));
     },
-    [setRaw],
+    [articleId, setRaw],
   );
   return [parseFontSize(raw), setSize];
 }
 
-/** Subtitle-list visibility shared by every article. */
-export function useGlobalShowFullSubtitles(): [
-  boolean,
-  (action: SetStateAction<boolean>) => void,
-] {
-  const [raw, setRaw] = useUiState(UI_SHOW_FULL_SUBTITLES_KEY, "false");
+/** Subtitle-list visibility remembered per article. */
+export function useScopedShowFullSubtitles(
+  articleId: string | undefined,
+): [boolean, (action: SetStateAction<boolean>) => void] {
+  const [raw, setRaw] = useScopedUiState(UI_SHOW_FULL_SUBTITLES_KEY, articleId, "false");
   const setFlag = useCallback(
     (action: SetStateAction<boolean>) => {
       const current = parseBoolean(
-        readEffective(UI_SHOW_FULL_SUBTITLES_KEY, "false"),
+        readEffective(UI_SHOW_FULL_SUBTITLES_KEY, articleId, "false"),
         false,
       );
       setRaw(resolveAction(action, current) ? "true" : "false");
     },
-    [setRaw],
+    [articleId, setRaw],
   );
   return [parseBoolean(raw, false), setFlag];
 }
