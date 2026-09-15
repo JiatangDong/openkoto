@@ -54,24 +54,14 @@ export function AssistantSidebarShell({
       return "compact";
     }
 
-    try {
-      const saved = window.localStorage.getItem(storageKey);
-      return saved === "wide" || saved === "full" ? saved : "compact";
-    } catch {
-      // Storage can throw (private mode, blocked storage) — fall back
-      // instead of white-screening the whole reader.
-      return "compact";
-    }
+    const saved = window.localStorage.getItem(storageKey);
+    return saved === "wide" || saved === "full" ? saved : "compact";
   });
   const [internalActiveTab, setInternalActiveTab] = useState(defaultTab);
   const resolvedActiveTab = activeTab ?? internalActiveTab;
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(storageKey, assistantPanelMode);
-    } catch {
-      // Non-fatal: panel width preference just won't persist this session.
-    }
+    window.localStorage.setItem(storageKey, assistantPanelMode);
   }, [assistantPanelMode, storageKey]);
 
   const effectivePanelMode = showAssistant ? assistantPanelMode : "compact";
